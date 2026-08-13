@@ -1,4 +1,4 @@
-# 酒馆小助手 Tavern Tweaks
+# 鼠鼠小助手 ShuShu Tweaks
 
 一个 SillyTavern 第三方扩展，解决两个日常痛点：
 
@@ -53,9 +53,9 @@
 SillyTavern/public/scripts/extensions/third-party/
 ```
 
-然后刷新酒馆页面，在"扩展（Extensions）"面板确认"酒馆小助手 Tavern Tweaks"已启用。
+然后刷新酒馆页面，在"扩展（Extensions）"面板确认"鼠鼠小助手 ShuShu Tweaks"已启用。
 
-扩展设置入口：扩展面板 → 酒馆小助手 Tavern Tweaks。
+扩展设置入口：扩展面板 → 鼠鼠小助手 ShuShu Tweaks。
 
 ## 设置项
 

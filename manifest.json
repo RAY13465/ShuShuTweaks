@@ -1,5 +1,5 @@
 {
-    "display_name": "酒馆小助手 Tavern Tweaks",
+    "display_name": "鼠鼠小助手 ShuShu Tweaks",
     "loading_order": 10,
     "js": "index.js",
     "css": "style.css",

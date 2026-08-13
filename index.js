@@ -1,5 +1,5 @@
 /**
- * 酒馆小助手 Tavern Tweaks
+ * 鼠鼠小助手 ShuShu Tweaks
  * ----------------------------------------
  * 功能一：思维链收纳（Thinking Shield）
  *   1) 生成拦截器：任何生成（普通/续写/重roll/swipe）发起前，先把聊天里的
@@ -267,7 +267,7 @@ function registerEventHandlers() {
         if (changed) {
             await saveChatSafe();
             await refreshMessagesUI();
-            toastr.info('已收纳历史消息中的思维链（点开消息上方的"思考"折叠块即可查看/编辑）', '酒馆小助手');
+            toastr.info('已收纳历史消息中的思维链（点开消息上方的"思考"折叠块即可查看/编辑）', '鼠鼠小助手');
         }
     });
 
@@ -502,7 +502,7 @@ async function updateExistingCharacter(existingChar, card, file) {
     } catch (error) {
         console.warn(`${LOG_PREFIX} 刷新角色列表失败:`, error);
     }
-    toastr.success(`已更新同名角色「${name}」`, '酒馆小助手');
+    toastr.success(`已更新同名角色「${name}」`, '鼠鼠小助手');
 }
 
 /** 文档级捕获监听：抢在酒馆原生 change 处理之前拿到导入文件。 */
@@ -538,7 +538,7 @@ function setupImportInterceptor() {
             await updateExistingCharacter(duplicate, card, file);
         } catch (error) {
             console.error(`${LOG_PREFIX} 导入处理失败:`, error);
-            toastr.error('同名角色更新失败，已回退到原生导入', '酒馆小助手');
+            toastr.error('同名角色更新失败，已回退到原生导入', '鼠鼠小助手');
             return fallbackToNativeImport(input);
         } finally {
             // 允许再次选择同一文件
@@ -559,7 +559,7 @@ function addSettingsPanel() {
     <div class="tavern_tweaks_settings">
         <div class="inline-drawer">
             <div class="inline-drawer-toggle inline-drawer-header">
-                <b>酒馆小助手 Tavern Tweaks</b>
+                <b>鼠鼠小助手 ShuShu Tweaks</b>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
             <div class="inline-drawer-content">
