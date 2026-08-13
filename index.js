@@ -374,14 +374,30 @@ function findDuplicateCharacter(name) {
 
 async function askUpdateOrNew(name) {
     const ctx = getContextSafe();
-    const message = `检测到同名角色「${name}」。\n\n「确定」= 用新卡更新原有角色（保留聊天记录、收藏与标签）\n「取消」= 仍然新建一个副本`;
-    if (ctx?.Popup?.show?.confirm) {
-        const result = await ctx.Popup.show.confirm('导入角色卡', message.replace(/\n/g, '<br>'));
-        if (result === true) return 'update';
-        if (result === false) return 'new';
+    // 注意：酒馆的弹窗返回的是数值枚举 POPUP_RESULT（1=确定, 0=否定, null=取消），
+    // 不是布尔值！用 === true / === false 判断会导致两个按钮都落入 cancel。
+    const RESULT = ctx?.POPUP_RESULT ?? { AFFIRMATIVE: 1, NEGATIVE: 0, CANCELLED: null };
+    const message = `检测到同名角色「${name}」。<br><br>`
+        + `<b>更新原角色</b>：用新卡内容覆盖原角色（保留聊天记录、收藏与标签）<br>`
+        + `<b>新建副本</b>：保留原角色，另外创建一个新角色`;
+
+    // 优先使用支持自定义按钮文字的弹窗，语义更清晰
+    if (ctx?.callGenericPopup && ctx?.POPUP_TYPE?.CONFIRM !== undefined) {
+        const result = await ctx.callGenericPopup(message, ctx.POPUP_TYPE.CONFIRM, '', {
+            okButton: '更新原角色',
+            cancelButton: '新建副本',
+        });
+        if (result === RESULT.AFFIRMATIVE || result === true) return 'update';
+        if (result === RESULT.NEGATIVE || result === false) return 'new';
         return 'cancel'; // 关闭/ESC
     }
-    if (window.confirm(message)) return 'update';
+    if (ctx?.Popup?.show?.confirm) {
+        const result = await ctx.Popup.show.confirm('导入角色卡', `${message}<br><br>「确定」= 更新原角色，「取消」= 新建副本`);
+        if (result === RESULT.AFFIRMATIVE || result === true) return 'update';
+        if (result === RESULT.NEGATIVE || result === false) return 'new';
+        return 'cancel'; // 关闭/ESC
+    }
+    if (window.confirm(`检测到同名角色「${name}」。\n「确定」= 更新原角色，「取消」= 新建副本`)) return 'update';
     return window.confirm('仍然新建一个副本吗？') ? 'new' : 'cancel';
 }
 
@@ -399,8 +415,8 @@ async function fetchFullCharacterData(avatar) {
             body: JSON.stringify({ avatar_url: avatar }),
         });
         if (!res.ok) return null;
-        const data = await res.json();
-        return data?.data ?? data;
+        // 返回完整角色对象（含顶层 chat / create_date 与 v2 data 子对象）
+        return await res.json();
     } catch (error) {
         console.warn(`${LOG_PREFIX} 拉取原角色数据失败:`, error);
         return null;
@@ -414,7 +430,8 @@ async function updateExistingCharacter(existingChar, card, file) {
     const newData = structuredClone(card.data ?? card);
 
     // 拉取原角色完整数据，做保护性合并
-    const existingData = await fetchFullCharacterData(existingChar.avatar) ?? {};
+    const existingFull = await fetchFullCharacterData(existingChar.avatar) ?? {};
+    const existingData = existingFull.data ?? existingFull; // v2 data 子对象
     const oldExt = existingData.extensions ?? {};
     const newExt = newData.extensions ?? {};
     const oldTags = Array.isArray(existingData.tags) ? existingData.tags : (existingChar.tags ?? []);
@@ -438,16 +455,22 @@ async function updateExistingCharacter(existingChar, card, file) {
     const fd = new FormData();
     fd.append('avatar_url', existingChar.avatar);
     fd.append('ch_name', name);
+    // 保留原角色的"上次聊天"绑定（服务端会直接采用 request.body.chat）
+    fd.append('chat', existingFull.chat ?? existingChar.chat ?? '');
     fd.append('description', mergedData.description ?? '');
     fd.append('first_mes', mergedData.first_mes ?? '');
     fd.append('mes_example', mergedData.mes_example ?? '');
     fd.append('personality', mergedData.personality ?? '');
     fd.append('scenario', mergedData.scenario ?? '');
-    fd.append('creatorcomment', mergedData.creator_notes ?? '');
+    // 服务端读取的字段名是 creator_notes，不是 creatorcomment
+    fd.append('creator_notes', mergedData.creator_notes ?? '');
     fd.append('creator', mergedData.creator ?? '');
     fd.append('character_version', String(mergedData.character_version ?? ''));
     fd.append('tags', mergedData.tags.join(','));
-    fd.append('alternate_greetings', JSON.stringify(mergedData.alternate_greetings ?? []));
+    // 服务端把字符串当作单条问候语处理，必须像原生表单一样逐条 append
+    for (const greeting of mergedData.alternate_greetings ?? []) {
+        fd.append('alternate_greetings', String(greeting));
+    }
     fd.append('system_prompt', mergedData.system_prompt ?? '');
     fd.append('post_history_instructions', mergedData.post_history_instructions ?? '');
     fd.append('depth_prompt_prompt', dp.prompt ?? '');
@@ -456,10 +479,11 @@ async function updateExistingCharacter(existingChar, card, file) {
     fd.append('talkativeness', String(mergedData.extensions?.talkativeness ?? 0.5));
     fd.append('fav', String(!!mergedData.extensions?.fav));
     fd.append('world', mergedData.extensions?.world ?? '');
-    fd.append('data_extensions', JSON.stringify(mergedData.extensions ?? {}));
+    // 服务端深合并的字段名是 extensions（JSON 字符串），不是 data_extensions
+    fd.append('extensions', JSON.stringify(mergedData.extensions ?? {}));
     fd.append('spec', 'chara_card_v2');
     fd.append('spec_version', '2.0');
-    fd.append('create_date', existingChar.create_date ?? '');
+    fd.append('create_date', existingChar.create_date ?? existingFull.create_date ?? '');
     fd.append('json_data', JSON.stringify({
         spec: 'chara_card_v2',
         spec_version: '2.0',
