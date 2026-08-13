@@ -1,0 +1,11 @@
+{
+    "display_name": "酒馆小助手 Tavern Tweaks",
+    "loading_order": 10,
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Kimi",
+    "version": "1.1.0",
+    "auto_update": false,
+    "minimum_client_version": "1.12.0",
+    "generate_interceptor": "tavernTweaksInterceptor"
+}

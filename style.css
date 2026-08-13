@@ -1,0 +1,15 @@
+.tavern_tweaks_settings .inline-drawer-content {
+    padding: 8px 0;
+}
+
+.tavern_tweaks_settings label.checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 6px 0;
+}
+
+.tavern_tweaks_settings input.text_pole {
+    width: 100%;
+    margin: 4px 0 10px 0;
+}
