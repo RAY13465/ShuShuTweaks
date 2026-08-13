@@ -55,6 +55,23 @@ function saveSettings() {
     getContextSafe()?.saveSettingsDebounced?.();
 }
 
+/**
+ * 带 CSRF 令牌的 API 请求头。
+ * 酒馆默认开启 CSRF 防护，裸 fetch 调 /api/* 会被 403 拒绝。
+ * 注意：FormData（multipart）请求必须删掉 Content-Type，
+ * 让浏览器自动生成带 boundary 的头，否则服务端解析不到字段。
+ * @param {boolean} forJson 是否为 JSON 请求体
+ */
+function getApiHeaders(forJson) {
+    const fn = getContextSafe()?.getRequestHeaders;
+    if (typeof fn !== 'function') {
+        return forJson ? { 'Content-Type': 'application/json' } : undefined;
+    }
+    const headers = { ...fn() };
+    if (!forJson) delete headers['Content-Type'];
+    return headers;
+}
+
 function escapeRegExp(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -411,7 +428,7 @@ async function fetchFullCharacterData(avatar) {
     try {
         const res = await fetch('/api/characters/get', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getApiHeaders(true),
             body: JSON.stringify({ avatar_url: avatar }),
         });
         if (!res.ok) return null;
@@ -493,8 +510,11 @@ async function updateExistingCharacter(existingChar, card, file) {
         fd.append('avatar', file);
     }
 
-    const res = await fetch('/api/characters/edit', { method: 'POST', body: fd });
-    if (!res.ok) throw new Error(`服务器返回 ${res.status}`);
+    const res = await fetch('/api/characters/edit', { method: 'POST', headers: getApiHeaders(false), body: fd });
+    if (!res.ok) {
+        const detail = (await res.text().catch(() => '')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+        throw new Error(`服务器返回 ${res.status}${detail ? `：${detail}` : ''}`);
+    }
 
     // 刷新角色列表
     try {
@@ -538,7 +558,7 @@ function setupImportInterceptor() {
             await updateExistingCharacter(duplicate, card, file);
         } catch (error) {
             console.error(`${LOG_PREFIX} 导入处理失败:`, error);
-            toastr.error('同名角色更新失败，已回退到原生导入', '鼠鼠小助手');
+            toastr.error(`同名角色更新失败（${error?.message ?? '未知错误'}），已回退到原生导入`, '鼠鼠小助手');
             return fallbackToNativeImport(input);
         } finally {
             // 允许再次选择同一文件
@@ -559,7 +579,7 @@ function addSettingsPanel() {
     <div class="tavern_tweaks_settings">
         <div class="inline-drawer">
             <div class="inline-drawer-toggle inline-drawer-header">
-                <b>鼠鼠小助手 ShuShu Tweaks</b>
+                <b>🐭 鼠鼠小助手 ShuShu Tweaks</b>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
             <div class="inline-drawer-content">
