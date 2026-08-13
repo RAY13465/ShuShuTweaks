@@ -25,6 +25,7 @@ const defaultSettings = Object.freeze({
     cleanHistoryOnChatLoad: true, // 切换/加载聊天时清理历史消息里的思维链
     thinkTags: 'think,thinking,thought', // 需要收纳的标签（逗号分隔）
     importUpdateEnabled: true,  // 导入时检测同名角色
+    importDuplicateMode: 'ask', // 同名时的动作：ask=每次询问 / update=总是更新原角色 / new=总是新建副本
     replaceAvatarOnUpdate: false, // 更新同名角色时是否同时替换头像
 });
 
@@ -506,7 +507,12 @@ async function updateExistingCharacter(existingChar, card, file) {
         spec_version: '2.0',
         data: mergedData,
     }));
-    if (settings.replaceAvatarOnUpdate && file) {
+    // 只有 PNG 卡才能当头像用；JSON 卡不含图片，硬传会让服务端解析失败（500）
+    const canReplaceAvatar = settings.replaceAvatarOnUpdate && file && file.name.toLowerCase().endsWith('.png');
+    if (settings.replaceAvatarOnUpdate && file && !canReplaceAvatar) {
+        toastr.warning('JSON 卡片不含图片，本次不替换头像', '鼠鼠小助手');
+    }
+    if (canReplaceAvatar) {
         fd.append('avatar', file);
     }
 
@@ -522,7 +528,26 @@ async function updateExistingCharacter(existingChar, card, file) {
     } catch (error) {
         console.warn(`${LOG_PREFIX} 刷新角色列表失败:`, error);
     }
+    if (canReplaceAvatar) {
+        bustAvatarCache(existingChar.avatar);
+    }
     toastr.success(`已更新同名角色「${name}」`, '鼠鼠小助手');
+}
+
+/**
+ * 头像替换后强制刷新页面里所有该角色的头像 <img>。
+ * 缩略图 URL 不变时浏览器可能继续展示旧图，追加时间戳参数强制重新加载。
+ */
+function bustAvatarCache(avatarFile) {
+    const bust = Date.now();
+    const needle = `file=${encodeURIComponent(avatarFile)}`;
+    document.querySelectorAll(`img[src*="${needle}"]`).forEach(img => {
+        try {
+            const url = new URL(img.src, window.location.origin);
+            url.searchParams.set('t', String(bust));
+            img.src = url.toString();
+        } catch { /* 单个头像失败忽略 */ }
+    });
 }
 
 /** 文档级捕获监听：抢在酒馆原生 change 处理之前拿到导入文件。 */
@@ -551,9 +576,15 @@ function setupImportInterceptor() {
             const duplicate = findDuplicateCharacter(name);
             if (!duplicate) return fallbackToNativeImport(input);
 
-            const choice = await askUpdateOrNew(name);
-            if (choice === 'new') return fallbackToNativeImport(input);
-            if (choice === 'cancel') { input.value = ''; return; }
+            // 同名时的动作：总是新建 / 总是更新 / 每次询问
+            const mode = getSettings().importDuplicateMode;
+            if (mode === 'new') return fallbackToNativeImport(input);
+
+            if (mode !== 'update') {
+                const choice = await askUpdateOrNew(name);
+                if (choice === 'new') return fallbackToNativeImport(input);
+                if (choice === 'cancel') { input.value = ''; return; }
+            }
 
             await updateExistingCharacter(duplicate, card, file);
         } catch (error) {
@@ -596,11 +627,17 @@ function addSettingsPanel() {
                 <hr>
                 <label class="checkbox_label" for="tt_import_update">
                     <input id="tt_import_update" type="checkbox" ${settings.importUpdateEnabled ? 'checked' : ''}>
-                    <span>导入角色卡时检测同名角色（提示更新原角色）</span>
+                    <span>导入角色卡时检测同名角色</span>
                 </label>
+                <label for="tt_duplicate_mode"><span>检测到同名角色时</span></label>
+                <select id="tt_duplicate_mode" class="text_pole">
+                    <option value="ask" ${settings.importDuplicateMode === 'ask' ? 'selected' : ''}>每次询问我</option>
+                    <option value="update" ${settings.importDuplicateMode === 'update' ? 'selected' : ''}>总是更新原角色</option>
+                    <option value="new" ${settings.importDuplicateMode === 'new' ? 'selected' : ''}>总是新建副本</option>
+                </select>
                 <label class="checkbox_label" for="tt_replace_avatar">
                     <input id="tt_replace_avatar" type="checkbox" ${settings.replaceAvatarOnUpdate ? 'checked' : ''}>
-                    <span>更新同名角色时同时替换头像图片</span>
+                    <span>更新同名角色时同时替换头像图片（仅 PNG 卡）</span>
                 </label>
             </div>
         </div>
@@ -623,6 +660,11 @@ function addSettingsPanel() {
     bind('tt_think_tags', 'thinkTags', true);
     bind('tt_import_update', 'importUpdateEnabled');
     bind('tt_replace_avatar', 'replaceAvatarOnUpdate');
+    const modeSelect = document.getElementById('tt_duplicate_mode');
+    modeSelect?.addEventListener('change', () => {
+        getSettings().importDuplicateMode = modeSelect.value;
+        saveSettings();
+    });
 }
 
 /* ============================== 启动 ============================== */
