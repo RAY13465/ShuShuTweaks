@@ -47,7 +47,7 @@
 
 ## 安装
 
-把整个 `SillyTavern-TavernTweaks` 文件夹复制到：
+把整个 `ShuShuTweaks` 文件夹复制到：
 
 ```
 SillyTavern/public/scripts/extensions/third-party/
@@ -78,9 +78,10 @@ SillyTavern/public/scripts/extensions/third-party/
 ## 文件结构
 
 ```
-SillyTavern-TavernTweaks/
+ShuShuTweaks/
 ├── manifest.json   # 扩展清单（含 generate_interceptor 注册）
 ├── index.js        # 主逻辑
 ├── style.css       # 设置面板样式
+├── LICENSE         # MIT
 └── README.md
 ```
