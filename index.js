@@ -2976,6 +2976,7 @@ function getSettings() {
     if (typeof s.detailHeader !== 'boolean') s.detailHeader = true;
     if (s.detailStyle !== 'video' && s.detailStyle !== 'about') s.detailStyle = 'about';
     /* 导入即更新（合并 导入 / 替换 / URL导入）：默认开 */
+    if (typeof s.listNotesFirstLine !== 'boolean') s.listNotesFirstLine = true;   // 列表里的作者注释只显示第一行
     if (typeof s.importMerge !== 'boolean') s.importMerge = true;
     if (typeof s.importSimThreshold !== 'number') s.importSimThreshold = IMPORT_SIM_DEFAULT;
     /* 思维链收纳（从老的「鼠鼠小助手 ShuShu Tweaks」并进来的功能）
@@ -3887,6 +3888,31 @@ function guardTouchScroll() {
     }, { passive: false });
 }
 
+/** 列表里那行「作者注释」只显示第一行。
+    酒馆的 .ch_description 装的是角色卡的 creator_notes（创作者注释），而且自带
+    white-space:nowrap —— 整段（含换行）被拼成一长条再打省略号，于是看到的开头是
+    「--- **某某人物设定** **姓名：** …」这种。这里按**第一个换行**截断只留第一行，
+    完整内容塞进 title，鼠标停上去照样能看全。 */
+function trimListCreatorNotes() {
+    if (getSettings().listNotesFirstLine === false) return false;
+    let n = 0;
+    queryAll('#rm_print_characters_block .character_select').forEach(card => {
+        const el = card && card.querySelector ? card.querySelector('.ch_description') : null;
+        if (!el) return;
+        const full = String(el.textContent == null ? '' : el.textContent);
+        const nl = full.search(/[\r\n]/);
+        if (nl < 0) {                                   // 本来就只有一行 → 不碰它
+            if (el.setAttribute && full.trim()) el.setAttribute('title', full.trim());
+            return;
+        }
+        const first = full.slice(0, nl).trim();
+        el.textContent = first || full.slice(0, 80).trim();
+        if (el.setAttribute) el.setAttribute('title', full.trim());
+        n += 1;
+    });
+    return n > 0;
+}
+
 function toast(msg, level = 'info') {
     const fn = globalThis.toastr?.[level];
     if (typeof fn === 'function') fn(msg, '鼠鼠小助手');
@@ -3974,7 +4000,8 @@ function bindSettings(root) {
                 if (out) out.textContent = t.value + '%';
                 return;
             }
-            if (t.dataset.sspThinkshield !== undefined) { getSettings().thinkShield = Boolean(t.checked); save(); toast(t.checked ? '思维链收纳：开' : '思维链收纳：关', 'info'); return; }
+            if (t.dataset.sspNotesone !== undefined) { getSettings().listNotesFirstLine = Boolean(t.checked); save(); trimListCreatorNotes(); toast(t.checked ? '作者注释：只显示第一行' : '作者注释：整段显示', 'info'); return; }
+        if (t.dataset.sspThinkshield !== undefined) { getSettings().thinkShield = Boolean(t.checked); save(); toast(t.checked ? '思维链收纳：开' : '思维链收纳：关', 'info'); return; }
             if (t.dataset.sspThinkload !== undefined) { getSettings().thinkOnChatLoad = Boolean(t.checked); save(); return; }
             if (t.dataset.sspThinktags !== undefined) { getSettings().thinkTags = String(t.value || 'think,thinking,thought'); save(); return; }
             if (t.dataset.sspCardCheck) { c[t.dataset.sspCardCheck] = Boolean(t.checked); save(); applyCardStyle(); return; }
@@ -4029,7 +4056,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.12.6';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.12.7';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4076,7 +4103,11 @@ function settingsPanelHTML() {
     /* —— 角色卡样式（沿用原来那块渲染器，只是搬进面板）—— */
     const secCard = `<section class="ssp-sec">
         <h4><i class="fa-solid fa-image"></i>角色卡样式</h4>
-        <div class="ssp-secbody" id="ssp_cardslot">${cardDrawerHTML()}</div></section>`;
+        <div class="ssp-secbody">
+          ${frow('作者注释只显示第一行', '列表里那行是角色卡的「创作者注释」；关掉就整段显示（长文本会被省略号截断）',
+              fsw('data-ssp-notesone="1"', s.listNotesFirstLine !== false))}
+          <div id="ssp_cardslot">${cardDrawerHTML()}</div>
+        </div></section>`;
 
     /* —— 详情页版头 —— */
     const secDetail = sec('fa-id-card', '角色详情页版头', [
@@ -4268,6 +4299,7 @@ function reclaim(reason) {
     // 角色卡样式：列表每次重画都会换回缩略图/丢掉样式，所以这里要重新认领
     applyCardStyle();
     applyCardOrder();            // 手动排序：重画/翻页后重新按你的顺序排
+    trimListCreatorNotes();      // 作者注释只留第一行（酒馆重画后要重新截）
     setCardAvatarVars();         // 学生证的右侧图片影子
     applyDetailHeader();         // 角色详情页版头（点开角色后那块）
     if (sortMode) insertSortHint();
@@ -4292,6 +4324,7 @@ function init() {
     apply();
     applyCardStyle();
     applyCardOrder();
+    trimListCreatorNotes();
     document.addEventListener?.('click', blockCardClick, true);   // 排序模式下别让点卡片打开角色
     document.addEventListener?.('pointerdown', onListPointerDown, true);
     bindFavStar();                                               // 列表卡片上的 ★ 能点（收藏/取消收藏）
@@ -4337,7 +4370,7 @@ if (globalThis.__SSP_TEST__) {
         extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
         migrateTweaksSettings, TWEAKS_MODULE_NAME,
         restoreCardStyle, hdCardAvatars, cardDrawerHTML, mountDrawer, attrOf, setAttr,
-        mountSettingsPanel, openSettingsPanel, closeSettingsPanel, panelOpen, settingsPanelHTML, bindSettings, refreshCardSection,
+        mountSettingsPanel, openSettingsPanel, closeSettingsPanel, panelOpen, settingsPanelHTML, bindSettings, refreshCardSection, trimListCreatorNotes,
         get boxOpen() { return boxOpen; }, set boxOpen(v) { boxOpen = v; },
         get renaming() { return renaming; }, set renaming(v) { renaming = v; },
         get drag() { return drag; }, set drag(v) { drag = v; },
