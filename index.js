@@ -3107,10 +3107,30 @@ function findLiveEquivalent(stale) {
     return null;
 }
 
-/** 找到按钮对应的原生元素：先看缓存，缓存断了才重新查询 */
+/** 找到按钮对应的原生元素：先看缓存，缓存断了才重新查询。
+    ⚠️ rebuilt（酒馆每次重画都会重建的那种，比如**分页**、标签筛选）不能只信缓存 ——
+       我们搬进模块的那个旧副本**一直是 connected 的**，而酒馆已经在原生位置建好了新的：
+         · 继续用旧的 → 分页看着在、点不动（模块里那个是死的）
+         · 新旧同时存在 → 面板上出现两排一样的分页
+       ⚠️ 还有个坑：旧副本被搬走后，`b.native` 那个选择器（带原生父容器的）
+       **匹配不到它了** —— 所以清理不能只遍历"选择器匹配到的"，必须显式摘掉缓存里那一个。 */
 function resolveNative(b) {
     if (!b || !b.native) return null;
     const cached = elCache.get(b.id);
+    if (b.rebuilt) {
+        const fresh = query(b.native);                       // 酒馆在原地新建的那个
+        const drop = el => { if (el && el !== fresh && el.parentElement && typeof el.remove === 'function') el.remove(); };
+        if (fresh && fresh !== cached) {
+            drop(cached);                                    // 先摘掉我们搬走的旧副本
+            queryAll(b.native).forEach(drop);                // 再清掉可能残留的其它副本
+            elCache.set(b.id, fresh);
+            return fresh;
+        }
+        if (fresh) { elCache.set(b.id, fresh); return fresh; }
+        /* 酒馆还没重建 → 继续用我们搬过来的那个 */
+        if (cached && cached.isConnected !== false) return cached;
+        return null;
+    }
     if (cached && cached.isConnected !== false) return cached;
     const el = query(b.native);
     if (el) elCache.set(b.id, el);
@@ -3177,6 +3197,35 @@ function ensureModuleEls(layout) {
 }
 
 /** 把模块容器按分区顺序摆好（append 会移动已有节点，所以幂等） */
+/**
+ * 自愈：**一个按钮只能出现在一个模块里**。
+ * 一个按钮只有一个原生 DOM，如果配置里把它放进了两个模块，apply() 每次都会把它
+ * 从一个模块搬到另一个 —— 表现就是「一会儿找不到、一会儿又重复出现」（分页那次就是这么翻车的）。
+ * 这里保留第一次出现的位置，后面的删掉；有改动就落盘，只修一次。
+ */
+function normalizeLayout(L) {
+    if (!L || !Array.isArray(L.modules)) return 0;
+    const seen = new Set();
+    let dropped = 0;
+    const kept = [];
+    L.modules.forEach(m => {
+        if (!m || !Array.isArray(m.rows)) return;
+        m.rows = m.rows.map(row => (Array.isArray(row) ? row : []).filter(id => {
+            if (!id) return false;
+            if (seen.has(id)) { dropped += 1; return false; }
+            seen.add(id);
+            return true;
+        }));
+        if (!m.rows.length) m.rows = [[]];
+        kept.push(m);
+    });
+    if (dropped) {
+        L.modules = kept;
+        warn('布局里有', dropped, '个按钮重复出现在多个模块里，已自动去重（保留第一次出现的位置）');
+    }
+    return dropped;
+}
+
 function placeModules(layout) {
     ZONE_IDS.forEach(z => {
         const zoneEl = zoneEls.get(z);
@@ -3207,6 +3256,8 @@ function apply() {
     if (!s.enabled) { restoreAll(); return { moved: 0, hidden: 0, missing: [] }; }
     const dev = activeDevice();
     const layout = layoutOf(s, dev);
+    /* 去重：同一个按钮被放进多个模块的话，先自愈（并落盘），不然它会来回跳 */
+    if (normalizeLayout(layout)) save();
 
     ensureZoneEls();
     ensureModuleEls(layout);
@@ -3963,7 +4014,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.12.2';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.12.3';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4253,7 +4304,7 @@ if (globalThis.__SSP_TEST__) {
         defaultLayout, getSettings, apply, restoreAll, reclaim,
         ensureMount, ensureZoneEls, ensureModuleEls, placeModules, renderMount,
         putButton, toggleRow, setLayers, setAlign, addModule, delModule, renameModule,
-        moveModule, moveModuleToOtherZone, locateButton, zoneOfModule, currentLayout,
+        moveModule, moveModuleToOtherZone, locateButton, zoneOfModule, currentLayout, normalizeLayout,
         activeDevice, snapshots, claimed, modEls, zoneEls, hideStyle, elCache, resolveNative, newEls,
         ensureNewBtnEls, ACTIONS, sortByField, clickTagAction, pickRandomCharacter, libraryStats, showLibraryStats,
         CARD_STYLES, CARD_STYLE_ORDER, CARD_STYLE_ID, CARD_OPT, setCardAvatarVars, cardAvatarOf, cardEls, cardOrderSettings,
