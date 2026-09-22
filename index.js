@@ -513,7 +513,7 @@ const CARD_STYLES = {
   box-shadow:
     inset 0 var(--id-bandh,25px) 0 0 var(--id-band,#9a9aa1),
     inset 0 calc(-1 * var(--id-bandh,25px) * 0.8) 0 0 var(--id-band,#9a9aa1),
-    0 0 0 1px rgba(0,0,0,.08);
+    0 6px 18px rgba(0,0,0,.22), 0 0 0 1px rgba(0,0,0,.08);
   color:var(--id-ink,#3c3c42);
   transition:box-shadow .25s ease, transform .25s ease;
 }
@@ -4069,7 +4069,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.12.10';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.12.11';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */

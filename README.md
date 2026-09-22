@@ -529,3 +529,24 @@ body:not(.big-avatars) .avatar img { border-radius: 50%; }
 > 排查提醒：定位"发光是谁加的"时，我一开始把扩展文件里 student 段之后的一大段代码也切进来了，
 > 于是把**详情页版头**的阴影误当成学生证的 ✗。**切片要看清楚边界** —— 扩展里的样式不是按
 > 原型那种顺序排列的。
+
+### 顶部「收藏头像排」重做 + 学生证阴影加回（v1.12.11）
+
+**① 收藏/热插拔那排头像**（`#CharListButtonAndHotSwaps` 里的 `.hotswap.avatars_inline`）：
+酒馆自带的规则是
+
+```css
+.hotswap        { margin:5px; justify-content:space-evenly }   /* 摊得很开 */
+.avatars_inline { gap:5px }
+.avatars_inline .avatar { margin: calc(var(--avatar-base-border-radius)) }
+.avatar img     { border-radius:50% }                          /* 圆的来源（全局） */
+```
+
+改成：**左对齐贴紧**（`justify-content:flex-start` + `gap:3px` + `margin:0`）、
+**正方形带 1px 细边框**（`border-radius:5px`）、**边长 58px**（原来约 50px，显小）。
+尺寸和圆角是变量 `--ssp-favsize` / `--ssp-favradius`，想微调改这两个值就行。
+（顺带确认：**美化里 hotswap 规则是 0 条** —— 这排的形状/间距全是酒馆自带的，所以改在扩展里是对的。）
+
+**② 学生证阴影加回**：上一版为了治"黑色发光"把卡片外阴影全删了，后来查明发光其实是
+**美化给字体加的 text-shadow**，跟卡片阴影无关 → 把**卡片本体那条最轻的**
+（`0 6px 18px rgba(0,0,0,.22)`）加回来了；证件照和收藏态那两条不加（免得又把"发光"观感带回来）。

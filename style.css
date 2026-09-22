@@ -454,3 +454,46 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     #ssp_panel .ssp-row { flex-wrap: wrap; }
     #ssp_panel .ssp-ctl { width: 100%; justify-content: flex-end; }
 }
+
+/* ==========================================================================
+   顶部「收藏 / 热插拔」那排头像（#CharListButtonAndHotSwaps 里的 .hotswap）
+   --------------------------------------------------------------------------
+   酒馆自带的样子：圆头像 + 摊得很开 + 偏小
+       .hotswap        { margin:5px; justify-content:space-evenly }
+       .avatars_inline { gap:5px; flex-wrap:wrap }
+       .avatars_inline .avatar { margin: calc(var(--avatar-base-border-radius)) }
+       全局           .avatar img { border-radius:50% }   ← 圆的来源
+   这里改成：贴紧（左对齐 + 小 gap + 去掉每个头像的 margin）、正方形带细边框、大一点。
+   尺寸/圆角做成变量，想微调直接改这两个值即可（或跟我说，我加进面板旋钮）。
+   ========================================================================== */
+#CharListButtonAndHotSwaps .hotswap,
+#CharListButtonAndHotSwaps .avatars_inline,
+#HotSwapWrapper .hotswap,
+#HotSwapWrapper .avatars_inline,
+.hotswap.avatars_inline {
+    --ssp-favsize: 58px;    /* 收藏头像的边长 */
+    --ssp-favradius: 5px;   /* 方框的圆角（0 = 纯直角） */
+    justify-content: flex-start !important;
+    gap: 3px !important;
+    flex-wrap: wrap !important;
+}
+#CharListButtonAndHotSwaps .avatars_inline .avatar,
+#HotSwapWrapper .avatars_inline .avatar,
+.hotswap.avatars_inline .avatar {
+    width: var(--ssp-favsize, 58px) !important;
+    height: var(--ssp-favsize, 58px) !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    margin: 0 !important;
+    flex: 0 0 auto !important;
+}
+#CharListButtonAndHotSwaps .avatars_inline .avatar img,
+#HotSwapWrapper .avatars_inline .avatar img,
+.hotswap.avatars_inline .avatar img {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    border-radius: var(--ssp-favradius, 5px) !important;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, .16)) !important;
+    box-shadow: none !important;
+}
