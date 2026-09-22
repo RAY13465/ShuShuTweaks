@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.17.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.18.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4379,6 +4379,173 @@ var orbTab = 'notes';       // 当前模块页（模块容器：以后加功能�
 var orbBinding = null;      // 正在给哪个面具选绑定角色（null = 不在绑定模式）
 var orbPersonaEdit = null;  // 正在编辑哪个面具（null = 不在编辑模式）
 var orbPSearch = '';        // 面具页的搜索词（角色卡名 / 面具名 / 描述）
+var orbPresetBinding = null;// 正在给哪个预设选绑定角色
+var orbPreSearch = '';      // 预设页搜索词
+
+/* ============================ 预设（采样预设）栏 ============================
+   酒馆没有「预设绑角色」的原生功能，所以：
+     读/切：官方 API —— getPresetManager('openai') 的 getAllPresets / getSelectedPresetName / selectPreset
+     绑定关系：存在本扩展设置里（presetBinds[api][角色头像] = 预设名），跟着酒馆备份走
+     自动切换：切聊天（CHAT_CHANGED）时，看当前角色绑了哪个预设 → 自动 selectPreset + 弹提示
+   ========================================================================== */
+var ORB_PRESET_API = 'openai';          // 聊天补全预设（第三方 API 用的就是这个）
+
+function orbPresetMgr() {
+    try { return (getContext() || {}).getPresetManager(ORB_PRESET_API); } catch (e) { return null; }
+}
+function orbPresetList() {
+    const m = orbPresetMgr();
+    if (!m) return [];
+    try { return (m.getAllPresets() || []).slice(); } catch (e) { return []; }
+}
+function orbPresetCur() {
+    /* 优先读酒馆自己的下拉框（最准）；读不到再退回官方 API */
+    try {
+        const sel = document.getElementById('settings_preset_openai');
+        if (sel && sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) {
+            return (sel.options[sel.selectedIndex].textContent || '').trim();
+        }
+    } catch (e) { }
+    const m = orbPresetMgr();
+    if (!m) return '';
+    try {
+        if (typeof m.getSelectedPresetName === 'function') return m.getSelectedPresetName() || '';
+        return String(m.getSelectedPreset() || '');
+    } catch (e) { return ''; }
+}
+
+/** 切预设。
+    ⚠️ 不能直接 selectPreset(预设名)：openai 预设下拉的 value 是**序号**（"0"/"1"…），
+    传名字会切失败（实测切完 getSelectedPresetName() 变空）。
+    所以走「驱动酒馆自己的下拉框」这条路 —— 跟面具切换一个思路，借酒馆原生 handler。 */
+function orbPresetPick(name) {
+    const want = String(name || '').trim();
+    if (!want) return false;
+    try {
+        const sel = document.getElementById('settings_preset_openai');
+        if (sel) {
+            const opt = Array.from(sel.options).find(o => (o.textContent || '').trim() === want);
+            if (opt) {
+                sel.value = opt.value;
+                sel.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            }
+        }
+    } catch (e) { }
+    /* 退路：官方 API（有的管理器收的就是名字） */
+    const m = orbPresetMgr();
+    if (m) { try { m.selectPreset(want); return true; } catch (e) { toast('换预设失败：' + e.message, 'warning'); } }
+    return false;
+}
+function orbPresetBinds() {
+    const s = getSettings();
+    if (!s.presetBinds || typeof s.presetBinds !== 'object') s.presetBinds = {};
+    if (!s.presetBinds[ORB_PRESET_API] || typeof s.presetBinds[ORB_PRESET_API] !== 'object') s.presetBinds[ORB_PRESET_API] = {};
+    return s.presetBinds[ORB_PRESET_API];
+}
+function orbPresetAuto() {
+    const s = getSettings();
+    if (typeof s.presetAuto !== 'boolean') s.presetAuto = true;
+    return s.presetAuto;
+}
+/** 谁绑了这个预设（返回角色名数组） */
+function orbPresetCharNames(name) {
+    const b = orbPresetBinds(), chars = orbCharList();
+    return Object.keys(b).filter(k => b[k] === name)
+        .map(k => (chars.find(c => c.id === k) || {}).name || k);
+}
+function orbPresetBind(charAvatar, name) {
+    const b = orbPresetBinds();
+    if (name) b[charAvatar] = name; else delete b[charAvatar];
+    save();
+}
+function orbPresetCurChar() {
+    const ctx = getContext() || {};
+    const ch = (ctx.characters || [])[ctx.characterId];
+    return ch && ch.avatar ? ch : null;
+}
+/** 切角色/切聊天时自动换预设 */
+function orbPresetAutoApply() {
+    if (!orbPresetAuto()) return false;
+    const ch = orbPresetCurChar();
+    if (!ch) return false;
+    const want = orbPresetBinds()[ch.avatar];
+    if (!want) return false;
+    if (orbPresetCur() === want) return false;
+    if (orbPresetList().indexOf(want) < 0) { toast('绑的预设「' + want + '」已经找不到了', 'warning'); return false; }
+    if (orbPresetPick(want)) {
+        toast('自动换预设：' + want + '（' + ch.name + ' 绑的）', 'info');
+        if (orbOpenNow) renderOrbPanel();
+        return true;
+    }
+    return false;
+}
+
+function orbPresetRowsHTML() {
+    const all = orbPresetList();
+    const cur = orbPresetCur();
+    if (!all.length) return '<div class="ssp-orb-empty">没读到预设（预设管理器拿不到）。</div>';
+    const q = orbPreSearch.toLowerCase();
+    const hit = all.filter(n => !q
+        || String(n).toLowerCase().indexOf(q) >= 0
+        || orbPresetCharNames(n).join('、').toLowerCase().indexOf(q) >= 0);
+    if (!hit.length) return '<div class="ssp-orb-empty">没有匹配「' + esc(orbPreSearch) + '」的预设。<br>（搜的是：预设名 / 绑定在这上面的角色卡名）</div>';
+    const head = orbPreSearch ? '<div class="ssp-orb-pcount">筛选出 ' + hit.length + ' / ' + all.length + ' 个预设</div>' : '';
+    const rows = hit.map(n => {
+        const on = (n === cur);
+        const names = orbPresetCharNames(n);
+        return '<div class="ssp-orb-prow' + (on ? ' on' : '') + '">'
+            + '<div class="ssp-orb-pmain">'
+            + '<div class="ssp-orb-pname">' + esc(n) + (on ? '<span class="ssp-orb-ptag">当前</span>' : '') + '</div>'
+            + '<div class="ssp-orb-pbind' + (names.length ? ' has' : '') + '"><i class="fa-solid fa-link"></i>'
+            + (names.length ? esc(names.join('、')) : '未绑定角色') + '</div>'
+            + '</div>'
+            + '<div class="ssp-orb-pacts">'
+            + '<span class="ssp-pbtn' + (on ? ' primary' : '') + '" data-orb-preset="' + esc(n) + '">' + (on ? '当前' : '用这个') + '</span>'
+            + '<span class="ssp-pbtn" data-orb-pbind="' + esc(n) + '"><i class="fa-solid fa-link"></i>绑定</span>'
+            + '</div></div>';
+    }).join('');
+    return head + '<div class="ssp-orb-plist">' + rows + '</div>';
+}
+
+function orbPresetHTML() {
+    if (orbPresetBinding) return orbPresetPickerHTML(orbPresetBinding);
+    const all = orbPresetList();
+    if (!all.length) return orbPresetRowsHTML();
+    return '<div class="ssp-orb-pfilter">'
+        + '<i class="fa-solid fa-magnifying-glass"></i>'
+        + '<input class="ssp-inp" type="text" data-orb-presearch="1" placeholder="搜预设 / 角色卡（比如：即兴坠落）" value="' + esc(orbPreSearch) + '">'
+        + (orbPreSearch ? '<span class="ssp-pbtn" data-orb-preclear="1">清除</span>' : '')
+        + '</div>'
+        + '<div class="ssp-orb-pcount"><label class="ssp-orb-auto"><input type="checkbox" data-orb-pauto="1"'
+        + (orbPresetAuto() ? ' checked' : '') + '><span>切到绑定的角色时自动换预设（会弹提示）</span></label></div>'
+        + '<div id="ssp_orb_preset_list">' + orbPresetRowsHTML() + '</div>'
+        + '<div class="ssp-orb-empty" style="padding-top:6px">当前预设：<b>' + esc(orbPresetCur() || '(读不到)') + '</b>'
+        + '；「用这个」立刻切，「绑定」选角色（一张卡只认一个预设，换绑会盖掉）。</div>';
+}
+
+function orbPresetPickerHTML(name) {
+    const conns = orbPresetCharNames(name);
+    const b = orbPresetBinds();
+    const chars = orbCharList();
+    const rows = chars.length ? chars.map(c => {
+        const mine = (b[c.id] === name);
+        const other = (b[c.id] && b[c.id] !== name) ? b[c.id] : '';
+        return '<div class="ssp-orb-charrow' + (mine ? ' on' : '') + '" data-orb-pbindchar="' + esc(c.id) + '" data-orb-pbindname="' + esc(name) + '">'
+            + '<img src="/thumbnail?type=avatar&file=' + encodeURIComponent(c.id) + '" alt="">'
+            + '<span class="ssp-orb-charn">' + esc(c.name) + (other ? '<i style="opacity:.5"> · 现在绑的是「' + esc(other) + '」</i>' : '') + '</span>'
+            + '<span class="ssp-orb-charmark">' + (mine ? '<i class="fa-solid fa-check"></i> 已绑定' : '<i class="fa-regular fa-circle"></i>') + '</span>'
+            + '</div>';
+    }).join('') : '<div class="ssp-orb-empty">没读到角色列表。</div>';
+    return '<div class="ssp-orb-bindhead">'
+        + '<span class="ssp-pbtn" data-orb-presetback="1"><i class="fa-solid fa-arrow-left"></i>返回</span>'
+        + '<b>' + esc(name) + ' · 绑定角色</b>'
+        + '</div>'
+        + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">点角色＝绑到它 / 再点＝解除。一张角色卡只认一个预设，绑新的会把旧的盖掉。</div>'
+        + '<div class="ssp-orb-charrows">' + rows + '</div>'
+        + (conns.length ? '<div class="ssp-orb-empty" style="padding-top:6px">已绑定：' + esc(conns.join('、')) + '</div>' : '');
+}
+
 
 function orbNotes() {
     const s = getSettings();
@@ -4433,6 +4600,7 @@ function orbInsert(text) {
 const ORB_MODULES = [
     { id: 'notes', name: '番外', icon: 'fa-feather-pointed', render: () => orbNotesHTML() },
     { id: 'persona', name: '面具', icon: 'fa-masks-theater', render: () => orbPersonaHTML() },
+    { id: 'preset', name: '预设', icon: 'fa-sliders', render: () => orbPresetHTML() },
 ];
 function orbModule(id) { return ORB_MODULES.find(m => m.id === id) || null; }
 
@@ -4814,12 +4982,15 @@ function bindOrb() {
         const c0 = getContext() || {};
         const es = c0.eventSource, et = c0.eventTypes;
         if (es && et && es.on) {
-            ['PERSONA_CHANGED', 'PERSONA_CREATED', 'PERSONA_UPDATED', 'PERSONA_RENAMED', 'PERSONA_DELETED', 'CHAT_CHANGED'].forEach(k => {
+            ['PERSONA_CHANGED', 'PERSONA_CREATED', 'PERSONA_UPDATED', 'PERSONA_RENAMED', 'PERSONA_DELETED',
+                'PRESET_CHANGED', 'OAI_PRESET_CHANGED_AFTER', 'PRESET_RENAMED', 'PRESET_DELETED', 'CHAT_CHANGED'].forEach(k => {
                 const evName = et[k];
                 if (!evName) return;
                 es.on(evName, () => {
+                    /* 切聊天时先看要不要自动换预设 */
+                    if (k === 'CHAT_CHANGED') { try { orbPresetAutoApply(); } catch (e) { } }
                     if (!orbOpenNow) return;
-                    /* 刷两次：事件刚发时酒馆可能还没把 .selected 落下来 */
+                    /* 刷两次：事件刚发时酒馆可能还没把选中状态落下来 */
                     setTimeout(() => { if (orbOpenNow) renderOrbPanel(); }, 60);
                     setTimeout(() => { if (orbOpenNow) renderOrbPanel(); }, 400);
                 });
@@ -4900,11 +5071,47 @@ function bindOrb() {
         }
     });
 
+    /* 预设页搜索 */
+    document.addEventListener('input', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbPresearch === undefined) return;
+        orbPreSearch = el.value || '';
+        const box = document.getElementById('ssp_orb_preset_list');
+        if (box) box.innerHTML = orbPresetRowsHTML();
+        const bar = document.querySelector('.ssp-orb-pfilter');
+        if (bar) {
+            let c = bar.querySelector('[data-orb-preclear]');
+            if (orbPreSearch && !c) { c = document.createElement('span'); c.className = 'ssp-pbtn'; c.setAttribute('data-orb-preclear', '1'); c.textContent = '清除'; bar.append(c); }
+            else if (!orbPreSearch && c) c.remove();
+        }
+    });
+
     document.addEventListener('click', ev => {
         const t = ev.target;
         if (!t || !t.closest) return;
         if (t.closest('[data-orb-pclear]')) { orbPSearch = ''; renderOrbPanel(); return; }
         if (t.closest('[data-orb-close]')) { closeOrb(); return; }
+        /* 预设页：清除搜索 / 返回 / 用这个 / 绑定 / 选角色 / 自动开关 */
+        if (t.closest('[data-orb-preclear]')) { orbPreSearch = ''; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-presetback]')) { orbPresetBinding = null; renderOrbPanel(); return; }
+        const prs = t.closest('[data-orb-preset]');
+        if (prs) { const n = prs.dataset.orbPreset; if (orbPresetPick(n)) { toast('已换成预设：' + n, 'success'); renderOrbPanel(); } return; }
+        const pbind = t.closest('[data-orb-pbind]');
+        if (pbind) { orbPresetBinding = pbind.dataset.orbPbind; renderOrbPanel(); return; }
+        const pbc = t.closest('[data-orb-pbindchar]');
+        if (pbc) {
+            const charId = pbc.dataset.orbPbindchar, pname = pbc.dataset.orbPbindname;
+            const bb = orbPresetBinds();
+            orbPresetBind(charId, bb[charId] === pname ? '' : pname);
+            renderOrbPanel();
+            return;
+        }
+        if (t.closest('[data-orb-pauto]')) {
+            getSettings().presetAuto = Boolean(t.checked);
+            save();
+            toast(t.checked ? '自动换预设：开' : '自动换预设：关', 'info');
+            return;
+        }
         /* 模块标签页 */
         const tabEl = t.closest('[data-orb-tab]');
         if (tabEl) { orbTab = tabEl.dataset.orbTab || 'notes'; orbEditing = null; renderOrbPanel(); return; }
