@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.16.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.17.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4378,6 +4378,7 @@ var orbEditing = null;
 var orbTab = 'notes';       // 当前模块页（模块容器：以后加功能只加标签页）
 var orbBinding = null;      // 正在给哪个面具选绑定角色（null = 不在绑定模式）
 var orbPersonaEdit = null;  // 正在编辑哪个面具（null = 不在编辑模式）
+var orbPSearch = '';        // 面具页的搜索词（角色卡名 / 面具名 / 描述）
 
 function orbNotes() {
     const s = getSettings();
@@ -4500,12 +4501,43 @@ function orbPersonaHTML() {
     if (orbPersonaEdit) return orbPersonaEditHTML(orbPersonaEdit);
 
     const list = orbPersonas();
-    const act = orbActivePersona();
     if (!list.length) {
         return '<div class="ssp-orb-empty">没读到面具。先在酒馆里打开一次「用户设定」面板，再回来看看。</div>'
             + '<div class="ssp-orb-foot"><span class="ssp-pbtn primary" data-orb-newpersona="1"><i class="fa-solid fa-plus"></i>新建面具</span></div>';
     }
-    const rows = list.map(p => {
+    return '<div class="ssp-orb-pfilter">'
+        + '<i class="fa-solid fa-magnifying-glass"></i>'
+        + '<input class="ssp-inp" type="text" data-orb-psearch="1" placeholder="搜角色卡 / 面具名 / 描述（比如：周树生）" value="' + esc(orbPSearch) + '">'
+        + (orbPSearch ? '<span class="ssp-pbtn" data-orb-pclear="1">清除</span>' : '')
+        + '</div>'
+        + '<div id="ssp_orb_pfilter_list">' + orbPersonaRowsHTML() + '</div>'
+        + '<div class="ssp-orb-foot"><span class="ssp-pbtn primary" data-orb-newpersona="1"><i class="fa-solid fa-plus"></i>新建面具</span></div>'
+        + '<div class="ssp-orb-empty" style="padding-top:6px">搜角色卡名 → 列出**绑定了这张卡**的面具；也能搜面具名和描述。点「换成这个」换面具，「绑定」改绑定，「编辑」改名称/描述。</div>';
+}
+
+/** 一个面具是否命中搜索（角色卡名 / 面具名 / 描述 三处都算） */
+function orbPersonaMatch(p, q) {
+    if (!q) return true;
+    const s = q.toLowerCase();
+    if (String(p.name || '').toLowerCase().indexOf(s) >= 0) return true;
+    if (orbBindNames(p.id).toLowerCase().indexOf(s) >= 0) return true;
+    if (orbPersonaDesc(p.id).toLowerCase().indexOf(s) >= 0) return true;
+    return false;
+}
+
+/** 列表部分单独抽出来 —— 搜的时候只换这块，输入框不会丢焦点 */
+function orbPersonaRowsHTML() {
+    const all = orbPersonas();
+    const act = orbActivePersona();
+    const hit = all.filter(p => orbPersonaMatch(p, orbPSearch));
+    if (!hit.length) {
+        return '<div class="ssp-orb-empty">没有匹配「' + esc(orbPSearch) + '」的面具。<br>'
+            + '（搜的是：角色卡名 / 面具名 / 描述）</div>';
+    }
+    const head = orbPSearch
+        ? '<div class="ssp-orb-pcount">筛选出 ' + hit.length + ' / ' + all.length + ' 个面具</div>'
+        : '';
+    const rows = hit.map(p => {
         const on = (p.id === act);
         const bound = orbBindNames(p.id);
         const desc = orbPersonaDesc(p.id);
@@ -4522,9 +4554,7 @@ function orbPersonaHTML() {
             + '<span class="ssp-pbtn" data-orb-pedit="' + esc(p.id) + '"><i class="fa-solid fa-pen"></i>编辑</span>'
             + '</div></div>';
     }).join('');
-    return '<div class="ssp-orb-plist">' + rows + '</div>'
-        + '<div class="ssp-orb-foot"><span class="ssp-pbtn primary" data-orb-newpersona="1"><i class="fa-solid fa-plus"></i>新建面具</span></div>'
-        + '<div class="ssp-orb-empty" style="padding-top:6px">点「换成这个」就换面具（走酒馆原生切换）；「绑定」可以绑到角色；「编辑」改名称和描述。</div>';
+    return head + '<div class="ssp-orb-plist">' + rows + '</div>';
 }
 
 /* ---------------------------- 面具的读取 / 编辑 ----------------------------
@@ -4813,9 +4843,33 @@ function bindOrb() {
         } else if (orbOpenNow) closeOrb(); else openOrb();
     }, true);
 
+    /* 面具页搜索：只换列表那一块（输入框不重画，焦点和光标都不会丢） */
+    document.addEventListener('input', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbPsearch === undefined) return;
+        orbPSearch = el.value || '';
+        const box = document.getElementById('ssp_orb_pfilter_list');
+        if (box) box.innerHTML = orbPersonaRowsHTML();
+        /* 「清除」按钮跟着搜索词出现/消失（只补这一个节点，不动输入框） */
+        const bar = document.querySelector('.ssp-orb-pfilter');
+        if (bar) {
+            let c = bar.querySelector('[data-orb-pclear]');
+            if (orbPSearch && !c) {
+                c = document.createElement('span');
+                c.className = 'ssp-pbtn';
+                c.setAttribute('data-orb-pclear', '1');
+                c.textContent = '清除';
+                bar.append(c);
+            } else if (!orbPSearch && c) {
+                c.remove();
+            }
+        }
+    });
+
     document.addEventListener('click', ev => {
         const t = ev.target;
         if (!t || !t.closest) return;
+        if (t.closest('[data-orb-pclear]')) { orbPSearch = ''; renderOrbPanel(); return; }
         if (t.closest('[data-orb-close]')) { closeOrb(); return; }
         /* 模块标签页 */
         const tabEl = t.closest('[data-orb-tab]');

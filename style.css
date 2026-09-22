@@ -672,3 +672,9 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 
 .ssp-orb-fl { display: block; margin-bottom: 9px; }
 .ssp-orb-fl > span { display: block; font-size: 11px; opacity: .6; margin-bottom: 4px; }
+/* ---------- 面具页搜索栏 ---------- */
+.ssp-orb-pfilter { display: flex; align-items: center; gap: 8px; padding: 2px 0 9px; }
+.ssp-orb-pfilter > i { font-size: 12px; opacity: .5; }
+.ssp-orb-pfilter .ssp-inp { flex: 1 1 auto; }
+.ssp-orb-pcount { font-size: 11px; opacity: .55; padding: 0 2px 7px; }
+
