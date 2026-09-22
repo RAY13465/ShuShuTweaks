@@ -3006,7 +3006,11 @@ function getSettings() {
     if (typeof s.detailHeader !== 'boolean') s.detailHeader = true;
     if (s.detailStyle !== 'video' && s.detailStyle !== 'about') s.detailStyle = 'about';
     /* 导入即更新（合并 导入 / 替换 / URL导入）：默认开 */
-    if (typeof s.listNotesFirstLine !== 'boolean') s.listNotesFirstLine = true;   // 列表里的作者注释只显示第一行
+    if (typeof s.listNotesFirstLine !== 'boolean') s.listNotesFirstLine = true;
+    /* 悬浮球（鼠鼠口袋）：默认开；位置存 orbPos（会校验）；番外存在 notes 里 */
+    if (typeof s.orbOn !== 'boolean') s.orbOn = true;
+    if (s.orbPos && (typeof s.orbPos.x !== 'number' || typeof s.orbPos.y !== 'number')) s.orbPos = null;
+    if (!Array.isArray(s.notes)) s.notes = [];   // 列表里的作者注释只显示第一行
     if (typeof s.importMerge !== 'boolean') s.importMerge = true;
     if (typeof s.importSimThreshold !== 'number') s.importSimThreshold = IMPORT_SIM_DEFAULT;
     /* 思维链收纳（从老的「鼠鼠小助手 ShuShu Tweaks」并进来的功能）
@@ -4039,7 +4043,12 @@ function bindSettings(root) {
                 if (out) out.textContent = t.value + '%';
                 return;
             }
-            if (t.dataset.sspNotesone !== undefined) { getSettings().listNotesFirstLine = Boolean(t.checked); save(); trimListCreatorNotes(); toast(t.checked ? '作者注释：只显示第一行' : '作者注释：整段显示', 'info'); return; }
+            if (t.dataset.sspOrbon !== undefined) {
+            getSettings().orbOn = Boolean(t.checked); save();
+            if (t.checked) { orbBuilt = false; mountOrb(); bindOrb(); refreshOrbBadge(); }
+            else { const r0 = document.getElementById('ssp_orb_root'); if (r0) r0.remove(); const b0 = document.getElementById('ssp_orb'); if (b0) b0.remove(); orbBuilt = false; closeOrb(); }
+            toast(t.checked ? '悬浮球：开' : '悬浮球：关', 'info'); return; }
+        if (t.dataset.sspNotesone !== undefined) { getSettings().listNotesFirstLine = Boolean(t.checked); save(); trimListCreatorNotes(); toast(t.checked ? '作者注释：只显示第一行' : '作者注释：整段显示', 'info'); return; }
         if (t.dataset.sspThinkshield !== undefined) { getSettings().thinkShield = Boolean(t.checked); save(); toast(t.checked ? '思维链收纳：开' : '思维链收纳：关', 'info'); return; }
             if (t.dataset.sspThinkload !== undefined) { getSettings().thinkOnChatLoad = Boolean(t.checked); save(); return; }
             if (t.dataset.sspThinktags !== undefined) { getSettings().thinkTags = String(t.value || 'think,thinking,thought'); save(); return; }
@@ -4169,6 +4178,11 @@ function settingsPanelHTML() {
     ].join(''), '认卡顺序：<b>卡里的姓名</b> → <b>人设文字重合度</b> → 文件名。认出重复会问你「更新这一张 / 另存为新角色」；'
         + '更新后会自动补回局部正则 / 收藏 / 世界书绑定 / 深度提示。认不出的新卡直接导入，不弹窗。');
 
+    /* —— 悬浮球（鼠鼠口袋）—— */
+    const secOrb = sec('fa-circle-nodes', '悬浮球（鼠鼠口袋）', [
+        frow('显示悬浮球', '右下角一颗菱形球，展开是番外库（可拖动换位置）',
+            fsw('data-ssp-orbon="1"', s.orbOn !== false)),
+    ].join(''), '番外一条一条存，支持复制 / 一键插进输入框；数据存在扩展设置里，跟着酒馆备份走。以后要加别的功能，也是往这个球里塞模块。');
     /* —— 思维链收纳 —— */
     const secThink = sec('fa-brain', '思维链收纳', [
         frow('收纳思维链', '续写不再把 &lt;think&gt; 吐回正文',
@@ -4189,7 +4203,7 @@ function settingsPanelHTML() {
         <div class="ssp-p-x" data-ssp-panel-close="1" title="关闭"><i class="fa-solid fa-xmark"></i></div>
       </div>
       <div class="ssp-p-body">
-        ${secThink}${secCard}${secDetail}${secImport}${secBuild}${secSort}
+        ${secOrb}${secThink}${secCard}${secDetail}${secImport}${secBuild}${secSort}
       </div>
       <div class="ssp-p-foot">
         <span>改完立刻生效并落盘，不用点保存</span>
@@ -4346,6 +4360,263 @@ function reclaim(reason) {
     if (boxOpen) renderMount();
 }
 
+/* ==========================================================================
+   🐭 悬浮球（#ssp_orb）+ 鼠鼠口袋
+   --------------------------------------------------------------------------
+   用户要的：一颗悬浮球（图案 = 菱形方块，黑白配色），展开里面是「番外」库：
+   一条一条存小短文，可复制 / 一键插进输入框。面板做成模块容器，以后加功能往里塞。
+   实现上的三个坑（都踩过，写在这儿别再踩）：
+     ① 球必须**直接挂 body**：放进任何有尺寸的容器里，那个容器就可能成为它的包含块
+        （实测顶到屏幕外 top=-148 = -(bottom 96 + 高 52)）。
+     ② 本块代码必须位于 init() **之前**：否则 init 执行时 const/let 还在 TDZ，
+        会抛 "Cannot access 'xxx' before initialization"。
+     ③ 重画面板只换面板**内部**，绝不重画整个容器 —— 否则球会跟着被替换掉。
+   ========================================================================== */
+var orbBuilt = false;
+var orbOpenNow = false;
+var orbEditing = null;
+
+function orbNotes() {
+    const s = getSettings();
+    if (!Array.isArray(s.notes)) s.notes = [];
+    return s.notes;
+}
+function orbNewId() { return 'n' + Date.now().toString(36) + Math.floor(Math.random() * 1000); }
+
+function orbSaveNote(id, title, text) {
+    const list = orbNotes();
+    const t = String(title || '').trim();
+    const body = String(text || '');
+    if (!t && !body.trim()) return null;
+    let rec = id ? list.find(n => n.id === id) : null;
+    if (rec) { rec.title = t; rec.text = body; rec.at = Date.now(); }
+    else { rec = { id: orbNewId(), title: t, text: body, at: Date.now() }; list.unshift(rec); }
+    save();
+    return rec;
+}
+
+function orbDelNote(id) {
+    const s = getSettings();
+    if (!Array.isArray(s.notes)) return false;
+    const i = s.notes.findIndex(n => n.id === id);
+    if (i < 0) return false;
+    s.notes.splice(i, 1);
+    save();
+    return true;
+}
+
+async function orbCopy(text) {
+    try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; } } catch (e) { }
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.append(ta); ta.select(); document.execCommand('copy'); ta.remove();
+        return true;
+    } catch (e) { return false; }
+}
+
+function orbInsert(text) {
+    const ta = document.getElementById('send_textarea');
+    if (!ta) { toast('没找到输入框（先打开一个聊天）', 'warning'); return false; }
+    ta.value = String(text || '');
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    try { ta.focus(); } catch (e) { }
+    toast('已插进输入框', 'info');
+    return true;
+}
+
+/** 面板里的模块表 —— 以后加功能往这里加一项 */
+const ORB_MODULES = [
+    { id: 'notes', name: '番外', icon: 'fa-feather-pointed', render: () => orbNotesHTML() },
+];
+function orbModule(id) { return ORB_MODULES.find(m => m.id === id) || null; }
+
+function orbNotesHTML() {
+    const list = orbNotes();
+    if (!list.length) return '<div class="ssp-orb-empty">还没有番外。点下面的「＋ 新的一条」就能存了 —— 存好之后可以一键复制，或者直接插进输入框。</div>';
+    return list.map(n => '<div class="ssp-orb-note" data-orb-note="' + esc(n.id) + '">'
+        + '<div class="ssp-orb-note-h"><b>' + esc(n.title || '(没写标题)') + '</b>'
+        + '<span class="ssp-orb-note-t">' + new Date(n.at || Date.now()).toLocaleDateString() + '</span></div>'
+        + '<div class="ssp-orb-note-b">' + esc(String(n.text || '').slice(0, 160)) + (String(n.text || '').length > 160 ? '…' : '') + '</div>'
+        + '<div class="ssp-orb-note-a">'
+        + '<span class="ssp-pbtn" data-orb-act="copy" data-id="' + esc(n.id) + '"><i class="fa-solid fa-copy"></i>复制</span>'
+        + '<span class="ssp-pbtn" data-orb-act="insert" data-id="' + esc(n.id) + '"><i class="fa-solid fa-arrow-right-to-bracket"></i>插进输入框</span>'
+        + '<span class="ssp-pbtn" data-orb-act="edit" data-id="' + esc(n.id) + '"><i class="fa-solid fa-pen"></i>编辑</span>'
+        + '<span class="ssp-pbtn danger" data-orb-act="del" data-id="' + esc(n.id) + '"><i class="fa-solid fa-trash"></i></span>'
+        + '</div></div>').join('');
+}
+
+function orbPanelHTML() {
+    const e = orbEditing;
+    const tabs = ORB_MODULES.map(m => '<span class="ssp-orb-tab on"><i class="fa-solid ' + m.icon + '"></i>' + esc(m.name) + '</span>').join('');
+    return '<div class="ssp-orb-head"><span class="ssp-orb-logo"></span>'
+        + '<div class="ssp-orb-title"><b>鼠鼠口袋</b><small>悬浮球 · ' + ORB_MODULES.length + ' 个模块</small></div>'
+        + '<span class="ssp-pbtn" data-orb-close="1"><i class="fa-solid fa-xmark"></i></span></div>'
+        + '<div class="ssp-orb-tabs">' + tabs + '</div>'
+        + '<div class="ssp-orb-body">'
+        + (e ? '<div class="ssp-orb-edit">'
+            + '<input class="ssp-inp" type="text" data-orb-f="title" placeholder="标题（比如：番外·雨夜）" value="' + esc(e.title || '') + '">'
+            + '<textarea class="ssp-inp ssp-orb-ta" data-orb-f="text" rows="9" placeholder="正文…">' + esc(e.text || '') + '</textarea>'
+            + '<div class="ssp-orb-edit-a">'
+            + '<span class="ssp-pbtn primary" data-orb-act="save" data-id="' + esc(e.id || '') + '"><i class="fa-solid fa-check"></i>保存</span>'
+            + '<span class="ssp-pbtn" data-orb-act="cancel">取消</span>'
+            + (e.id ? '<span class="ssp-pbtn danger" data-orb-act="del" data-id="' + esc(e.id) + '"><i class="fa-solid fa-trash"></i>删掉这条</span>' : '')
+            + '</div></div>'
+            : ORB_MODULES.map(m => m.render()).join('') + '<div class="ssp-orb-foot"><span class="ssp-pbtn primary" data-orb-act="new"><i class="fa-solid fa-plus"></i>新的一条</span></div>')
+        + '</div>';
+}
+
+/** 只换面板**内部**（绝不重画容器，否则球会被一起换掉） */
+function renderOrbPanel() {
+    const panel = document.getElementById('ssp_orb_panel');
+    if (!panel) return false;
+    panel.innerHTML = orbPanelHTML();
+    refreshOrbBadge();
+    return true;
+}
+
+function openOrb() {
+    mountOrb();
+    const root = document.getElementById('ssp_orb_root');
+    if (root && root.classList) root.classList.add('on');
+    orbOpenNow = true; orbEditing = null;
+    renderOrbPanel();
+    return true;
+}
+
+function closeOrb() {
+    const root = document.getElementById('ssp_orb_root');
+    if (root && root.classList) root.classList.remove('on');
+    orbOpenNow = false; orbEditing = null;
+    return true;
+}
+
+function refreshOrbBadge() {
+    const b = document.getElementById('ssp_orb_badge');
+    if (!b) return false;
+    const n = orbNotes().length;
+    b.textContent = n ? String(n) : '';
+    b.style.display = n ? '' : 'none';
+    return true;
+}
+
+function mountOrb() {
+    if (orbBuilt && document.getElementById('ssp_orb')) return true;
+    if (!document.body) return false;
+    const oldBall = document.getElementById('ssp_orb'); if (oldBall) oldBall.remove();
+    const oldRoot = document.getElementById('ssp_orb_root'); if (oldRoot) oldRoot.remove();
+
+    /* 坐标：存过的要用，但先校验（负数/越界一律当没存过，免得球跑到屏幕外） */
+    let pos = getSettings().orbPos;
+    if (pos && (typeof pos.x !== 'number' || typeof pos.y !== 'number'
+        || pos.x < 0 || pos.y < 0
+        || pos.x > window.innerWidth - 20 || pos.y > window.innerHeight - 20)) {
+        getSettings().orbPos = null;
+        pos = null;
+    }
+
+    /* ① 球：直接挂 body（不进任何容器） */
+    const ball = document.createElement('div');
+    ball.className = 'ssp-orb';
+    ball.id = 'ssp_orb';
+    ball.title = '鼠鼠口袋（可拖动 · 点一下展开）';
+    /* ⚠️ 位置不能用 CSS 的 bottom：酒馆里球的包含块高度会被算成 0，
+       bottom:96px 于是变成 top:-148px（球飞到屏幕外，用户以为没有球）。
+       实测 left/right 正常、坏的只有纵向 → 直接按视口把 left/top 算好写进去。 */
+    if (pos) {
+        ball.setAttribute('style', 'left:' + Math.round(pos.x) + 'px;top:' + Math.round(pos.y) + 'px;right:auto;bottom:auto;');
+    } else {
+        const vs = 52;
+        ball.setAttribute('style', 'left:' + Math.round(window.innerWidth - vs - 18) + 'px;top:'
+            + Math.round(window.innerHeight - vs - 96) + 'px;right:auto;bottom:auto;');
+    }
+    ball.innerHTML = '<span class="ssp-orb-diamond"></span><span class="ssp-orb-badge" id="ssp_orb_badge"></span>';
+    document.body.append(ball);
+
+    /* ② 面板容器：全屏但 pointer-events:none，只让遮罩/面板收点击 */
+    const root = document.createElement('div');
+    root.id = 'ssp_orb_root';
+    root.className = 'ssp-orb-root';
+    root.innerHTML = '<div class="ssp-orb-mask" data-orb-close="1"></div>'
+        + '<div class="ssp-orb-panel" id="ssp_orb_panel"></div>';
+    document.body.append(root);
+
+    orbBuilt = true;
+    renderOrbPanel();
+    refreshOrbBadge();
+    return true;
+}
+
+function bindOrb() {
+    if (bindOrb.done) return false;
+    bindOrb.done = true;
+    const getBall = () => document.getElementById('ssp_orb');
+    let dragging = false, moved = false, sx = 0, sy = 0, ox = 0, oy = 0;
+
+    document.addEventListener('pointerdown', ev => {
+        const el = ev.target && ev.target.closest ? ev.target.closest('#ssp_orb') : null;
+        if (!el) return;
+        const o = getBall(); if (!o) return;
+        const r = o.getBoundingClientRect();
+        dragging = true; moved = false;
+        sx = ev.clientX; sy = ev.clientY; ox = r.left; oy = r.top;
+        try { o.setPointerCapture(ev.pointerId); } catch (e) { }
+    }, true);
+
+    document.addEventListener('pointermove', ev => {
+        if (!dragging) return;
+        const o = getBall(); if (!o) return;
+        const dx = ev.clientX - sx, dy = ev.clientY - sy;
+        if (!moved && Math.abs(dx) + Math.abs(dy) < 6) return;      // 点一下别被当成拖动
+        moved = true;
+        const w = o.offsetWidth || 52, h = o.offsetHeight || 52;
+        const x = Math.max(4, Math.min(window.innerWidth - w - 4, ox + dx));
+        const y = Math.max(4, Math.min(window.innerHeight - h - 4, oy + dy));
+        o.style.left = Math.round(x) + 'px'; o.style.top = Math.round(y) + 'px';
+        o.style.right = 'auto'; o.style.bottom = 'auto';
+        if (o.classList) o.classList.add('moving');
+    }, true);
+
+    document.addEventListener('pointerup', () => {
+        if (!dragging) return;
+        dragging = false;
+        const o = getBall(); if (!o) return;
+        if (o.classList) o.classList.remove('moving');
+        if (moved) {
+            const r = o.getBoundingClientRect();
+            getSettings().orbPos = { x: Math.round(r.left), y: Math.round(r.top) };
+            save();
+        } else if (orbOpenNow) closeOrb(); else openOrb();
+    }, true);
+
+    document.addEventListener('click', ev => {
+        const t = ev.target;
+        if (!t || !t.closest) return;
+        if (t.closest('[data-orb-close]')) { closeOrb(); return; }
+        const act = t.closest('[data-orb-act]');
+        if (!act) return;
+        const a = act.dataset.orbAct, id = act.dataset.id || '';
+        const panel = document.getElementById('ssp_orb_panel');
+        const val = f => { const el = panel && panel.querySelector('[data-orb-f="' + f + '"]'); return el ? el.value : ''; };
+        if (a === 'new') { orbEditing = { id: '', title: '', text: '' }; renderOrbPanel(); const f = panel.querySelector('[data-orb-f="title"]'); if (f) f.focus(); return; }
+        if (a === 'cancel') { orbEditing = null; renderOrbPanel(); return; }
+        if (a === 'save') {
+            const rec = orbSaveNote(id, val('title'), val('text'));
+            orbEditing = null; renderOrbPanel();
+            toast(rec ? '已存下这一条' : '空的没存（标题或正文写一个）', rec ? 'success' : 'warning');
+            return;
+        }
+        if (a === 'edit') { const n = orbNotes().find(x => x.id === id); if (n) { orbEditing = { id: n.id, title: n.title, text: n.text }; renderOrbPanel(); } return; }
+        if (a === 'del') { if (orbDelNote(id)) { orbEditing = null; renderOrbPanel(); toast('删掉了', 'info'); } return; }
+        if (a === 'copy') { const n = orbNotes().find(x => x.id === id); if (n) orbCopy((n.title ? n.title + '\n\n' : '') + n.text).then(ok => toast(ok ? '已复制' : '复制失败', ok ? 'success' : 'warning')); return; }
+        if (a === 'insert') { const n = orbNotes().find(x => x.id === id); if (n) orbInsert((n.title ? n.title + '\n\n' : '') + n.text); return; }
+    }, true);
+
+    document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && orbOpenNow) closeOrb(); });
+    return true;
+}
+
+
 function init() {
     const ctx = getContext();
     if (!ctx) { warn('拿不到 getContext()，扩展不启动'); return false; }
@@ -4370,6 +4641,7 @@ function init() {
     if (importMergeOn()) bindImportMerge();                      // 导入即更新（合并 导入 / 替换 / URL导入）
     registerThinkDisplayHook();                                  // 思维链收纳：显示层兜底（流式半截标签也不上屏）
     registerThinkEvents();                                       // 思维链收纳：生成结束/收到消息/换聊天时收纳
+    if (getSettings().orbOn !== false) { mountOrb(); bindOrb(); }   // 🐭 悬浮球（鼠鼠口袋）
 
     try {
         ctx.eventSource?.on?.(ctx.eventTypes?.CHARACTER_PAGE_LOADED, () => reclaim('page-loaded'));
@@ -4409,6 +4681,7 @@ if (globalThis.__SSP_TEST__) {
         extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
         migrateTweaksSettings, TWEAKS_MODULE_NAME,
         restoreCardStyle, hdCardAvatars, cardDrawerHTML, mountDrawer, attrOf, setAttr,
+        mountOrb, bindOrb, openOrb, closeOrb, orbNotes, orbSaveNote, orbDelNote, orbInsert, orbCopy, refreshOrbBadge, ORB_MODULES, orbModule,
         mountSettingsPanel, openSettingsPanel, closeSettingsPanel, panelOpen, settingsPanelHTML, bindSettings, refreshCardSection, trimListCreatorNotes,
         get boxOpen() { return boxOpen; }, set boxOpen(v) { boxOpen = v; },
         get renaming() { return renaming; }, set renaming(v) { renaming = v; },
