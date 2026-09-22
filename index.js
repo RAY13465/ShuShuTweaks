@@ -4105,7 +4105,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.27.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.27.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4441,7 +4441,8 @@ function hdSwapAll(root) {
 function bindHdAvatars() {
     if (bindHdAvatars.done) return false;
     bindHdAvatars.done = true;
-    hdSwapAll(document);
+    const n0 = hdSwapAll(document);
+    try { window.__sspHdCount = n0; console.log('[鼠鼠小助手] 高清头像：初始替换 ' + n0 + ' 张（之后新出现的图会自动跟上）'); } catch (e) { }
     try {
         new MutationObserver(muts => {
             if (!hdAvatarWanted()) return;
@@ -4449,7 +4450,10 @@ function bindHdAvatars() {
                 mu.addedNodes && mu.addedNodes.forEach(node => {
                     if (!node || node.nodeType !== 1) return;
                     if (node.tagName === 'IMG') hdSwapOne(node);
-                    else if (node.querySelectorAll) hdSwapAll(node);
+                    else if (node.querySelectorAll) {
+                        const k = hdSwapAll(node);
+                        if (k) { try { window.__sspHdCount = (window.__sspHdCount || 0) + k; } catch (e) { } }
+                    }
                 });
             });
         }).observe(document.body, { childList: true, subtree: true });
