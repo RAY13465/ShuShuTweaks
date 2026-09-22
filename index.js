@@ -5290,6 +5290,28 @@ function refreshOrbBadge() {
     return true;
 }
 
+/** 往酒馆的「扩展程序」展开栏里挂一个「鼠鼠口袋」入口（点了直接开面板，不依赖悬浮球） */
+function mountPocketMenuEntry() {
+    const menu = document.getElementById('extensionsMenu');
+    if (!menu) return false;
+    if (document.getElementById('ssp_menu_pocket')) return true;
+    const item = document.createElement('div');
+    item.id = 'ssp_menu_pocket';
+    item.className = 'extensionsMenuExtensionButton menu_button interactable';
+    item.title = '鼠鼠口袋（番外 / 面具 / 预设 / 美化 / 存档）';
+    item.innerHTML = '<i class="fa-solid fa-mouse"></i> 鼠鼠口袋';
+    item.addEventListener('click', ev => { ev.stopPropagation(); openOrb(); });
+    menu.append(item);
+    return true;
+}
+
+function bindPocketMenuEntry() {
+    if (bindPocketMenuEntry.done) return;
+    bindPocketMenuEntry.done = true;
+    mountPocketMenuEntry();
+    try { setInterval(mountPocketMenuEntry, 2000); } catch (e) { }
+}
+
 function mountOrb() {
     if (orbBuilt && document.getElementById('ssp_orb')) return true;
     if (!document.body) return false;
@@ -5331,12 +5353,10 @@ function mountOrb() {
     const oldWand = document.getElementById('ssp_orb_wand'); if (oldWand) oldWand.remove();
     const wand = document.createElement('div');
     wand.className = 'ssp-orb-wand';
+    wand.style.display = 'none';   /* 用户不要这个自建魔法棒：入口已经挂进酒馆的「扩展程序」展开栏 */
     wand.id = 'ssp_orb_wand';
     wand.setAttribute('data-orb-wand', '1');
     wand.title = '鼠鼠口袋：点一下把球收起来 / 放出来';
-    /* ⚠️ 跟球一样：不能用 CSS 的 bottom（酒馆里包含块高度会被算成 0 → 按钮飞到屏幕外）。
-       这里直接按视口算好 left/top。 */
-    wand.setAttribute('style', 'left:14px;top:' + Math.round(window.innerHeight - 34 - 14) + 'px;right:auto;bottom:auto;');
     wand.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i>';
     document.body.append(wand);
     orbSetCollapsed(getSettings().orbCollapsed === true, true);
@@ -5355,13 +5375,37 @@ function mountOrb() {
     return true;
 }
 
+/** 魔法棒的位置：贴到酒馆自己的「扩展程序」按钮（#extensionsMenuButton）旁边。
+    ⚠️ 不能把节点塞进那个 div —— 它靠 class 里的图标字体显示魔杖，塞东西会把图标撑坏。
+    所以是"贴在它左边"，视觉上就是同一颗按钮的位置。找不到那个按钮就退回左下角。 */
+function orbPlaceWand() {
+    const wd = document.getElementById('ssp_orb_wand');
+    if (!wd) return;
+    const h = wd.offsetHeight || 34;
+    let left = 14, top = Math.round(window.innerHeight - h - 14);
+    try {
+        const anchor = document.getElementById('extensionsMenuButton');
+        if (anchor) {
+            const r = anchor.getBoundingClientRect();
+            if (r.width > 0) {
+                left = Math.max(4, Math.round(r.left - h - 6));            // 贴在「扩展程序」按钮左边
+                top = Math.round(r.top + r.height / 2 - h / 2);
+            }
+        }
+    } catch (e) { }
+    wd.style.left = left + 'px';
+    wd.style.top = top + 'px';
+    wd.style.right = 'auto';
+    wd.style.bottom = 'auto';
+}
+
 /** 收纳 / 展开悬浮球（魔法棒控制；silent=true 时不弹提示、不落盘，用于初始化）
     ⚠️ 收纳时把球**移动到魔法棒的位置**再缩小淡出 —— 用户要的是"收进那颗魔法棒里"，
        不是原地消失。展开时再飞回原位（位置由 orbEdge 决定）。 */
 function orbSetCollapsed(on, silent) {
     orbCollapsed = Boolean(on);
     const ball = document.getElementById('ssp_orb');
-    const wand = document.getElementById('ssp_orb_wand');
+    const wand = document.getElementById('extensionsMenuButton');   /* 收纳目标 = 酒馆自己的扩展程序按钮 */
     if (ball && ball.classList) ball.classList.toggle('ssp-collapsed', orbCollapsed);
     if (wand && wand.classList) wand.classList.toggle('active', orbCollapsed);
     if (ball) {
@@ -5746,7 +5790,8 @@ function init() {
     registerThinkDisplayHook();                                  // 思维链收纳：显示层兜底（流式半截标签也不上屏）
     registerThinkEvents();                                       // 思维链收纳：生成结束/收到消息/换聊天时收纳
     if (getSettings().orbOn !== false) { mountOrb(); bindOrb(); }
-    bindHdAvatars();                                                 // 全站头像高清化（聊天气泡/列表都算）   // 🐭 悬浮球（鼠鼠口袋）
+    bindHdAvatars();
+    bindPocketMenuEntry();                                            // 「鼠鼠口袋」入口挂进扩展程序展开栏                                                 // 全站头像高清化（聊天气泡/列表都算）   // 🐭 悬浮球（鼠鼠口袋）
 
     try {
         ctx.eventSource?.on?.(ctx.eventTypes?.CHARACTER_PAGE_LOADED, () => reclaim('page-loaded'));
