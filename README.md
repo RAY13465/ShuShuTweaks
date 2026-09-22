@@ -550,3 +550,38 @@ body:not(.big-avatars) .avatar img { border-radius: 50%; }
 **② 学生证阴影加回**：上一版为了治"黑色发光"把卡片外阴影全删了，后来查明发光其实是
 **美化给字体加的 text-shadow**，跟卡片阴影无关 → 把**卡片本体那条最轻的**
 （`0 6px 18px rgba(0,0,0,.22)`）加回来了；证件照和收藏态那两条不加（免得又把"发光"观感带回来）。
+
+### 修：切换层数后按钮/模块「莫名其妙消失」（v1.12.12）
+
+**真因**（`ensureModuleEls` 里拆多余层那段）：
+
+```js
+while (rec.rows.length > m.rows.length) {
+    rec.rows.pop().remove();      // ← 把这一层连里面的原生按钮一起 remove 了
+}
+```
+
+「2 层 → 1 层」（装配面板里的层数切换 / 恢复行数）时，第 2 层里的按钮**没先送回老家就被连窝端** ✗ ——
+元素从 DOM 上彻底消失，`resolveNative()` 再也查不到 → 该模块判定为空 → 连模块一起 `display:none` ✗。
+一个根因、两个症状（按钮没了 + 模块没了），正是用户报的那句话。
+
+**修法**（和"删模块"那条路一样的写法：拆容器前先把原生元素救出来）：
+
+```js
+const row = rec.rows.pop();
+Array.from(row.children).forEach(el => {
+    const home = originalParentOf(el);
+    if (home && home.isConnected !== false) home.append(el);
+});
+row.remove();
+```
+
+实测：p3 走一遍 2层 → 1层 → 2层，`character_sort_order` / `rm_button_search` / `character_search_bar`
+**全程都在**，分页也在 ✓。
+
+> 行为说明：2 层 → 1 层会把两层的按钮**合并到第 1 层**（配置语义如此），再切回 2 层时**第 2 层是空的**，
+> 按钮都还在第 1 层 —— 不会丢，但要自己再拖一个进去。想让"切回 2 层"记住原来的拆分，说一声我加。
+
+> ⚠️ 测量的坑（这次连踩两次）：我一开始用 `.menu_button, [id^=ssp_btn_]` 数"模块里有多少按钮"，
+> 结果把**搜索框、排序、分页**这些不是 `.menu_button` 的元素全漏了 ✗，于是误判"你的布局已经坏了"。
+> **数控件别按 class 猜，要按配置里的按钮 id 去对**（或者干脆数所有子元素）。

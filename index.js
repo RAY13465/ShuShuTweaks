@@ -3220,7 +3220,16 @@ function ensureModuleEls(layout) {
             rec.rows.push(row);
         }
         while (rec.rows.length > m.rows.length) {
-            rec.rows.pop().remove();
+            const row = rec.rows.pop();
+            /* ⚠️ 拆层之前必须先把这一层里的原生按钮送回老家 ——
+               否则它们跟着层一起被 remove，从 DOM 上彻底消失，
+               resolveNative 再也查不到 → 按钮"莫名其妙没了"，
+               接着该模块判定为空 → 连模块也一起 display:none（2 层改 1 层时必踩）。 */
+            Array.from(row.children).forEach(el => {
+                const home = originalParentOf(el);
+                if (home && home.isConnected !== false) home.append(el);
+            });
+            row.remove();
         }
     });
 }
@@ -4069,7 +4078,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.12.11';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.12.12';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
