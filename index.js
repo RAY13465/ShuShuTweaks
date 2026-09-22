@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.13.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.14.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4375,6 +4375,7 @@ function reclaim(reason) {
 var orbBuilt = false;
 var orbOpenNow = false;
 var orbEditing = null;
+var orbTab = 'notes';       // 当前模块页（模块容器：以后加功能只加标签页）
 
 function orbNotes() {
     const s = getSettings();
@@ -4428,8 +4429,89 @@ function orbInsert(text) {
 /** 面板里的模块表 —— 以后加功能往这里加一项 */
 const ORB_MODULES = [
     { id: 'notes', name: '番外', icon: 'fa-feather-pointed', render: () => orbNotesHTML() },
+    { id: 'persona', name: '面具', icon: 'fa-masks-theater', render: () => orbPersonaHTML() },
 ];
 function orbModule(id) { return ORB_MODULES.find(m => m.id === id) || null; }
+
+/* ============================ 面具（用户设定）栏 ============================
+   读：酒馆把面具放在 power_user.personas（id → 名字），上下文里能用
+       SillyTavern.getContext().powerUserSettings 读到（实测可读 ✓）。
+   切：不自己改数据，直接**点酒馆自己面具列表里那一项**（#user_avatar_block .avatar-container），
+       走酒馆原生的切换逻辑，最稳。
+   新建：点酒馆自己的加面具按钮（#add_avatar_button，是个隐藏的 file input）→ 走酒馆原生流程。
+   ========================================================================== */
+function orbPersonas() {
+    const out = [];
+    try {
+        const ctx = getContext() || {};
+        const pu = ctx.powerUserSettings || {};
+        const map = pu.personas || {};
+        Object.keys(map).forEach(id => out.push({ id: id, name: String(map[id] || id) }));
+    } catch (e) { /* 读不到就退回 DOM */ }
+    if (!out.length) {
+        document.querySelectorAll('#user_avatar_block .avatar-container').forEach(c => {
+            const img = c.querySelector('img');
+            const m = img && /[?&]file=([^&]+)/.exec(img.getAttribute('src') || '');
+            if (m) out.push({ id: decodeURIComponent(m[1]), name: (c.querySelector('.ch_name, b') || {}).textContent || m[1] });
+        });
+    }
+    return out;
+}
+
+/** 当前戴着的面具 id（读酒馆列表里 .selected 那一项） */
+function orbActivePersona() {
+    const sel = document.querySelector('#user_avatar_block .avatar-container.selected img');
+    const m = sel && /[?&]file=([^&]+)/.exec(sel.getAttribute('src') || '');
+    if (m) return decodeURIComponent(m[1]);
+    try { return (getContext().powerUserSettings || {}).default_persona || ''; } catch (e) { return ''; }
+}
+
+function orbPersonaThumb(id) { return '/thumbnail?type=persona&file=' + encodeURIComponent(id); }
+
+/** 选一个面具：点酒馆自己列表里对应那一项 */
+function orbPersonaSwitch(id) {
+    const items = Array.from(document.querySelectorAll('#user_avatar_block .avatar-container'));
+    for (const c of items) {
+        const img = c.querySelector('img');
+        const m = img && /[?&]file=([^&]+)/.exec(img.getAttribute('src') || '');
+        if (m && decodeURIComponent(m[1]) === id) {
+            c.click();
+            toast('已换成：' + (orbPersonas().find(p => p.id === id) || {}).name, 'info');
+            return true;
+        }
+    }
+    toast('没在酒馆的面具列表里找到这一项（先打开一次「用户设定」面板）', 'warning');
+    return false;
+}
+
+function orbPersonaNew() {
+    const btn = document.getElementById('add_avatar_button');
+    if (!btn) { toast('没找到酒馆的「加面具」按钮', 'warning'); return false; }
+    btn.click();                                  // 走酒馆原生新建流程（选图 → 起名）
+    return true;
+}
+
+function orbPersonaHTML() {
+    const list = orbPersonas();
+    const act = orbActivePersona();
+    if (!list.length) {
+        return '<div class="ssp-orb-empty">没读到面具。先在酒馆里打开一次「用户设定」面板，再回来看看。</div>'
+            + '<div class="ssp-orb-foot"><span class="ssp-pbtn primary" data-orb-newpersona="1"><i class="fa-solid fa-plus"></i>新建面具</span></div>';
+    }
+    const cards = list.map(p => {
+        const on = (p.id === act);
+        return '<div class="ssp-orb-face' + (on ? ' on' : '') + '" data-orb-persona="' + esc(p.id) + '" title="' + esc(p.name) + '">'
+            + '<img src="' + orbPersonaThumb(p.id) + '" alt="">'
+            + '<span class="ssp-orb-face-n">' + esc(p.name) + '</span>'
+            + (on ? '<span class="ssp-orb-face-t">当前</span>' : '')
+            + '</div>';
+    }).join('');
+    return '<div class="ssp-orb-faces">' + cards + '</div>'
+        + '<div class="ssp-orb-foot">'
+        + '<span class="ssp-pbtn primary" data-orb-newpersona="1"><i class="fa-solid fa-plus"></i>新建面具</span>'
+        + '</div>'
+        + '<div class="ssp-orb-empty" style="padding-top:6px">点一个就换面具（走酒馆原生切换）；「新建面具」会打开酒馆的加面具流程。</div>';
+}
 
 function orbNotesHTML() {
     const list = orbNotes();
@@ -4448,7 +4530,9 @@ function orbNotesHTML() {
 
 function orbPanelHTML() {
     const e = orbEditing;
-    const tabs = ORB_MODULES.map(m => '<span class="ssp-orb-tab on"><i class="fa-solid ' + m.icon + '"></i>' + esc(m.name) + '</span>').join('');
+    const cur = orbModule(orbTab) || ORB_MODULES[0];
+    const tabs = ORB_MODULES.map(m => '<span class="ssp-orb-tab' + (m.id === cur.id ? ' on' : ' off')
+        + '" data-orb-tab="' + m.id + '"><i class="fa-solid ' + m.icon + '"></i>' + esc(m.name) + '</span>').join('');
     return '<div class="ssp-orb-head"><span class="ssp-orb-logo"></span>'
         + '<div class="ssp-orb-title"><b>鼠鼠口袋</b><small>悬浮球 · ' + ORB_MODULES.length + ' 个模块</small></div>'
         + '<span class="ssp-pbtn" data-orb-close="1"><i class="fa-solid fa-xmark"></i></span></div>'
@@ -4462,7 +4546,7 @@ function orbPanelHTML() {
             + '<span class="ssp-pbtn" data-orb-act="cancel">取消</span>'
             + (e.id ? '<span class="ssp-pbtn danger" data-orb-act="del" data-id="' + esc(e.id) + '"><i class="fa-solid fa-trash"></i>删掉这条</span>' : '')
             + '</div></div>'
-            : ORB_MODULES.map(m => m.render()).join('') + '<div class="ssp-orb-foot"><span class="ssp-pbtn primary" data-orb-act="new"><i class="fa-solid fa-plus"></i>新的一条</span></div>')
+            : cur.render() + (cur.id === 'notes' ? '<div class="ssp-orb-foot"><span class="ssp-pbtn primary" data-orb-act="new"><i class="fa-solid fa-plus"></i>新的一条</span></div>' : ''))
         + '</div>';
 }
 
@@ -4593,6 +4677,13 @@ function bindOrb() {
         const t = ev.target;
         if (!t || !t.closest) return;
         if (t.closest('[data-orb-close]')) { closeOrb(); return; }
+        /* 模块标签页 */
+        const tabEl = t.closest('[data-orb-tab]');
+        if (tabEl) { orbTab = tabEl.dataset.orbTab || 'notes'; orbEditing = null; renderOrbPanel(); return; }
+        /* 面具栏：选一个 / 新建 */
+        const face = t.closest('[data-orb-persona]');
+        if (face) { orbPersonaSwitch(face.dataset.orbPersona); renderOrbPanel(); return; }
+        if (t.closest('[data-orb-newpersona]')) { orbPersonaNew(); return; }
         const act = t.closest('[data-orb-act]');
         if (!act) return;
         const a = act.dataset.orbAct, id = act.dataset.id || '';

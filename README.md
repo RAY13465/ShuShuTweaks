@@ -620,3 +620,23 @@ row.remove();
 
 > 流程教训：**别用 node -e 传带引号/反引号的补丁代码**（PowerShell 会搅坏，这几轮反复栽在这儿）。
 > 补丁一律写成文件再跑，而且先在副本上试、通过才写真文件。
+
+## 🎭 面具栏（用户设定）· v1.14.0 新增
+
+鼠鼠口袋里多了第二个模块：**面具**（顶部标签页切换：番外 | 面具）。
+
+- 列出所有用户设定（头像 + 名字），**当前戴着的那个有白框和「当前」角标**
+- **点一下就换面具** —— 不自己改数据，而是**点酒馆自己面具列表里那一项**，走原生切换逻辑，最稳
+- **新建面具**：点开酒馆自己的加面具流程（#add_avatar_button，选图 → 起名）
+
+### 数据怎么读的
+
+| 需要 | 来源 |
+|---|---|
+| 面具清单（id → 名字） | SillyTavern.getContext().powerUserSettings.personas（实测可读 ✓），读不到退回扫 #user_avatar_block 的 DOM |
+| 当前面具 | #user_avatar_block .avatar-container.selected 的头像 file 参数 |
+| 缩略图 | /thumbnail?type=persona&file=xxx（跟酒馆自己用的一样） |
+| 切换 | 点 #user_avatar_block 里对应那一项（酒馆原生 handler） |
+| 新建 | 点 #add_avatar_button（酒馆原生的隐藏 file input） |
+
+顺带把面板的模块容器做通了：标签页现在**能点、会切换**，以后加功能就是往 ORB_MODULES 里加一项 + 写个 render。
