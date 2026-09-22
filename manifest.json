@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "RAY13465",
-  "version": "1.22.1",
+  "version": "1.23.0",
   "generate_interceptor": "shushuPanelInterceptor",
   "description": "鼠鼠小助手：思维链收纳（三层防护，续写不再把思维链吐回正文）+ 角色管理面板模块化（按钮 → 模块 → 分区，桌面/手机两套布局）+ 8 种角色卡样式（可实时切换）+ 头像高清化 + 角色详情页版头 + 导入即更新（认卡里姓名/人设重合度，重复就问你是更新还是另存，更新后自动补回局部正则/收藏/世界书绑定）。"
 }
