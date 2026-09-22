@@ -4105,7 +4105,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.27.2';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.28.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5330,6 +5330,7 @@ function orbPanelHTML() {
         + '" data-orb-tab="' + m.id + '"><i class="fa-solid ' + m.icon + '"></i>' + esc(m.name) + '</span>').join('');
     return '<div class="ssp-orb-head"><span class="ssp-orb-logo"></span>'
         + '<div class="ssp-orb-title"><b>鼠鼠口袋</b><small>悬浮球 · ' + ORB_MODULES.length + ' 个模块</small></div>'
+        + '<span class="ssp-pbtn" data-orb-retract="1" title="收回悬浮球（之后从酒馆「扩展」列表里的鼠鼠面板再打开）"><i class="fa-solid fa-eye-slash"></i></span>'
         + '<span class="ssp-pbtn" data-orb-close="1"><i class="fa-solid fa-xmark"></i></span></div>'
         + '<div class="ssp-orb-tabs">' + tabs + '</div>'
         + '<div class="ssp-orb-body">'
@@ -5663,7 +5664,17 @@ function bindOrb() {
         const t = ev.target;
         if (!t || !t.closest) return;
         if (t.closest('[data-orb-pclear]')) { orbPSearch = ''; renderOrbPanel(); return; }
-        if (t.closest('[data-orb-close]')) { closeOrb(); return; }
+        if (t.closest('[data-orb-close]')) { closeOrb(); return; }
+        /* 收回悬浮球：按钮就在面板里（用户要求做在球自己里面） */
+        if (t.closest('[data-orb-retract]')) {
+            getSettings().orbOn = false; save();
+            orbSetCollapsed(true, true);
+            closeOrb();
+            const b2 = document.getElementById('ssp_orb');
+            if (b2) setTimeout(() => { try { b2.style.display = 'none'; } catch (e) { } }, 260);
+            toast('球已收回。想再拿回来：扩展 → 🐭 鼠鼠小助手 → 打开鼠鼠面板 → 勾上「显示悬浮球」', 'info');
+            return;
+        }
         /* 美化页：清除搜索 / 返回 / 用这个 / 绑定 / 选角色 / 自动开关 */
         if (t.closest('[data-orb-thclear]')) { orbThSearch = ''; renderOrbPanel(); return; }
         if (t.closest('[data-orb-themeback]')) { orbThemeBinding = null; renderOrbPanel(); return; }
