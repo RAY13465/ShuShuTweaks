@@ -515,7 +515,7 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     border: 1px solid rgba(255, 255, 255, .22);
     box-shadow: 0 6px 20px rgba(0, 0, 0, .5);
     touch-action: none; user-select: none;
-    transition: transform .16s ease, box-shadow .16s ease;
+    transition: transform .16s ease, box-shadow .16s ease, left .22s cubic-bezier(.4,0,.2,1), top .22s cubic-bezier(.4,0,.2,1);
 }
 #ssp_orb:hover { transform: scale(1.06); box-shadow: 0 8px 26px rgba(0, 0, 0, .62); }
 #ssp_orb.moving { cursor: grabbing; transform: scale(1.1); }
@@ -717,7 +717,7 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     background: linear-gradient(#1c1c22, #0e0e12);
     border: 1px solid rgba(255, 255, 255, .2); color: rgba(255, 255, 255, .78);
     font-size: 14px; box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
-    transition: transform .16s ease, border-color .16s ease, color .16s ease;
+    transition: transform .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease;
     user-select: none; touch-action: none;
 }
 .ssp-orb-wand:hover { transform: scale(1.08); border-color: rgba(255, 255, 255, .6); color: #fff; }

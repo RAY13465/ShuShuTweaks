@@ -4105,7 +4105,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.25.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.25.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5355,13 +5355,31 @@ function mountOrb() {
     return true;
 }
 
-/** 收纳 / 展开悬浮球（魔法棒控制；silent=true 时不弹提示、不落盘，用于初始化） */
+/** 收纳 / 展开悬浮球（魔法棒控制；silent=true 时不弹提示、不落盘，用于初始化）
+    ⚠️ 收纳时把球**移动到魔法棒的位置**再缩小淡出 —— 用户要的是"收进那颗魔法棒里"，
+       不是原地消失。展开时再飞回原位（位置由 orbEdge 决定）。 */
 function orbSetCollapsed(on, silent) {
     orbCollapsed = Boolean(on);
     const ball = document.getElementById('ssp_orb');
     const wand = document.getElementById('ssp_orb_wand');
     if (ball && ball.classList) ball.classList.toggle('ssp-collapsed', orbCollapsed);
     if (wand && wand.classList) wand.classList.toggle('active', orbCollapsed);
+    if (ball) {
+        if (orbCollapsed && wand) {
+            /* 目标点 = 魔法棒中心（球缩到很小，所以直接用中心对齐即可） */
+            const r = wand.getBoundingClientRect();
+            const w = ball.offsetWidth || 52;
+            ball.dataset.sspFly = '1';
+            ball.style.left = Math.round(r.left + r.width / 2 - w / 2) + 'px';
+            ball.style.top = Math.round(r.top + r.height / 2 - w / 2) + 'px';
+        } else if (ball.dataset.sspFly) {
+            /* 飞回原位（按离边距离算） */
+            const w = ball.offsetWidth || 52, h = ball.offsetHeight || 52;
+            ball.style.left = Math.round(window.innerWidth - w - orbEdge.right) + 'px';
+            ball.style.top = Math.round(window.innerHeight - h - orbEdge.bottom) + 'px';
+            delete ball.dataset.sspFly;
+        }
+    }
     if (!silent) {
         getSettings().orbCollapsed = orbCollapsed;
         save();
