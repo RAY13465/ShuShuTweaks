@@ -4105,7 +4105,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.28.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.29.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4374,36 +4374,54 @@ function reclaim(reason) {
      ③ 重画面板只换面板**内部**，绝不重画整个容器 —— 否则球会跟着被替换掉。
    ========================================================================== */
 
-/* ===== 扩展程序展开栏里的「鼠鼠口袋」入口（v1.27.0）=====
-   酒馆的「扩展程序」菜单是**每次打开临时造一个 Popup**（scripts/extensions.js），
-   所以不能往某个常驻容器里挂 —— 得在它出现后，找到本扩展那一条（.extension_block，
-   条里有 .extension_name 和 .extension_actions），把按钮塞进 .extension_actions。
-   菜单每次打开都会重建，所以用 setInterval 定期补挂（很轻，没找到就直接返回）。 */
+/* ===== 扩展程序展开栏里的两个选项（v1.29.0）=====
+   用户给的这份 HTML 就是真实结构：容器是 #extensionsMenu（点魔杖才出现），
+   条目 = <div class="list-group-item flex-container flexGap5 interactable" role="listitem">
+          + <div class="extensionsMenuExtensionButton">图标</div> + <span>文字</span>
+   所以这里照抄那套写法，往 #extensionsMenu 里追加两条：
+     ① 鼠鼠口袋（打开面板，球收着也能开）  ② 收回悬浮球
+   栏是点开时才生成的，用定时器补挂（800ms 一次，没找到就直接返回）。 */
 function mountPocketMenuEntry() {
-    const blocks = document.querySelectorAll('.extension_block');
-    for (let i = 0; i < blocks.length; i++) {
-        const blk = blocks[i];
-        const nameEl = blk.querySelector('.extension_name');
-        const nm = nameEl ? (nameEl.textContent || '') : '';
-        if (!/鼠鼠|ShuShu/i.test(nm)) continue;
-        if (blk.querySelector('#ssp_menu_pocket')) return true;
-        const host = blk.querySelector('.extension_actions') || blk;
-        const btn = document.createElement('div');
-        btn.id = 'ssp_menu_pocket';
-        btn.className = 'menu_button menu_button_icon interactable';
-        btn.title = '鼠鼠口袋（番外 / 面具 / 预设 / 美化 / 存档）';
-        btn.innerHTML = '<i class="fa-solid fa-mouse"></i>';
-        btn.addEventListener('click', ev => { ev.stopPropagation(); openOrb(); });
-        host.append(btn);
-        return true;
+    const menu = document.getElementById('extensionsMenu');
+    if (!menu) return false;
+    if (document.getElementById('ssp_menu_pocket')) return true;
+
+    function mk(id, icon, text, title, fn) {
+        const row = document.createElement('div');
+        row.id = id;
+        row.className = 'list-group-item flex-container flexGap5 interactable';
+        row.setAttribute('tabindex', '0');
+        row.setAttribute('role', 'listitem');
+        if (title) row.setAttribute('title', title);
+        const ic = document.createElement('div');
+        ic.className = 'fa-solid ' + icon + ' extensionsMenuExtensionButton';
+        const sp = document.createElement('span');
+        sp.textContent = text;
+        row.append(ic, sp);
+        row.addEventListener('click', function (ev) { ev.stopPropagation(); fn(); });
+        return row;
     }
-    return false;
+
+    menu.append(mk('ssp_menu_pocket', 'fa-mouse', '鼠鼠口袋', '打开鼠鼠口袋面板（番外 / 面具 / 预设 / 美化 / 存档）', function () {
+        try { openOrb(); } catch (e) { toast('打开鼠鼠口袋失败：' + e.message, 'warning'); }
+    }));
+
+    menu.append(mk('ssp_menu_retract', 'fa-eye-slash', '收回悬浮球', '把右下角那颗球收起来（之后还能用上面那条打开面板）', function () {
+        getSettings().orbOn = false;
+        try { save(); } catch (e) { }
+        try { orbSetCollapsed(true, true); } catch (e) { }
+        const b0 = document.getElementById('ssp_orb');
+        if (b0) setTimeout(function () { try { b0.style.display = 'none'; } catch (e) { } }, 260);
+        toast('球已收回；想放出来：鼠鼠面板里勾「显示悬浮球」', 'info');
+    }));
+
+    return true;
 }
 function bindPocketMenuEntry() {
     if (bindPocketMenuEntry.done) return false;
     bindPocketMenuEntry.done = true;
     mountPocketMenuEntry();
-    try { setInterval(mountPocketMenuEntry, 1500); } catch (e) { }
+    try { setInterval(mountPocketMenuEntry, 800); } catch (e) { }
     return true;
 }
 /* ===== 扩展程序入口 结束 ===== */
@@ -4441,7 +4459,7 @@ function hdSwapAll(root) {
 function bindHdAvatars() {
     if (bindHdAvatars.done) return false;
     bindHdAvatars.done = true;
-    const n0 = hdSwapAll(document);
+    const n0 = hdSwapAll(document);
     try { window.__sspHdCount = n0; console.log('[鼠鼠小助手] 高清头像：初始替换 ' + n0 + ' 张（之后新出现的图会自动跟上）'); } catch (e) { }
     try {
         new MutationObserver(muts => {
@@ -4450,9 +4468,9 @@ function bindHdAvatars() {
                 mu.addedNodes && mu.addedNodes.forEach(node => {
                     if (!node || node.nodeType !== 1) return;
                     if (node.tagName === 'IMG') hdSwapOne(node);
-                    else if (node.querySelectorAll) {
-                        const k = hdSwapAll(node);
-                        if (k) { try { window.__sspHdCount = (window.__sspHdCount || 0) + k; } catch (e) { } }
+                    else if (node.querySelectorAll) {
+                        const k = hdSwapAll(node);
+                        if (k) { try { window.__sspHdCount = (window.__sspHdCount || 0) + k; } catch (e) { } }
                     }
                 });
             });
@@ -5330,7 +5348,7 @@ function orbPanelHTML() {
         + '" data-orb-tab="' + m.id + '"><i class="fa-solid ' + m.icon + '"></i>' + esc(m.name) + '</span>').join('');
     return '<div class="ssp-orb-head"><span class="ssp-orb-logo"></span>'
         + '<div class="ssp-orb-title"><b>鼠鼠口袋</b><small>悬浮球 · ' + ORB_MODULES.length + ' 个模块</small></div>'
-        + '<span class="ssp-pbtn" data-orb-retract="1" title="收回悬浮球（之后从酒馆「扩展」列表里的鼠鼠面板再打开）"><i class="fa-solid fa-eye-slash"></i></span>'
+        + '<span class="ssp-pbtn" data-orb-retract="1" title="收回悬浮球（之后从酒馆「扩展」列表里的鼠鼠面板再打开）"><i class="fa-solid fa-eye-slash"></i></span>'
         + '<span class="ssp-pbtn" data-orb-close="1"><i class="fa-solid fa-xmark"></i></span></div>'
         + '<div class="ssp-orb-tabs">' + tabs + '</div>'
         + '<div class="ssp-orb-body">'
@@ -5357,6 +5375,8 @@ function renderOrbPanel() {
 
 function openOrb() {
     mountOrb();
+    /* 球被收回（orbOn=false）时，从「扩展程序」栏开面板不该把球带出来 */
+    try { const bb = document.getElementById('ssp_orb'); if (bb && getSettings().orbOn === false) bb.style.display = 'none'; } catch (e) { }
     const root = document.getElementById('ssp_orb_root');
     if (root && root.classList) root.classList.add('on');
     orbOpenNow = true; orbEditing = null;
@@ -5420,7 +5440,7 @@ function mountOrb() {
        球的展开与否存进设置（orbCollapsed），刷新后保持。 */
     const oldWand = document.getElementById('ssp_orb_wand'); if (oldWand) oldWand.remove();
     const wand = document.createElement('div');
-    wand.className = 'ssp-orb-wand';
+    wand.className = 'ssp-orb-wand';
     wand.style.display = 'none';   /* 用户不要这个自建魔法棒；入口改挂到酒馆「扩展程序」展开栏 */
     wand.id = 'ssp_orb_wand';
     wand.setAttribute('data-orb-wand', '1');
@@ -5664,16 +5684,16 @@ function bindOrb() {
         const t = ev.target;
         if (!t || !t.closest) return;
         if (t.closest('[data-orb-pclear]')) { orbPSearch = ''; renderOrbPanel(); return; }
-        if (t.closest('[data-orb-close]')) { closeOrb(); return; }
-        /* 收回悬浮球：按钮就在面板里（用户要求做在球自己里面） */
-        if (t.closest('[data-orb-retract]')) {
-            getSettings().orbOn = false; save();
-            orbSetCollapsed(true, true);
-            closeOrb();
-            const b2 = document.getElementById('ssp_orb');
-            if (b2) setTimeout(() => { try { b2.style.display = 'none'; } catch (e) { } }, 260);
-            toast('球已收回。想再拿回来：扩展 → 🐭 鼠鼠小助手 → 打开鼠鼠面板 → 勾上「显示悬浮球」', 'info');
-            return;
+        if (t.closest('[data-orb-close]')) { closeOrb(); return; }
+        /* 收回悬浮球：按钮就在面板里（用户要求做在球自己里面） */
+        if (t.closest('[data-orb-retract]')) {
+            getSettings().orbOn = false; save();
+            orbSetCollapsed(true, true);
+            closeOrb();
+            const b2 = document.getElementById('ssp_orb');
+            if (b2) setTimeout(() => { try { b2.style.display = 'none'; } catch (e) { } }, 260);
+            toast('球已收回。想再拿回来：扩展 → 🐭 鼠鼠小助手 → 打开鼠鼠面板 → 勾上「显示悬浮球」', 'info');
+            return;
         }
         /* 美化页：清除搜索 / 返回 / 用这个 / 绑定 / 选角色 / 自动开关 */
         if (t.closest('[data-orb-thclear]')) { orbThSearch = ''; renderOrbPanel(); return; }
