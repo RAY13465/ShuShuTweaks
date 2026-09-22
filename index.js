@@ -3838,139 +3838,282 @@ function mountDrawer() {
     wrap.id = 'ssp_drawer';
     wrap.className = 'inline-drawer';
     wrap.innerHTML = `<div class="inline-drawer-toggle inline-drawer-header"><b>🐭 鼠鼠小助手</b>
-        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
-        <div class="inline-drawer-content">
-        <div class="ssp-note">把角色面板做成可装配的模块：<b>头部 / 列表 / 底部栏</b> 三个分区，模块可以 1~2 层，每层放任意按钮。
-        <b>桌面和手机是两套独立布局。</b><br>入口在角色面板顶部那几排下面的「▦ 装配面板」。</div>
-        <div class="ssp-drawer-row">
-        <div class="menu_button" data-ssp-open="1">展开装配面板</div>
-        <div class="menu_button" data-ssp-restore="1">恢复原版</div>
-        <label class="checkbox_label"><input type="checkbox" data-ssp-enabled="1" ${getSettings().enabled ? 'checked' : ''}>
-        <span>启用（关掉＝立刻还原成原版）</span></label></div>
-        <div class="ssp-cardsec ssp-sortsec">
-        <div class="ssp-crow"><span class="ssp-clabel">手动排序</span>
-        <div class="menu_button" data-ssp-sortmode="1">进入拖拽排序</div>
-        <div class="menu_button" data-ssp-clearorder="1">清空我的顺序</div></div>
-        <div class="ssp-crow"><span class="ssp-clabel">按我的顺序</span>
-        <label class="ssp-ccheck"><input type="checkbox" data-ssp-useorder="1" ${getSettings().useCardOrder !== false ? 'checked' : ''}>
-        <span>自定义顺序里有 ${(getSettings().cardOrder || []).length} 个角色</span></label></div>
-        <div class="ssp-note" style="opacity:.6">进排序模式后拖动角色卡即可；顺序会记住，翻页 / 重画后仍然生效。</div></div>
-        <div class="ssp-cardsec">
-        <div class="ssp-crow"><span class="ssp-clabel">详情页版头</span>
-        <label class="ssp-ccheck"><input type="checkbox" data-ssp-detail-toggle="1" ${detailEnabled() ? 'checked' : ''}>
-        <span>重排「点开角色后」那个面板</span></label></div>
-        <div class="ssp-crow"><span class="ssp-clabel">版头样式</span>
-        <select class="text_pole ssp-cinput" data-ssp-detail-style="1">
-            <option value="about"${detailStyle() === 'about' ? ' selected' : ''}>About. 字段列（大头像 + 一列字段）</option>
-            <option value="video"${detailStyle() === 'video' ? ' selected' : ''}>视频页（头像当播放器 + 点赞栏 + 订阅）</option>
-        </select></div>
-        <div class="ssp-note" style="opacity:.6">About 版：左边大头像、右边一列从角色卡描述里自动抓的字段。
-        视频页版：头像拉成 16:9 当播放器，标签变话题 chips、角色卡按钮变点赞栏、收藏变「订阅」。
-        两种都保留下面的标签 / 创作者注释 / 角色描述。</div></div>
-        <div class="ssp-cardsec">
-        <div class="ssp-crow"><span class="ssp-clabel">思维链收纳</span>
-        <label class="ssp-ccheck"><input type="checkbox" data-ssp-thinkshield="1" ${getSettings().thinkShield !== false ? 'checked' : ''}>
-        <span>把 &lt;think&gt; 之类的思维链挪进酒馆原生折叠块（续写不再吐回正文）</span></label></div>
-        <div class="ssp-crow"><span class="ssp-clabel">加载时清理</span>
-        <label class="ssp-ccheck"><input type="checkbox" data-ssp-thinkload="1" ${getSettings().thinkOnChatLoad !== false ? 'checked' : ''}>
-        <span>切换 / 加载聊天时顺手收纳历史消息里的思维链</span></label></div>
-        <div class="ssp-crow"><span class="ssp-clabel">思维链标签</span>
-        <input class="ssp-cinput" type="text" data-ssp-thinktags="1" value="${esc(getSettings().thinkTags || 'think,thinking,thought')}"></div>
-        <div class="ssp-note" style="opacity:.6">思维链**不会被删除**：都进了消息上方那个「思考」折叠块，点开能看、能复制、能编辑。
-        酒馆自带「高级格式化 → Reasoning → Add to Prompts」打开后，折叠块内容照样能送回模型。</div></div>
-        <div class="ssp-cardsec">
-        <div class="ssp-crow"><span class="ssp-clabel">导入即更新</span>
-        <label class="ssp-ccheck"><input type="checkbox" data-ssp-importmerge="1" ${importMergeOn() ? 'checked' : ''}>
-        <span>「导入」认得出已有的卡时，问你更新还是另存（把替换/更新也并进来）</span></label></div>
-        ${importMergeRow()}
-        <div class="ssp-note" style="opacity:.6">酒馆原来的「导入」和「更多… → Replace/Update」打的是同一个接口，
-        区别只是带不带 preserved_name。开了这个：认卡先看**卡里的姓名**，再看**人设文字重合度**（≥ 上面那个阈值就当同一张卡），
-        都没有才退回文件名；认出来会问你「更新 / 另存为新角色」，认不出（新卡）就直接导进来不弹窗。</div></div>
-        <div id="ssp_cardslot">${cardDrawerHTML()}</div></div>`;
-    wrap.addEventListener('click', ev => {
-        if (ev.target.closest('[data-ssp-open]')) { boxOpen = true; ensureMount(); renderMount(); }
-        if (ev.target.closest('[data-ssp-sortmode]')) { setSortMode(!sortMode); return; }
-        if (ev.target.closest('[data-ssp-color-reset]')) { setCardColor('songBg', '#4a2b7d', true, wrap); return; }
-        if (ev.target.closest('[data-ssp-clearorder]')) { clearCardOrder(); toast('已清空自定义顺序', 'info'); return; }
-        if (ev.target.closest('[data-ssp-card-measure]')) {
-            const box = wrap.querySelector('[data-ssp-card-out2]');
-            if (box) { box.hidden = false; box.textContent = measureCards(); }
-        }
-        if (ev.target.closest('[data-ssp-restore]')) {
-            const s = getSettings();
-            s.devices[activeDevice()] = defaultLayout(activeDevice());
-            commit(); toast('已恢复成酒馆原版', 'info');
-        }
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
+            <div class="inline-drawer-content">
+            <div class="ssp-note">思维链收纳 + 角色面板装配 + 8 种角色卡样式 + 详情页版头 + 导入即更新。
+            设置都在下面那个独立的扁平面板里（不用在一堆扩展里翻）。</div>
+            <div class="ssp-drawer-row">
+            <div class="menu_button" data-ssp-panel-open="1">打开鼠鼠面板</div>
+            <label class="checkbox_label"><input type="checkbox" data-ssp-enabled="1" ${getSettings().enabled ? 'checked' : ''}>
+            <span>启用（关掉＝立刻还原成原版）</span></label></div></div>`;
+wrap.addEventListener('click', ev => {
+        if (ev.target.closest && ev.target.closest('[data-ssp-panel-open]')) openSettingsPanel();
     });
-    /* 下拉框 / 复选框 / 文字框：改完立刻生效并落盘 */
     wrap.addEventListener('change', ev => {
-        const t = ev.target;
-        if (!t || !t.dataset) return;
-        const c = cardStyleSettings();
-        if (t.dataset.sspUseorder) { getSettings().useCardOrder = Boolean(t.checked); save(); applyCardOrder(); return; }
-        if (t.dataset.sspUseorder) { getSettings().useCardOrder = Boolean(t.checked); save(); applyCardOrder(); return; }
-        if (t.dataset.sspCardStyle !== undefined) {
-            switchCardStyle(t.value);
-            save(); applyCardStyle(); refreshCardSection(); return;
-        }
-        if (t.dataset.sspCardSelect) { c[t.dataset.sspCardSelect] = t.value; save(); applyCardStyle(); return; }
-        if (t.dataset.sspDetailStyle) { getSettings().detailStyle = (t.value === 'video' ? 'video' : 'about'); save(); applyDetailHeader(); return; }
-        if (t.dataset.sspImportmerge !== undefined) {
-            getSettings().importMerge = Boolean(t.checked);
-            save();
-            if (t.checked) bindImportMerge(); else restoreImportMerge();
-            toast(t.checked ? '导入即更新：开' : '导入即更新：已关（酒馆原样）', 'info');
-            return;
-        }
-        if (t.dataset.sspImpsim !== undefined) {
-            getSettings().importSimThreshold = Math.min(0.95, Math.max(0.2, Number(t.value) / 100));
-            save();
-            const out = wrap.querySelector('[data-ssp-impout]');
-            if (out) out.textContent = t.value + '%';
-            return;
-        }
-        if (t.dataset.sspThinkshield !== undefined) { getSettings().thinkShield = Boolean(t.checked); save(); toast(t.checked ? '思维链收纳：开' : '思维链收纳：关', 'info'); return; }
-        if (t.dataset.sspThinkload !== undefined) { getSettings().thinkOnChatLoad = Boolean(t.checked); save(); return; }
-        if (t.dataset.sspThinktags !== undefined) { getSettings().thinkTags = String(t.value || 'think,thinking,thought'); save(); return; }
-        if (t.dataset.sspCardCheck) { c[t.dataset.sspCardCheck] = Boolean(t.checked); save(); applyCardStyle(); return; }
-        if (t.dataset.sspCardColor) { setCardColor(t.dataset.sspCardColor, t.dataset.sspColorReset ? '#4a2b7d' : t.value, true); return; }
-        if (t.dataset.sspCardText) { c[t.dataset.sspCardText] = t.value; save(); applyCardStyle(); return; }
-        if (t.dataset.sspDetailToggle !== undefined) {
-            getSettings().detailHeader = Boolean(t.checked);
-            save();
-            applyDetailHeader();
-            toast(t.checked ? '详情页版头：开' : '详情页版头：已还原成原版', 'info');
-            return;
-        }
-        if (!t.dataset.sspEnabled) return;
-        const s = getSettings();
-        s.enabled = Boolean(t.checked);
+        const t2 = ev.target;
+        if (!t2 || t2.dataset.sspEnabled === undefined) return;
+        const s2 = getSettings();
+        s2.enabled = Boolean(t2.checked);
         save();
-        if (s.enabled) { apply(); ensureMount(); } else { restoreAll(); }
-        toast(s.enabled ? '已启用' : '已关闭并还原', 'info');
+        if (s2.enabled) { apply(); ensureMount(); } else { restoreAll(); }
+        toast(s2.enabled ? '已启用' : '已关闭并还原', 'info');
     });
-    /* 滑块：拖动实时生效，松手（change）才写设置，免得刷爆存档；颜色输入同理 */
-    wrap.addEventListener('input', ev => {
-        const t = ev.target;
-        if (t?.dataset?.sspCardColor && !t.dataset.sspColorReset) { setCardColor(t.dataset.sspCardColor, t.value, false, wrap); return; }
-        if (t?.dataset?.sspImpsim !== undefined) {
-            const out = wrap.querySelector('[data-ssp-impout]');
-            if (out) out.textContent = t.value + '%';
-            getSettings().importSimThreshold = Math.min(0.95, Math.max(0.2, Number(t.value) / 100));
-            return;
-        }
-        const k = t?.dataset?.sspCardKnob;
-        if (!k) return;
-        const c = cardStyleSettings();
-        c[k] = Number(t.value);
-        const out = wrap.querySelector('[data-ssp-card-out="' + k + '"]');
-        if (out) out.textContent = t.value + (k === 'fadeStop' || k === 'overlay' ? '%' : 'px');
-        applyCardStyle();
-    });
-    wrap.addEventListener('change', ev => {
-        if (ev.target?.dataset?.sspCardKnob) save();
-    });
+
     host.append(wrap);
+    return true;
+}
+
+/* 所有设置项的事件逻辑集中在这儿；面板和抽屉共用（root 传谁就绑谁） */
+function bindSettings(root) {
+    const wrap = root;
+        wrap.addEventListener('click', ev => {
+            if (ev.target.closest('[data-ssp-open]')) { boxOpen = true; ensureMount(); renderMount(); }
+            if (ev.target.closest('[data-ssp-sortmode]')) { setSortMode(!sortMode); return; }
+            if (ev.target.closest('[data-ssp-color-reset]')) { setCardColor('songBg', '#4a2b7d', true, wrap); return; }
+            if (ev.target.closest('[data-ssp-clearorder]')) { clearCardOrder(); toast('已清空自定义顺序', 'info'); return; }
+            if (ev.target.closest('[data-ssp-card-measure]')) {
+                const box = wrap.querySelector('[data-ssp-card-out2]');
+                if (box) { box.hidden = false; box.textContent = measureCards(); }
+            }
+            if (ev.target.closest('[data-ssp-restore]')) {
+                const s = getSettings();
+                s.devices[activeDevice()] = defaultLayout(activeDevice());
+                commit(); toast('已恢复成酒馆原版', 'info');
+            }
+        });
+        /* 下拉框 / 复选框 / 文字框：改完立刻生效并落盘 */
+        wrap.addEventListener('change', ev => {
+            const t = ev.target;
+            if (!t || !t.dataset) return;
+            const c = cardStyleSettings();
+            if (t.dataset.sspUseorder) { getSettings().useCardOrder = Boolean(t.checked); save(); applyCardOrder(); return; }
+            if (t.dataset.sspUseorder) { getSettings().useCardOrder = Boolean(t.checked); save(); applyCardOrder(); return; }
+            if (t.dataset.sspCardStyle !== undefined) {
+                switchCardStyle(t.value);
+                save(); applyCardStyle(); refreshCardSection(); return;
+            }
+            if (t.dataset.sspCardSelect) { c[t.dataset.sspCardSelect] = t.value; save(); applyCardStyle(); return; }
+            if (t.dataset.sspDetailStyle) { getSettings().detailStyle = (t.value === 'video' ? 'video' : 'about'); save(); applyDetailHeader(); return; }
+            if (t.dataset.sspImportmerge !== undefined) {
+                getSettings().importMerge = Boolean(t.checked);
+                save();
+                if (t.checked) bindImportMerge(); else restoreImportMerge();
+                toast(t.checked ? '导入即更新：开' : '导入即更新：已关（酒馆原样）', 'info');
+                return;
+            }
+            if (t.dataset.sspImpsim !== undefined) {
+                getSettings().importSimThreshold = Math.min(0.95, Math.max(0.2, Number(t.value) / 100));
+                save();
+                const out = wrap.querySelector('[data-ssp-impout]');
+                if (out) out.textContent = t.value + '%';
+                return;
+            }
+            if (t.dataset.sspThinkshield !== undefined) { getSettings().thinkShield = Boolean(t.checked); save(); toast(t.checked ? '思维链收纳：开' : '思维链收纳：关', 'info'); return; }
+            if (t.dataset.sspThinkload !== undefined) { getSettings().thinkOnChatLoad = Boolean(t.checked); save(); return; }
+            if (t.dataset.sspThinktags !== undefined) { getSettings().thinkTags = String(t.value || 'think,thinking,thought'); save(); return; }
+            if (t.dataset.sspCardCheck) { c[t.dataset.sspCardCheck] = Boolean(t.checked); save(); applyCardStyle(); return; }
+            if (t.dataset.sspCardColor) { setCardColor(t.dataset.sspCardColor, t.dataset.sspColorReset ? '#4a2b7d' : t.value, true); return; }
+            if (t.dataset.sspCardText) { c[t.dataset.sspCardText] = t.value; save(); applyCardStyle(); return; }
+            if (t.dataset.sspDetailToggle !== undefined) {
+                getSettings().detailHeader = Boolean(t.checked);
+                save();
+                applyDetailHeader();
+                toast(t.checked ? '详情页版头：开' : '详情页版头：已还原成原版', 'info');
+                return;
+            }
+            if (!t.dataset.sspEnabled) return;
+            const s = getSettings();
+            s.enabled = Boolean(t.checked);
+            save();
+            if (s.enabled) { apply(); ensureMount(); } else { restoreAll(); }
+            toast(s.enabled ? '已启用' : '已关闭并还原', 'info');
+        });
+        /* 滑块：拖动实时生效，松手（change）才写设置，免得刷爆存档；颜色输入同理 */
+        wrap.addEventListener('input', ev => {
+            const t = ev.target;
+            if (t?.dataset?.sspCardColor && !t.dataset.sspColorReset) { setCardColor(t.dataset.sspCardColor, t.value, false, wrap); return; }
+            if (t?.dataset?.sspImpsim !== undefined) {
+                const out = wrap.querySelector('[data-ssp-impout]');
+                if (out) out.textContent = t.value + '%';
+                getSettings().importSimThreshold = Math.min(0.95, Math.max(0.2, Number(t.value) / 100));
+                return;
+            }
+            const k = t?.dataset?.sspCardKnob;
+            if (!k) return;
+            const c = cardStyleSettings();
+            c[k] = Number(t.value);
+            const out = wrap.querySelector('[data-ssp-card-out="' + k + '"]');
+            if (out) out.textContent = t.value + (k === 'fadeStop' || k === 'overlay' ? '%' : 'px');
+            applyCardStyle();
+        });
+        wrap.addEventListener('change', ev => {
+            if (ev.target?.dataset?.sspCardKnob) save();
+        });
+}
+
+
+/* ==========================================================================
+   🐭 鼠鼠面板：扁平化设置面板
+   --------------------------------------------------------------------------
+   以前所有设置都挤在酒馆「扩展」列表里那个折叠抽屉里 —— 十几个扩展里根本找不到，
+   而且一行一个原生 checkbox 确实不好看。现在做成一个独立的扁平面板：
+     · 分区卡片 + 发丝分隔线 + 扁平开关 / 滑块 / 输入框，不用渐变、不用高光
+     · 颜色全部走酒馆主题变量（--SmartTheme*），你换主题它自动跟着变
+     · 入口：扩展列表里那个抽屉中的「打开鼠鼠面板」按钮；Esc 或点背景也能关
+   关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
+   所以 bindSettings() 里那一大段逻辑一行都不用改。
+   ========================================================================== */
+const PANEL_VERSION = '1.12.2';   // 面板上显示的版本号（改 manifest 时记得一起改）
+let panelEl = null;
+
+/** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
+function fsw(attr, on) {
+    return `<label class="ssp-sw"><input type="checkbox" ${attr} ${on ? 'checked' : ''}><i></i></label>`;
+}
+
+/** 一行：左边标题+小字说明，右边控件 */
+function frow(label, desc, ctl) {
+    return `<div class="ssp-row"><div class="ssp-lab">${esc(label)}${desc ? `<small>${esc(desc)}</small>` : ''}</div>`
+        + `<div class="ssp-ctl">${ctl}</div></div>`;
+}
+
+function settingsPanelHTML() {
+    const s = getSettings();
+    const c = cardStyleSettings();
+    const orderCount = (s.cardOrder || []).length;
+    const pct = Math.round(importSimThreshold() * 100);
+
+    const sec = (icon, title, inner, note) => `
+      <section class="ssp-sec">
+        <h4><i class="fa-solid ${icon}"></i>${esc(title)}</h4>
+        <div class="ssp-secbody">${inner}${note ? `<div class="ssp-fnote">${note}</div>` : ''}</div>
+      </section>`;
+
+    /* —— 面板装配 —— */
+    const secBuild = sec('fa-table-cells-large', '面板装配', [
+        frow('启用面板工坊', '关掉＝立刻还原成酒馆原版', fsw('data-ssp-enabled="1"', s.enabled)),
+        frow('装配面板', '拖拽排布模块与按钮（桌面 / 手机两套布局）',
+            '<div class="ssp-pbtn" data-ssp-open="1"><i class="fa-solid fa-up-right-and-down-left-from-center"></i>展开装配面板</div>'),
+        frow('恢复原版', '把当前设备的布局还原成酒馆默认',
+            '<div class="ssp-pbtn" data-ssp-restore="1"><i class="fa-solid fa-rotate-left"></i>恢复原版</div>'),
+    ].join(''));
+
+    /* —— 角色列表排序 —— */
+    const secSort = sec('fa-arrow-down-wide-short', '角色列表排序', [
+        frow('手动排序', '进入后拖动角色卡即可',
+            '<div class="ssp-pbtn" data-ssp-sortmode="1"><i class="fa-solid fa-hand-pointer"></i>进入拖拽排序</div>'),
+        frow('清空我的顺序', '只清顺序，不动角色卡',
+            '<div class="ssp-pbtn" data-ssp-clearorder="1"><i class="fa-solid fa-eraser"></i>清空</div>'),
+        frow('按我的顺序', `自定义顺序里有 ${orderCount} 个角色`, fsw('data-ssp-useorder="1"', s.useCardOrder !== false)),
+    ].join(''));
+
+    /* —— 角色卡样式（沿用原来那块渲染器，只是搬进面板）—— */
+    const secCard = `<section class="ssp-sec">
+        <h4><i class="fa-solid fa-image"></i>角色卡样式</h4>
+        <div class="ssp-secbody" id="ssp_cardslot">${cardDrawerHTML()}</div></section>`;
+
+    /* —— 详情页版头 —— */
+    const secDetail = sec('fa-id-card', '角色详情页版头', [
+        frow('重排详情面板', '点开角色后那个面板（About / 视频页两套）',
+            fsw('data-ssp-detail-toggle="1"', detailEnabled())),
+        frow('版头样式', '', `<select class="ssp-inp" data-ssp-detail-style="1">
+            <option value="about"${detailStyle() === 'about' ? ' selected' : ''}>About. 字段列</option>
+            <option value="video"${detailStyle() === 'video' ? ' selected' : ''}>视频页（播放器皮肤）</option>
+        </select>`),
+    ].join(''), 'About 版＝左边大头像、右边一列从卡里自动抓的字段；视频页版＝头像拉成 16:9 当播放器，'
+        + '标签变话题 chips、按钮变点赞栏、收藏变「订阅」。两种都保留下面的标签 / 注释 / 描述。');
+
+    /* —— 导入即更新 —— */
+    const secImport = sec('fa-file-import', '导入即更新', [
+        frow('认出重复卡时问我', '把「导入 / 替换更新 / 从 URL 导入」并成一条路',
+            fsw('data-ssp-importmerge="1"', importMergeOn())),
+        frow('人设重合度阈值', '文字重合到这个程度就算同一张卡',
+            `<input class="ssp-range" type="range" min="30" max="90" step="5" value="${pct}" data-ssp-impsim="1">`
+            + `<b class="ssp-out" data-ssp-impout="1">${pct}%</b>`),
+    ].join(''), '认卡顺序：<b>卡里的姓名</b> → <b>人设文字重合度</b> → 文件名。认出重复会问你「更新这一张 / 另存为新角色」；'
+        + '更新后会自动补回局部正则 / 收藏 / 世界书绑定 / 深度提示。认不出的新卡直接导入，不弹窗。');
+
+    /* —— 思维链收纳 —— */
+    const secThink = sec('fa-brain', '思维链收纳', [
+        frow('收纳思维链', '续写不再把 &lt;think&gt; 吐回正文',
+            fsw('data-ssp-thinkshield="1"', s.thinkShield !== false)),
+        frow('加载时清理', '切换 / 加载聊天时顺手收纳历史消息',
+            fsw('data-ssp-thinkload="1"', s.thinkOnChatLoad !== false)),
+        frow('思维链标签', '逗号分隔',
+            `<input class="ssp-inp wide" type="text" data-ssp-thinktags="1" value="${esc(s.thinkTags || 'think,thinking,thought')}">`),
+    ].join(''), '思维链<b>不会被删除</b>：都进了消息上方的「思考」折叠块，点开能看、能复制、能编辑。'
+        + '想连流式输出那半截也不上屏，把酒馆自带「高级格式化 → Reasoning」的标签也打开。');
+
+    return `
+    <div class="ssp-p-mask" data-ssp-panel-close="1"></div>
+    <div class="ssp-p" id="ssp_panel" role="dialog" aria-label="鼠鼠小助手设置">
+      <div class="ssp-p-head">
+        <div class="ssp-p-logo">🐭</div>
+        <div class="ssp-p-title"><b>鼠鼠小助手</b><small>ShuShu Tweaks · v${PANEL_VERSION}</small></div>
+        <div class="ssp-p-x" data-ssp-panel-close="1" title="关闭"><i class="fa-solid fa-xmark"></i></div>
+      </div>
+      <div class="ssp-p-body">
+        ${secThink}${secCard}${secDetail}${secImport}${secBuild}${secSort}
+      </div>
+      <div class="ssp-p-foot">
+        <span>改完立刻生效并落盘，不用点保存</span>
+        <span class="ssp-p-foot-r">Esc 关闭</span>
+      </div>
+    </div>`;
+}
+
+/ 建面板（只建一次，建完留在 DOM 里，靠 .on 显隐） */
+function mountSettingsPanel() {
+    if (document.getElementById('ssp_panel')) return true;
+    if (!document.body) return false;
+    const box = document.createElement('div');
+    box.id = 'ssp_panel_root';
+    box.innerHTML = settingsPanelHTML();
+    document.body.append(box);
+    panelEl = document.getElementById('ssp_panel');
+    return true;
+}
+
+function panelOpen() { return !!(panelEl && panelEl.classList && panelEl.classList.contains('on')); }
+
+function openSettingsPanel() {
+    mountSettingsPanel();
+    bindSettingsOnce();
+    if (panelEl) {
+        panelEl.classList.add('on');
+        const box = document.getElementById('ssp_panel_root');
+        if (box && box.classList) box.classList.add('on');
+    }
+    return true;
+}
+
+function closeSettingsPanel() {
+    if (panelEl) panelEl.classList.remove('on');
+    const box = document.getElementById('ssp_panel_root');
+    if (box && box.classList) box.classList.remove('on');
+    return true;
+}
+
+function refreshCardSection() {
+    const slot = document.getElementById('ssp_cardslot');
+    if (slot) slot.innerHTML = cardDrawerHTML();
+    return true;
+}
+
+/** 面板只绑一次（用标记记着，重复调用不会叠监听） */
+function bindSettingsOnce() {
+    if (bindSettingsOnce.done) return false;
+    bindSettingsOnce.done = true;
+    const box = document.getElementById('ssp_panel_root');
+    if (box) {
+        bindSettings(box);                       // 老的设置逻辑整体复用（data-ssp-* 一模一样）
+        box.addEventListener('click', ev => {
+            if (ev.target.closest && ev.target.closest('[data-ssp-panel-close]')) closeSettingsPanel();
+        });
+    }
+    document.addEventListener('keydown', ev => {
+        if (ev.key === 'Escape' && panelOpen()) closeSettingsPanel();
+    });
     return true;
 }
 
@@ -4046,12 +4189,7 @@ function measureCards() {
     return lines.join('\n');
 }
 /** 重建「角色卡样式」那一段（换样式后滑块位置/下拉选中要跟着变；「原版」时整段收起） */
-function refreshCardSection() {
-    const wrap = document.getElementById('ssp_drawer');
-    if (!wrap) return;
-    const slot = wrap.querySelector('#ssp_cardslot');
-    if (slot) slot.innerHTML = cardDrawerHTML();
-}
+/* 旧版 refreshCardSection 已由面板里的新版取代（旧版只在抽屉里找槽位，抽屉已经没有槽位了） */
 
 
 /* ==========================================================================
@@ -4080,6 +4218,8 @@ function init() {
     const boot = () => {
         const mountOk = Boolean(ensureMount());
         const drawerOk = mountDrawer();
+    mountSettingsPanel();                                        // 扁平设置面板（点抽屉里的按钮打开）
+    bindSettingsOnce();
         if ((!mountOk || !drawerOk) && tries < 40) { tries += 1; globalThis.setTimeout?.(boot, 250); }
     };
     boot();
@@ -4131,6 +4271,7 @@ if (globalThis.__SSP_TEST__) {
         extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
         migrateTweaksSettings, TWEAKS_MODULE_NAME,
         restoreCardStyle, hdCardAvatars, cardDrawerHTML, mountDrawer, attrOf, setAttr,
+        mountSettingsPanel, openSettingsPanel, closeSettingsPanel, panelOpen, settingsPanelHTML, bindSettings, refreshCardSection,
         get boxOpen() { return boxOpen; }, set boxOpen(v) { boxOpen = v; },
         get renaming() { return renaming; }, set renaming(v) { renaming = v; },
         get drag() { return drag; }, set drag(v) { drag = v; },

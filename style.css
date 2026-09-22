@@ -263,3 +263,194 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-measure[hidden] { display: none; }
 /* 老行的「启用」勾选框：宽度交给酒馆会飘，这里锁死 */
 .ssp-drawer-row > .checkbox_label { flex: 0 0 auto; width: auto; margin: 0; }
+
+/* ==========================================================================
+   🐭 鼠鼠面板（扁平化设置面板）
+   --------------------------------------------------------------------------
+   设计约束：
+     · 扁平 —— 不用渐变、不用高光、不用多层阴影；靠「发丝线 + 一点点底色」分区
+     · 颜色全走酒馆主题变量（--SmartTheme*），换主题自动跟着变；强调色用 --SmartThemeQuoteColor
+     · 一行一个设置：左标题（+小字说明）右控件，行高统一 40px
+     · 开关 / 滑块 / 输入框都自己画（appearance:none），和原生控件长得不一样才叫面板
+   ========================================================================== */
+/* 定位用 flex 居中：不去跟 top / transform 的级联较劲（实测 top:50% 会被别处吃掉） */
+#ssp_panel_root { display: none; position: fixed !important; inset: 0 !important; z-index: 30000 !important; }
+#ssp_panel_root.on {
+    display: flex !important; align-items: center !important; justify-content: center !important;
+    padding: 12px !important; box-sizing: border-box !important;
+}
+
+#ssp_panel_root .ssp-p-mask {
+    position: absolute; inset: 0;
+    background: rgba(0, 0, 0, .62);
+    backdrop-filter: blur(1px);
+}
+
+#ssp_panel {
+    --ssp-accent: var(--SmartThemeQuoteColor, #b06cf0);
+    --ssp-line: rgba(128, 128, 128, .18);
+    --ssp-fill: rgba(255, 255, 255, .035);
+    --ssp-fill2: rgba(255, 255, 255, .075);
+    --ssp-dim: color-mix(in srgb, var(--SmartThemeBodyColor, #e8e8ee) 55%, transparent);
+    position: relative !important; z-index: 1 !important;
+    margin: auto !important;
+    width: min(560px, 100%); max-height: min(86vh, 940px);
+    display: flex; flex-direction: column;
+    /* 面板底必须够实：直接用主题色的话后面聊天会透出来（看着很脏） */
+    background-color: #1c1c22;
+    background-color: color-mix(in srgb, var(--SmartThemeBlurTintColor, #1c1c22) 94%, #000);
+    color: var(--SmartThemeBodyColor, #e8e8ee);
+    border: 1px solid var(--ssp-line);
+    border-radius: 14px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+    font-size: 13px; line-height: 1.45;
+    overflow: hidden;
+}
+
+/* —— 头 —— */
+#ssp_panel .ssp-p-head {
+    flex: 0 0 auto;
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 14px; border-bottom: 1px solid var(--ssp-line);
+    background: var(--ssp-fill);
+}
+#ssp_panel .ssp-p-logo { font-size: 22px; line-height: 1; }
+#ssp_panel .ssp-p-title { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+#ssp_panel .ssp-p-title b { font-size: 15px; letter-spacing: .3px; }
+#ssp_panel .ssp-p-title small { font-size: 10.5px; opacity: .5; }
+#ssp_panel .ssp-p-x {
+    flex: 0 0 auto; width: 30px; height: 30px; display: grid; place-items: center;
+    border-radius: 8px; cursor: pointer; opacity: .65;
+}
+#ssp_panel .ssp-p-x:hover { opacity: 1; background: var(--ssp-fill2); }
+
+/* —— 身 —— */
+#ssp_panel .ssp-p-body {
+    /* ⚠️ flex 子项默认 min-height:auto → 内容会把面板顶出屏幕（实测顶到 1100px+ 之外）。
+       必须 min-height:0 才能让 overflow-y:auto 真正生效、面板老老实实待在 max-height 里 */
+    flex: 1 1 auto; min-height: 0;
+    padding: 12px 14px 4px; overflow-y: auto; overscroll-behavior: contain;
+}
+#ssp_panel .ssp-p-body::-webkit-scrollbar { width: 8px; }
+#ssp_panel .ssp-p-body::-webkit-scrollbar-thumb { background: var(--ssp-fill2); border-radius: 4px; }
+
+#ssp_panel .ssp-sec {
+    border: 1px solid var(--ssp-line); border-radius: 10px;
+    background: var(--ssp-fill); margin-bottom: 10px; overflow: hidden;
+}
+#ssp_panel .ssp-sec > h4 {
+    margin: 0; padding: 9px 12px 9px 9px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: 700; letter-spacing: .4px;
+    border-left: 3px solid var(--ssp-accent);
+    background: var(--ssp-fill2);
+}
+#ssp_panel .ssp-sec > h4 i { font-size: 11px; opacity: .8; }
+#ssp_panel .ssp-secbody { padding: 2px 12px 8px; }
+#ssp_panel .ssp-fnote {
+    margin: 4px 0 2px; padding-top: 7px; border-top: 1px solid var(--ssp-line);
+    font-size: 10.5px; line-height: 1.5; opacity: .55;
+}
+
+/* —— 行 —— */
+#ssp_panel .ssp-row {
+    display: flex; align-items: center; gap: 10px;
+    min-height: 40px; padding: 4px 0;
+    border-top: 1px solid var(--ssp-line);
+}
+#ssp_panel .ssp-row:first-child { border-top: 0; }
+#ssp_panel .ssp-lab { flex: 1 1 auto; min-width: 0; }
+#ssp_panel .ssp-lab small { display: block; font-size: 10.5px; opacity: .45; margin-top: 1px; }
+#ssp_panel .ssp-ctl { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; }
+
+/* —— 扁平开关 —— */
+#ssp_panel .ssp-sw { position: relative; display: inline-block; width: 38px; height: 21px; flex: 0 0 auto; }
+#ssp_panel .ssp-sw input {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    margin: 0; opacity: 0; cursor: pointer; z-index: 1;
+}
+#ssp_panel .ssp-sw i {
+    position: absolute; inset: 0; border-radius: 999px;
+    background: var(--ssp-fill2); transition: background .16s ease;
+}
+#ssp_panel .ssp-sw i::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: #fff; transition: transform .16s ease;
+}
+#ssp_panel .ssp-sw input:checked + i { background: var(--ssp-accent); }
+#ssp_panel .ssp-sw input:checked + i::after { transform: translateX(17px); }
+
+/* —— 输入框 / 下拉 / 滑块 —— */
+#ssp_panel .ssp-inp, #ssp_panel select.ssp-inp {
+    min-height: 28px; padding: 3px 8px; font-size: 12px;
+    color: inherit; background: var(--ssp-fill2);
+    border: 1px solid var(--ssp-line); border-radius: 8px; outline: none;
+}
+#ssp_panel .ssp-inp:focus { border-color: var(--ssp-accent); }
+#ssp_panel .ssp-inp.wide { width: 168px; }
+#ssp_panel .ssp-range {
+    -webkit-appearance: none; appearance: none;
+    width: 130px; height: 20px; background: transparent; cursor: pointer;
+}
+#ssp_panel .ssp-range::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 999px; background: var(--ssp-fill2);
+}
+#ssp_panel .ssp-range::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px;
+    border: 0; border-radius: 50%; background: var(--ssp-accent);
+}
+#ssp_panel .ssp-out { min-width: 34px; text-align: right; font-size: 11.5px; opacity: .75; }
+
+/* —— 按钮 —— */
+#ssp_panel .ssp-pbtn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--ssp-line); background: transparent;
+    font-size: 12px; white-space: nowrap; transition: background .14s ease;
+}
+#ssp_panel .ssp-pbtn:hover { background: var(--ssp-fill2); }
+#ssp_panel .ssp-pbtn:active { transform: translateY(1px); }
+
+/* —— 脚 —— */
+#ssp_panel .ssp-p-foot {
+    flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px; border-top: 1px solid var(--ssp-line);
+    background: var(--ssp-fill); font-size: 10.5px; opacity: .5;
+}
+
+/* —— 面板里的角色卡那一块（原来是给抽屉写的，这里统一成一样的行式）—— */
+#ssp_panel .ssp-crow {
+    display: flex; align-items: center; gap: 10px;
+    min-height: 40px; padding: 4px 0; border-top: 1px solid var(--ssp-line);
+}
+#ssp_panel .ssp-crow:first-child { border-top: 0; }
+#ssp_panel .ssp-clabel { flex: 1 1 auto; font-size: 12.5px; }
+#ssp_panel .ssp-ccheck { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; }
+#ssp_panel .ssp-ccheck input { accent-color: var(--ssp-accent); }
+#ssp_panel .ssp-cinput {
+    min-height: 28px; padding: 3px 8px; font-size: 12px; color: inherit;
+    background: var(--ssp-fill2); border: 1px solid var(--ssp-line); border-radius: 8px;
+}
+#ssp_panel .ssp-crange { -webkit-appearance: none; appearance: none; width: 120px; height: 20px; background: transparent; }
+#ssp_panel .ssp-crange::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: var(--ssp-fill2); }
+#ssp_panel .ssp-crange::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; margin-top: -4.5px; border: 0; border-radius: 50%; background: var(--ssp-accent); }
+#ssp_panel .ssp-cval { min-width: 32px; text-align: right; font-size: 11.5px; opacity: .75; }
+#ssp_panel .ssp-ccolor { width: 34px; height: 26px; padding: 0; border: 1px solid var(--ssp-line); border-radius: 7px; background: transparent; }
+#ssp_panel .ssp-creset, #ssp_panel .ssp-cardsec .menu_button {
+    padding: 4px 9px; font-size: 11.5px; border-radius: 7px;
+    border: 1px solid var(--ssp-line); background: transparent;
+}
+#ssp_panel .ssp-creset:hover, #ssp_panel .ssp-cardsec .menu_button:hover { background: var(--ssp-fill2); }
+#ssp_panel .ssp-cardsec { border-top: 1px solid var(--ssp-line); }
+#ssp_panel .ssp-cardsec:first-child { border-top: 0; }
+#ssp_panel .ssp-note { font-size: 10.5px; opacity: .5; line-height: 1.5; padding: 2px 0; }
+#ssp_panel .ssp-swatch { display: flex; flex-wrap: wrap; gap: 5px; }
+
+/* 窄屏：面板铺满、行内控件允许换行 */
+@media (max-width: 560px) {
+    #ssp_panel { width: 96vw; max-height: 92vh; border-radius: 12px; }
+    #ssp_panel .ssp-row { flex-wrap: wrap; }
+    #ssp_panel .ssp-ctl { width: 100%; justify-content: flex-end; }
+}
