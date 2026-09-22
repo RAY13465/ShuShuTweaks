@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.18.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.18.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4514,7 +4514,7 @@ function orbPresetHTML() {
     if (!all.length) return orbPresetRowsHTML();
     return '<div class="ssp-orb-pfilter">'
         + '<i class="fa-solid fa-magnifying-glass"></i>'
-        + '<input class="ssp-inp" type="text" data-orb-presearch="1" placeholder="搜预设 / 角色卡（比如：即兴坠落）" value="' + esc(orbPreSearch) + '">'
+        + '<input class="ssp-inp" type="text" data-orb-presearch="1" placeholder="搜预设 / 角色卡" value="' + esc(orbPreSearch) + '">'
         + (orbPreSearch ? '<span class="ssp-pbtn" data-orb-preclear="1">清除</span>' : '')
         + '</div>'
         + '<div class="ssp-orb-pcount"><label class="ssp-orb-auto"><input type="checkbox" data-orb-pauto="1"'
@@ -4675,7 +4675,7 @@ function orbPersonaHTML() {
     }
     return '<div class="ssp-orb-pfilter">'
         + '<i class="fa-solid fa-magnifying-glass"></i>'
-        + '<input class="ssp-inp" type="text" data-orb-psearch="1" placeholder="搜角色卡 / 面具名 / 描述（比如：周树生）" value="' + esc(orbPSearch) + '">'
+        + '<input class="ssp-inp" type="text" data-orb-psearch="1" placeholder="搜角色卡 / 面具名 / 描述" value="' + esc(orbPSearch) + '">'
         + (orbPSearch ? '<span class="ssp-pbtn" data-orb-pclear="1">清除</span>' : '')
         + '</div>'
         + '<div id="ssp_orb_pfilter_list">' + orbPersonaRowsHTML() + '</div>'
