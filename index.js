@@ -360,30 +360,41 @@ const CARD_STYLES = {
 #rm_print_characters_block .character_select.is_fav .avatar{ outline:none; }
     ` },
 
-    /* 叠层相册 —— 花活 */
-    stack: { name: '叠层相册', hint: '花活', css: `
-/* 卡片互相压着，像一叠相片；指到哪张哪张抬起来。
-   —— 样式保持原样（立体感、叠压、悬停右移都不动），只把「静止时看不清」的三处调轻：
-      ① 遮罩：原来 0.78 的黑纱铺到 30% 才淡出 → 现在只压在文字那一小片，右边整张图是清的
-      ② 上压阴影：0.45 → 0.3（还留着，叠压的立体感靠它）
-      ③ 名字阴影加深一点（压在亮图上也不糊） */
+    /* 叠层相册 —— 上压下 + 上实下虚，悬停全实 */
+    stack: { name: '叠层相册', hint: '上压下 + 上实下虚，悬停全实', css: `
+/* 叠层相册：
+   静止 = 上面一张压着下面一张（叠压程度那个旋钮管压多少），每张卡**上实下虚** ——
+          图片从顶部的实，一路淡到"下一张压上来"的那条线上正好化没，
+          所以看着是一张张摞着、底边融进下面那张里。
+   悬停 = 整张完整浮出来（抬到最上层），遮罩整个取消 → **全实**。
+   淡出位置跟着「叠压程度」自动走，不用另设旋钮。 */
 #rm_print_characters_block { padding-top:10px; }
 #rm_print_characters_block .character_select{ position:relative; height:var(--pv-h,78px); padding:0; overflow:visible;
   margin-top:calc(var(--pv-gap,6px) - 6px - var(--pv-h,78px) * var(--pv-overlay,20) / 100); border-radius:var(--pv-radius,14px);
   transition:transform .25s ease, margin .25s ease; }
 #rm_print_characters_block .character_select:first-child{ margin-top:0; }
 #rm_print_characters_block .character_select:hover{ background:transparent; transform:translateX(8px); z-index:9; }
+/* 露出来的那一截 = 100% − 叠压程度；淡出正好收在这条线上 */
 #rm_print_characters_block .character_select .avatar{ position:absolute; inset:0; width:100%; height:100%; border-radius:inherit;
-  overflow:hidden; align-self:auto; box-shadow:0 -5px 12px rgba(0,0,0,.3), 0 0 0 1px var(--SmartThemeBorderColor, rgba(255,255,255,.12)); }
+  overflow:hidden; align-self:auto;
+  --pv-vis:calc(100% - var(--pv-overlay,20) * 1%);
+  -webkit-mask-image:linear-gradient(to bottom, #000 0, #000 calc(var(--pv-vis) - 30%), transparent var(--pv-vis));
+  mask-image:linear-gradient(to bottom, #000 0, #000 calc(var(--pv-vis) - 30%), transparent var(--pv-vis));
+  box-shadow:0 -5px 12px rgba(0,0,0,.3), 0 0 0 1px var(--SmartThemeBorderColor, rgba(255,255,255,.12));
+  transition:box-shadow .25s ease; }
+#rm_print_characters_block .character_select:hover .avatar{ -webkit-mask-image:none; mask-image:none;
+  box-shadow:0 12px 28px rgba(0,0,0,.55), 0 0 0 1px var(--SmartThemeBorderColor, rgba(255,255,255,.18)); }
 #rm_print_characters_block .character_select .avatar img{ width:100%; height:100%; object-fit:cover; border:0; border-radius:0; box-shadow:none; }
+/* 文字不再压遮罩（图片自己会淡出），靠阴影吃住任何底色 —— 所以不悬停也读得清 */
 #rm_print_characters_block .character_select .character_select_container{ position:absolute; inset:0; z-index:2; width:auto; padding:10px 14px;
-  justify-content:center; gap:2px; border-radius:inherit;
-  background:linear-gradient(to right, rgba(0,0,0,.55) 0%, rgba(0,0,0,.22) 42%, transparent 72%); }
+  justify-content:center; gap:2px; border-radius:inherit; background:transparent; }
 #rm_print_characters_block .character_select .character_name_block{ margin:0; }
-#rm_print_characters_block .character_select .ch_name{ font-size:var(--pv-name,15.5px); color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.85), 0 0 10px rgba(0,0,0,.5); }
-#rm_print_characters_block .character_select .ch_description{ margin:0; color:rgba(255,255,255,.78); text-shadow:0 1px 4px rgba(0,0,0,.7); }
+#rm_print_characters_block .character_select .ch_name{ font-size:var(--pv-name,15.5px); color:#fff;
+  text-shadow:0 1px 4px rgba(0,0,0,.9), 0 0 12px rgba(0,0,0,.6); }
+#rm_print_characters_block .character_select .ch_description{ margin:0; color:rgba(255,255,255,.8); text-shadow:0 1px 4px rgba(0,0,0,.8); }
 #rm_print_characters_block .character_select.is_fav .ch_name{ color:var(--golden); }
-#rm_print_characters_block .character_select.is_fav .avatar{ outline:none; box-shadow:0 -5px 12px rgba(0,0,0,.3), 0 0 0 2px var(--golden); }
+#rm_print_characters_block .character_select.is_fav .avatar{ box-shadow:0 -5px 12px rgba(0,0,0,.3), 0 0 0 2px var(--golden); }
+#rm_print_characters_block .character_select.is_fav:hover .avatar{ box-shadow:0 12px 28px rgba(0,0,0,.55), 0 0 0 2px var(--golden); }
     ` },
 
     /* 歌单行 —— 网易云那种一行一首 */
@@ -4018,7 +4029,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.12.5';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.12.6';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
