@@ -3009,7 +3009,8 @@ function getSettings() {
     if (typeof s.listNotesFirstLine !== 'boolean') s.listNotesFirstLine = true;
     /* 悬浮球（鼠鼠口袋）：默认开；位置存 orbPos（会校验）；番外存在 notes 里 */
     if (typeof s.orbOn !== 'boolean') s.orbOn = true;
-    if (s.orbPos && (typeof s.orbPos.x !== 'number' || typeof s.orbPos.y !== 'number')) s.orbPos = null;
+    /* ⚠️ orbPos 现在是 {right,bottom}（离边距离）；老的 {x,y} 也放行一次，由 mountOrb 换算 */
+    if (s.orbPos && typeof s.orbPos.right !== 'number' && typeof s.orbPos.x !== 'number') s.orbPos = null;
     if (!Array.isArray(s.notes)) s.notes = [];   // 列表里的作者注释只显示第一行
     if (typeof s.importMerge !== 'boolean') s.importMerge = true;
     if (typeof s.importSimThreshold !== 'number') s.importSimThreshold = IMPORT_SIM_DEFAULT;
@@ -4104,7 +4105,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.23.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.23.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4373,6 +4374,7 @@ function reclaim(reason) {
      ③ 重画面板只换面板**内部**，绝不重画整个容器 —— 否则球会跟着被替换掉。
    ========================================================================== */
 var orbBuilt = false;
+var orbEdge = { right: 18, bottom: 96 };   // 球离右边/下边的距离（贴边靠它）
 var orbOpenNow = false;
 var orbEditing = null;
 var orbTab = 'notes';       // 当前模块页（模块容器：以后加功能只加标签页）
@@ -5271,14 +5273,19 @@ function mountOrb() {
     const oldBall = document.getElementById('ssp_orb'); if (oldBall) oldBall.remove();
     const oldRoot = document.getElementById('ssp_orb_root'); if (oldRoot) oldRoot.remove();
 
-    /* 坐标：存过的要用，但先校验（负数/越界一律当没存过，免得球跑到屏幕外） */
+    /* 坐标存的是**离右边 / 下边的距离**（不是绝对像素）——
+       这样窗口大小一变，球还能按同样的边距贴回去（用户要的"贴边、跟着窗口走"）。
+       老数据是绝对 {x,y}，这里换算一次；算不出来就当没存过。 */
     let pos = getSettings().orbPos;
-    if (pos && (typeof pos.x !== 'number' || typeof pos.y !== 'number'
-        || pos.x < 0 || pos.y < 0
-        || pos.x > window.innerWidth - 20 || pos.y > window.innerHeight - 20)) {
-        getSettings().orbPos = null;
-        pos = null;
+    if (pos && (typeof pos.right !== 'number' || typeof pos.bottom !== 'number')) {
+        if (typeof pos.x === 'number' && typeof pos.y === 'number') {
+            pos = { right: window.innerWidth - pos.x - 52, bottom: window.innerHeight - pos.y - 52 };
+            if (pos.right < 0 || pos.bottom < 0) pos = null;
+        } else {
+            pos = null;
+        }
     }
+    orbEdge = pos ? { right: pos.right, bottom: pos.bottom } : { right: 18, bottom: 96 };
 
     /* ① 球：直接挂 body（不进任何容器） */
     const ball = document.createElement('div');
@@ -5288,12 +5295,10 @@ function mountOrb() {
     /* ⚠️ 位置不能用 CSS 的 bottom：酒馆里球的包含块高度会被算成 0，
        bottom:96px 于是变成 top:-148px（球飞到屏幕外，用户以为没有球）。
        实测 left/right 正常、坏的只有纵向 → 直接按视口把 left/top 算好写进去。 */
-    if (pos) {
-        ball.setAttribute('style', 'left:' + Math.round(pos.x) + 'px;top:' + Math.round(pos.y) + 'px;right:auto;bottom:auto;');
-    } else {
+    {
         const vs = 52;
-        ball.setAttribute('style', 'left:' + Math.round(window.innerWidth - vs - 18) + 'px;top:'
-            + Math.round(window.innerHeight - vs - 96) + 'px;right:auto;bottom:auto;');
+        ball.setAttribute('style', 'left:' + Math.round(window.innerWidth - vs - orbEdge.right) + 'px;top:'
+            + Math.round(window.innerHeight - vs - orbEdge.bottom) + 'px;right:auto;bottom:auto;');
     }
     ball.innerHTML = '<span class="ssp-orb-diamond"></span><span class="ssp-orb-badge" id="ssp_orb_badge"></span>';
     document.body.append(ball);
@@ -5389,7 +5394,8 @@ function bindOrb() {
         if (o.classList) o.classList.remove('moving');
         if (moved) {
             const r = o.getBoundingClientRect();
-            getSettings().orbPos = { x: Math.round(r.left), y: Math.round(r.top) };
+            orbEdge = { right: Math.round(window.innerWidth - r.right), bottom: Math.round(window.innerHeight - r.bottom) };
+            getSettings().orbPos = { right: Math.max(0, orbEdge.right), bottom: Math.max(0, orbEdge.bottom) };
             save();
         } else if (orbOpenNow) closeOrb(); else openOrb();
     }, true);
@@ -5598,6 +5604,22 @@ function bindOrb() {
     }, true);
 
     document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && orbOpenNow) closeOrb(); });
+
+    /* ⚠️ 窗口大小变化时，按「离边距离」重算位置 ——
+       这就是用户要的"窗口缩小，球跟着贴边走"。以前存绝对像素，一缩窗口球就脱边/跑出屏幕。 */
+    if (!bindOrb.resizeBound) {
+        bindOrb.resizeBound = true;
+        window.addEventListener('resize', () => {
+            const o = getBall();
+            if (!o) return;
+            const w = o.offsetWidth || 52, h = o.offsetHeight || 52;
+            const right = Math.max(4, Math.min(window.innerWidth - w - 4, orbEdge.right));
+            const bottom = Math.max(4, Math.min(window.innerHeight - h - 4, orbEdge.bottom));
+            o.style.left = Math.round(window.innerWidth - w - right) + 'px';
+            o.style.top = Math.round(window.innerHeight - h - bottom) + 'px';
+            o.style.right = 'auto'; o.style.bottom = 'auto';
+        });
+    }
     return true;
 }
 
