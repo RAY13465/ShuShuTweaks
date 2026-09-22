@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.20.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.21.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4381,6 +4381,120 @@ var orbPersonaEdit = null;  // 正在编辑哪个面具（null = 不在编辑模
 var orbPSearch = '';        // 面具页的搜索词（角色卡名 / 面具名 / 描述）
 var orbPresetBinding = null;// 正在给哪个预设选绑定角色
 var orbPreSearch = '';      // 预设页搜索词
+
+/* ============================ 存档（聊天记录）栏 ============================
+   把酒馆的「聊天记录」搬进来：列出当前角色的所有 .jsonl 存档 → 读档 / 删除。
+     列表：POST /api/characters/chats  { avatar_url }
+     读档：上下文里的 openCharacterChat(file)（酒馆自己导出的函数，直接调 ✓）
+     删除：POST /api/chats/delete  { chatfile, avatar_url }
+   列表是异步拉的，所以渲染用缓存 + 打开时拉一次 + 手动「刷新」。
+   ========================================================================== */
+var orbChatList = [];        // 缓存：[{file, name, time}]
+var orbChatLoading = false;
+var orbChatErr = '';
+var orbChSearch = '';
+
+function orbChatCtx() { return getContext() || {}; }
+function orbChatChar() { return orbPresetCurChar(); }          // 复用：当前聊天角色
+function orbCurChatId() { try { return orbChatCtx().getCurrentChatId() || ''; } catch (e) { return ''; } }
+
+async function orbChatsFetch() {
+    const ch = orbChatChar();
+    if (!ch) { orbChatErr = '当前没有打开任何角色聊天'; orbChatList = []; return false; }
+    orbChatLoading = true; orbChatErr = '';
+    if (orbOpenNow) renderOrbPanel();
+    try {
+        const res = await fetch('/api/characters/chats', {
+            method: 'POST',
+            headers: orbChatCtx().getRequestHeaders(),
+            body: JSON.stringify({ avatar_url: ch.avatar }),
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const arr = Array.isArray(data) ? data : (data.chats || []);
+        orbChatList = arr.map(it => {
+            const file = String(it.file_name || it.file || '');
+            return { file: file, name: file.replace(/\.jsonl$/, ''), time: it.last_mes || it.file_size || '' };
+        });
+    } catch (e) {
+        orbChatErr = '拉列表失败：' + e.message;
+        orbChatList = [];
+    }
+    orbChatLoading = false;
+    if (orbOpenNow) renderOrbPanel();
+    return true;
+}
+
+function orbChatLoad(file) {
+    const ctx = orbChatCtx();
+    if (!ctx.openCharacterChat) { toast('酒馆没暴露 openCharacterChat', 'warning'); return false; }
+    try {
+        ctx.openCharacterChat(file);
+        toast('已读档：' + String(file).replace(/\.jsonl$/, ''), 'success');
+        setTimeout(() => { if (orbOpenNow) renderOrbPanel(); }, 800);
+        return true;
+    } catch (e) { toast('读档失败：' + e.message, 'warning'); return false; }
+}
+
+async function orbChatDelete(file) {
+    const ch = orbChatChar();
+    if (!ch) return false;
+    try {
+        const res = await fetch('/api/chats/delete', {
+            method: 'POST',
+            headers: orbChatCtx().getRequestHeaders(),
+            body: JSON.stringify({ chatfile: file, avatar_url: ch.avatar }),
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        orbChatList = orbChatList.filter(x => x.file !== file);
+        toast('已删除存档：' + String(file).replace(/\.jsonl$/, ''), 'info');
+        if (orbOpenNow) renderOrbPanel();
+        return true;
+    } catch (e) { toast('删除失败：' + e.message, 'warning'); return false; }
+}
+
+function orbChatRowsHTML() {
+    const ch = orbChatChar();
+    if (!ch) return '<div class="ssp-orb-empty">先在酒馆里打开一个角色聊天，这里才会列出存档。</div>';
+    if (orbChatLoading) return '<div class="ssp-orb-empty">正在读存档列表…</div>';
+    if (orbChatErr) return '<div class="ssp-orb-empty">' + esc(orbChatErr) + '</div>';
+    if (!orbChatList.length) return '<div class="ssp-orb-empty">这个角色还没有存档（酒馆里聊过就会有）。</div>';
+    const cur = orbCurChatId();
+    const q = orbChSearch.toLowerCase();
+    const hit = orbChatList.filter(x => !q
+        || String(x.name).toLowerCase().indexOf(q) >= 0
+        || String(x.time).toLowerCase().indexOf(q) >= 0);
+    if (!hit.length) return '<div class="ssp-orb-empty">没有匹配「' + esc(orbChSearch) + '」的存档。</div>';
+    const head = orbChSearch ? '<div class="ssp-orb-pcount">筛选出 ' + hit.length + ' / ' + orbChatList.length + ' 个存档</div>' : '';
+    const rows = hit.map(x => {
+        const on = (x.name === cur);
+        return '<div class="ssp-orb-prow' + (on ? ' on' : '') + '">'
+            + '<div class="ssp-orb-pmain">'
+            + '<div class="ssp-orb-pname">' + esc(x.name) + (on ? '<span class="ssp-orb-ptag">当前</span>' : '') + '</div>'
+            + (x.time ? '<div class="ssp-orb-pdesc">' + esc(String(x.time).slice(0, 70)) + '</div>' : '')
+            + '</div>'
+            + '<div class="ssp-orb-pacts">'
+            + '<span class="ssp-pbtn' + (on ? ' primary' : '') + '" data-orb-chatload="' + esc(x.file) + '">' + (on ? '当前' : '读档') + '</span>'
+            + '<span class="ssp-pbtn danger" data-orb-chatdel="' + esc(x.file) + '" data-orb-chatname="' + esc(x.name) + '"><i class="fa-solid fa-trash"></i></span>'
+            + '</div></div>';
+    }).join('');
+    return head + '<div class="ssp-orb-plist">' + rows + '</div>';
+}
+
+function orbChatHTML() {
+    const ch = orbChatChar();
+    return '<div class="ssp-orb-pfilter">'
+        + '<i class="fa-solid fa-magnifying-glass"></i>'
+        + '<input class="ssp-inp" type="text" data-orb-chsearch="1" placeholder="搜存档名 / 时间" value="' + esc(orbChSearch) + '">'
+        + (orbChSearch ? '<span class="ssp-pbtn" data-orb-chclear="1">清除</span>' : '')
+        + '<span class="ssp-pbtn" data-orb-chrefresh="1"><i class="fa-solid fa-rotate"></i>刷新</span>'
+        + '</div>'
+        + '<div id="ssp_orb_chat_list">' + orbChatRowsHTML() + '</div>'
+        + '<div class="ssp-orb-empty" style="padding-top:6px">'
+        + (ch ? ('角色：<b>' + esc(ch.name) + '</b>；当前存档：<b>' + esc(orbCurChatId() || '(未保存)') + '</b>。')
+            : '')
+        + '「读档」会切到那份存档（酒馆原生切法）；🗑 直接删文件，删了救不回来。</div>';
+}
 
 /* ============================ 美化（主题）栏 ============================
    跟预设栏一个套路：酒馆没有「主题绑角色」的原生功能，所以
@@ -4734,6 +4848,7 @@ const ORB_MODULES = [
     { id: 'persona', name: '面具', icon: 'fa-masks-theater', render: () => orbPersonaHTML() },
     { id: 'preset', name: '预设', icon: 'fa-sliders', render: () => orbPresetHTML() },
     { id: 'theme', name: '美化', icon: 'fa-palette', render: () => orbThemeHTML() },
+    { id: 'chat', name: '存档', icon: 'fa-box-archive', render: () => orbChatHTML() },
 ];
 function orbModule(id) { return ORB_MODULES.find(m => m.id === id) || null; }
 
@@ -5273,6 +5388,15 @@ function bindOrb() {
         }
     });
 
+    /* 存档页搜索 */
+    document.addEventListener('input', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbChsearch === undefined) return;
+        orbChSearch = el.value || '';
+        const box = document.getElementById('ssp_orb_chat_list');
+        if (box) box.innerHTML = orbChatRowsHTML();
+    });
+
     /* 美化页搜索 */
     document.addEventListener('input', ev => {
         const el = ev.target;
@@ -5351,7 +5475,25 @@ function bindOrb() {
         }
         /* 模块标签页 */
         const tabEl = t.closest('[data-orb-tab]');
-        if (tabEl) { orbTab = tabEl.dataset.orbTab || 'notes'; orbEditing = null; renderOrbPanel(); return; }
+        if (tabEl) {
+            orbTab = tabEl.dataset.orbTab || 'notes'; orbEditing = null;
+            renderOrbPanel();
+            if (orbTab === 'chat') orbChatsFetch();            // 存档页：打开就拉一次列表
+            return;
+        }
+        /* 存档页：刷新 / 读档 / 删除 / 清除搜索 */
+        if (t.closest('[data-orb-chrefresh]')) { orbChatsFetch(); return; }
+        if (t.closest('[data-orb-chclear]')) { orbChSearch = ''; renderOrbPanel(); return; }
+        const cload = t.closest('[data-orb-chatload]');
+        if (cload) { orbChatLoad(cload.dataset.orbChatload); return; }
+        const cdel = t.closest('[data-orb-chatdel]');
+        if (cdel) {
+            const file = cdel.dataset.orbChatdel, nm = cdel.dataset.orbChatname || file;
+            callGenericPopup('删掉存档「' + nm + '」？<br>删了就找不回来了。', POPUP_TYPE.CONFIRM, '', {
+                okButton: '删掉', cancelButton: '算了',
+            }).then(r => { if (r === POPUP_RESULT.AFFIRMATIVE) orbChatDelete(file); });
+            return;
+        }
         /* 面具栏：编辑 / 选一个 / 新建 / 绑定角色 */
         if (t.closest('[data-orb-pcancel]')) { orbPersonaEdit = null; renderOrbPanel(); return; }
         const pedit = t.closest('[data-orb-pedit]');
