@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.21.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.21.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4428,9 +4428,12 @@ async function orbChatsFetch() {
 function orbChatLoad(file) {
     const ctx = orbChatCtx();
     if (!ctx.openCharacterChat) { toast('酒馆没暴露 openCharacterChat', 'warning'); return false; }
+    /* ⚠️ openCharacterChat 收的是**不带扩展名**的聊天名。
+       传 "...xxx.jsonl" 进去，酒馆会再补一个 .jsonl → 生成 xxx.jsonl.jsonl（多出一个假存档，实测踩到过）。 */
+    const name = String(file || '').replace(/\.jsonl$/i, '');
     try {
-        ctx.openCharacterChat(file);
-        toast('已读档：' + String(file).replace(/\.jsonl$/, ''), 'success');
+        ctx.openCharacterChat(name);
+        toast('已读档：' + name, 'success');
         setTimeout(() => { if (orbOpenNow) renderOrbPanel(); }, 800);
         return true;
     } catch (e) { toast('读档失败：' + e.message, 'warning'); return false; }
