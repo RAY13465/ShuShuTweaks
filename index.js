@@ -4105,7 +4105,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.23.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.24.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5624,6 +5624,54 @@ function bindOrb() {
 }
 
 
+/* ===== 高清头像：全站范围（v1.24.0）=====
+   把页面上所有 /thumbnail?type=avatar&file=X 换成原图 /characters/X ——
+   聊天气泡、角色列表、群聊、详情页……凡是出现角色头像的地方都高清。
+   两种都覆盖：avatar → /characters/<file>；persona → /User Avatars/<file>（都实测 HTTP 200，不会裂图）。
+   ⚠️ 换完 src 就不再匹配 /thumbnail? 了，所以 MutationObserver 不会自己咬自己。
+   开关：设置面板卡片样式里的「高清头像」。 */
+function hdAvatarWanted() {
+    try { const s = getSettings(); return !(s.card && s.card.hd === false); } catch (e) { return true; }
+}
+function hdSwapOne(img) {
+    try {
+        const src = img.getAttribute('src') || '';
+        const m = /\/thumbnail\?[^#]*?type=(avatar|persona)[^#]*?[?&]file=([^&]+)/.exec(src);
+        if (!m) return false;
+        const file = decodeURIComponent(m[2]);
+        if (!file) return false;
+        const origin = (/type=persona/.test(src) ? '/User%20Avatars/' : '/characters/') + encodeURIComponent(file);
+        if (img.getAttribute('src') === origin) return false;
+        img.setAttribute('src', origin);
+        return true;
+    } catch (e) { return false; }
+}
+function hdSwapAll(root) {
+    if (!hdAvatarWanted()) return 0;
+    const scope = root && root.querySelectorAll ? root : document;
+    let n = 0;
+    scope.querySelectorAll('img[src*="/thumbnail?"]').forEach(img => { if (hdSwapOne(img)) n += 1; });
+    return n;
+}
+function bindHdAvatars() {
+    if (bindHdAvatars.done) return false;
+    bindHdAvatars.done = true;
+    hdSwapAll(document);
+    try {
+        new MutationObserver(muts => {
+            if (!hdAvatarWanted()) return;
+            muts.forEach(mu => {
+                mu.addedNodes && mu.addedNodes.forEach(node => {
+                    if (!node || node.nodeType !== 1) return;
+                    if (node.tagName === 'IMG') hdSwapOne(node);
+                    else if (node.querySelectorAll) hdSwapAll(node);
+                });
+            });
+        }).observe(document.body, { childList: true, subtree: true });
+    } catch (e) { /* 观察不到就算了，至少首屏换过了 */ }
+    return true;
+}
+/* ===== 高清头像 结束 ===== */
 function init() {
     const ctx = getContext();
     if (!ctx) { warn('拿不到 getContext()，扩展不启动'); return false; }
@@ -5648,7 +5696,8 @@ function init() {
     if (importMergeOn()) bindImportMerge();                      // 导入即更新（合并 导入 / 替换 / URL导入）
     registerThinkDisplayHook();                                  // 思维链收纳：显示层兜底（流式半截标签也不上屏）
     registerThinkEvents();                                       // 思维链收纳：生成结束/收到消息/换聊天时收纳
-    if (getSettings().orbOn !== false) { mountOrb(); bindOrb(); }   // 🐭 悬浮球（鼠鼠口袋）
+    if (getSettings().orbOn !== false) { mountOrb(); bindOrb(); }
+    bindHdAvatars();                                                 // 全站头像高清化（聊天气泡/列表都算）   // 🐭 悬浮球（鼠鼠口袋）
 
     try {
         ctx.eventSource?.on?.(ctx.eventTypes?.CHARACTER_PAGE_LOADED, () => reclaim('page-loaded'));
