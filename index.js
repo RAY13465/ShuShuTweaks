@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.17.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.17.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4806,6 +4806,40 @@ function bindOrb() {
     bindOrb.done = true;
     const getBall = () => document.getElementById('ssp_orb');
     let dragging = false, moved = false, sx = 0, sy = 0, ox = 0, oy = 0;
+
+    /* ⚠️ 实时同步：酒馆换面具/新建/改名/删面具、切聊天时，只要面板开着就跟着刷。
+       之前是「换完立刻重画」→ 但酒馆那边的选中状态是异步落的，重画时读到的还是旧值，
+       表现就是「必须关了再打开才看到变化」。挂事件才对。 */
+    try {
+        const c0 = getContext() || {};
+        const es = c0.eventSource, et = c0.eventTypes;
+        if (es && et && es.on) {
+            ['PERSONA_CHANGED', 'PERSONA_CREATED', 'PERSONA_UPDATED', 'PERSONA_RENAMED', 'PERSONA_DELETED', 'CHAT_CHANGED'].forEach(k => {
+                const evName = et[k];
+                if (!evName) return;
+                es.on(evName, () => {
+                    if (!orbOpenNow) return;
+                    /* 刷两次：事件刚发时酒馆可能还没把 .selected 落下来 */
+                    setTimeout(() => { if (orbOpenNow) renderOrbPanel(); }, 60);
+                    setTimeout(() => { if (orbOpenNow) renderOrbPanel(); }, 400);
+                });
+            });
+            bindOrb.eventsBound = true;
+        }
+    } catch (e) { /* 事件拿不到就退回「点击后重画」 */ }
+
+    /* 兜底：酒馆把自己列表的选中状态改了（.selected 变动），面板开着就跟着刷 */
+    try {
+        const ub = document.getElementById('user_avatar_block');
+        if (ub && !bindOrb.observerBound && window.MutationObserver) {
+            bindOrb.observerBound = true;
+            new MutationObserver(() => {
+                if (!orbOpenNow) return;
+                if (orbTab !== 'persona' || orbBinding || orbPersonaEdit) return;
+                renderOrbPanel();
+            }).observe(ub, { attributes: true, attributeFilter: ['class'], subtree: true });
+        }
+    } catch (e) { }
 
     document.addEventListener('pointerdown', ev => {
         const el = ev.target && ev.target.closest ? ev.target.closest('#ssp_orb') : null;
