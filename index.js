@@ -4105,7 +4105,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.26.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.26.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4373,6 +4373,56 @@ function reclaim(reason) {
         会抛 "Cannot access 'xxx' before initialization"。
      ③ 重画面板只换面板**内部**，绝不重画整个容器 —— 否则球会跟着被替换掉。
    ========================================================================== */
+
+/* ===== 高清头像：全站范围（放在块里，避免重构时被冲掉）=====
+   把页面上所有 /thumbnail?type=avatar|persona&file=X 换成原图：
+     avatar  → /characters/<file>      （酒馆自己的高清替换逻辑就用这个路径）
+     persona → /User%20Avatars/<file>  （实测 HTTP 200）
+   覆盖聊天气泡、角色列表、群聊、详情页。换完 src 不再匹配 /thumbnail?，不会自咬。
+   开关：设置面板卡片样式里的「高清头像」。 */
+function hdAvatarWanted() {
+    try { const s = getSettings(); return !(s.card && s.card.hd === false); } catch (e) { return true; }
+}
+function hdSwapOne(img) {
+    try {
+        const src = img.getAttribute('src') || '';
+        const m = /\/thumbnail\?[^#]*?type=(avatar|persona)[^#]*?[?&]file=([^&]+)/.exec(src);
+        if (!m) return false;
+        const file = decodeURIComponent(m[2]);
+        if (!file) return false;
+        const origin = (/type=persona/.test(src) ? '/User%20Avatars/' : '/characters/') + encodeURIComponent(file);
+        if (img.getAttribute('src') === origin) return false;
+        img.setAttribute('src', origin);
+        return true;
+    } catch (e) { return false; }
+}
+function hdSwapAll(root) {
+    if (!hdAvatarWanted()) return 0;
+    const scope = root && root.querySelectorAll ? root : document;
+    let n = 0;
+    scope.querySelectorAll('img[src*="/thumbnail?"]').forEach(img => { if (hdSwapOne(img)) n += 1; });
+    return n;
+}
+function bindHdAvatars() {
+    if (bindHdAvatars.done) return false;
+    bindHdAvatars.done = true;
+    hdSwapAll(document);
+    try {
+        new MutationObserver(muts => {
+            if (!hdAvatarWanted()) return;
+            muts.forEach(mu => {
+                mu.addedNodes && mu.addedNodes.forEach(node => {
+                    if (!node || node.nodeType !== 1) return;
+                    if (node.tagName === 'IMG') hdSwapOne(node);
+                    else if (node.querySelectorAll) hdSwapAll(node);
+                });
+            });
+        }).observe(document.body, { childList: true, subtree: true });
+    } catch (e) { }
+    return true;
+}
+/* ===== 高清头像 结束 ===== */
+
 var orbBuilt = false;
 var orbEdge = { right: 18, bottom: 96 };   // 球离右边/下边的距离（贴边靠它）
 var orbOpenNow = false;
@@ -5290,28 +5340,6 @@ function refreshOrbBadge() {
     return true;
 }
 
-/** 往酒馆的「扩展程序」展开栏里挂一个「鼠鼠口袋」入口（点了直接开面板，不依赖悬浮球） */
-function mountPocketMenuEntry() {
-    const menu = document.getElementById('extensionsMenu');
-    if (!menu) return false;
-    if (document.getElementById('ssp_menu_pocket')) return true;
-    const item = document.createElement('div');
-    item.id = 'ssp_menu_pocket';
-    item.className = 'extensionsMenuExtensionButton menu_button interactable';
-    item.title = '鼠鼠口袋（番外 / 面具 / 预设 / 美化 / 存档）';
-    item.innerHTML = '<i class="fa-solid fa-mouse"></i> 鼠鼠口袋';
-    item.addEventListener('click', ev => { ev.stopPropagation(); openOrb(); });
-    menu.append(item);
-    return true;
-}
-
-function bindPocketMenuEntry() {
-    if (bindPocketMenuEntry.done) return;
-    bindPocketMenuEntry.done = true;
-    mountPocketMenuEntry();
-    try { setInterval(mountPocketMenuEntry, 2000); } catch (e) { }
-}
-
 function mountOrb() {
     if (orbBuilt && document.getElementById('ssp_orb')) return true;
     if (!document.body) return false;
@@ -5353,7 +5381,6 @@ function mountOrb() {
     const oldWand = document.getElementById('ssp_orb_wand'); if (oldWand) oldWand.remove();
     const wand = document.createElement('div');
     wand.className = 'ssp-orb-wand';
-    wand.style.display = 'none';   /* 用户不要这个自建魔法棒：入口已经挂进酒馆的「扩展程序」展开栏 */
     wand.id = 'ssp_orb_wand';
     wand.setAttribute('data-orb-wand', '1');
     wand.title = '鼠鼠口袋：点一下把球收起来 / 放出来';
@@ -5405,7 +5432,7 @@ function orbPlaceWand() {
 function orbSetCollapsed(on, silent) {
     orbCollapsed = Boolean(on);
     const ball = document.getElementById('ssp_orb');
-    const wand = document.getElementById('extensionsMenuButton');   /* 收纳目标 = 酒馆自己的扩展程序按钮 */
+    const wand = document.getElementById('ssp_orb_wand');
     if (ball && ball.classList) ball.classList.toggle('ssp-collapsed', orbCollapsed);
     if (wand && wand.classList) wand.classList.toggle('active', orbCollapsed);
     if (ball) {
@@ -5791,7 +5818,6 @@ function init() {
     registerThinkEvents();                                       // 思维链收纳：生成结束/收到消息/换聊天时收纳
     if (getSettings().orbOn !== false) { mountOrb(); bindOrb(); }
     bindHdAvatars();
-    bindPocketMenuEntry();                                            // 「鼠鼠口袋」入口挂进扩展程序展开栏                                                 // 全站头像高清化（聊天气泡/列表都算）   // 🐭 悬浮球（鼠鼠口袋）
 
     try {
         ctx.eventSource?.on?.(ctx.eventTypes?.CHARACTER_PAGE_LOADED, () => reclaim('page-loaded'));
