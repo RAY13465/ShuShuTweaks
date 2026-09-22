@@ -5516,8 +5516,8 @@ function bindOrb() {
         const cren = t.closest('[data-orb-chatren]');
         if (cren) {
             const file = cren.dataset.orbChatren, nm = cren.dataset.orbChatname || file;
-            callGenericPopup('把存档「' + nm + '」改成什么名字？<br><i style="opacity:.6">（酒馆会自动清洗掉文件名里的非法字符）</i>',
-                POPUP_TYPE.INPUT, nm, { okButton: '改名', cancelButton: '取消' })
+            getContext().callGenericPopup('把存档「' + nm + '」改成什么名字？<br><i style="opacity:.6">（酒馆会自动清洗掉文件名里的非法字符）</i>',
+                getContext().POPUP_TYPE.INPUT, nm, { okButton: '改名', cancelButton: '取消' })
                 .then(r => {
                     const val = (typeof r === 'string') ? r : '';
                     if (val && val.trim() && val.trim() !== nm) orbChatRename(file, val.trim());
@@ -5529,9 +5529,9 @@ function bindOrb() {
         const cdel = t.closest('[data-orb-chatdel]');
         if (cdel) {
             const file = cdel.dataset.orbChatdel, nm = cdel.dataset.orbChatname || file;
-            callGenericPopup('删掉存档「' + nm + '」？<br>删了就找不回来了。', POPUP_TYPE.CONFIRM, '', {
+            getContext().callGenericPopup('删掉存档「' + nm + '」？<br>删了就找不回来了。', getContext().POPUP_TYPE.CONFIRM, '', {
                 okButton: '删掉', cancelButton: '算了',
-            }).then(r => { if (r === POPUP_RESULT.AFFIRMATIVE) orbChatDelete(file); });
+            }).then(r => { if (r === getContext().POPUP_RESULT.AFFIRMATIVE) orbChatDelete(file); });
             return;
         }
         /* 面具栏：编辑 / 选一个 / 新建 / 绑定角色 */

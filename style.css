@@ -508,7 +508,7 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
        否则它会盖住整个界面，点什么都没反应。
    ========================================================================== */
 #ssp_orb {
-    position: fixed; right: 18px; bottom: 96px; z-index: 29000;
+    position: fixed; right: 18px; bottom: 96px; z-index: 3000;
     width: 52px; height: 52px; border-radius: 50%;
     display: grid; place-items: center; cursor: grab;
     background: linear-gradient(#1c1c22, #0e0e12);
@@ -532,7 +532,7 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 }
 
 /* 面板容器：全屏但不吃点击 */
-.ssp-orb-root { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 28999; pointer-events: none; display: block; }
+.ssp-orb-root { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 2999; pointer-events: none; display: block; }
 .ssp-orb-root .ssp-orb-mask,
 .ssp-orb-root .ssp-orb-panel { display: none; }
 .ssp-orb-root.on .ssp-orb-mask { display: block; pointer-events: auto; }
