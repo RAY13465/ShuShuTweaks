@@ -1,11 +1,11 @@
 {
-    "display_name": "🐭 鼠鼠小助手 ShuShu Tweaks",
-    "loading_order": 10,
-    "js": "index.js",
-    "css": "style.css",
-    "author": "Kimi",
-    "version": "1.2.0",
-    "auto_update": false,
-    "minimum_client_version": "1.12.0",
-    "generate_interceptor": "tavernTweaksInterceptor"
+  "display_name": "🐭 鼠鼠面板工坊 (ShuShu Panel)",
+  "loading_order": 30,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "RAY13465",
+  "version": "1.11.0",
+  "description": "把酒馆的角色管理面板拆成积木：按钮 → 模块（可 2 层、可设对齐）→ 分区，桌面/手机两套独立布局，底部栏钉在面板底部；附带 8 种角色卡样式（可实时切换）+ 头像高清化。"
 }
