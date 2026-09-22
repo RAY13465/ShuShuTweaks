@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.21.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.22.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4439,8 +4439,33 @@ function orbChatLoad(file) {
     } catch (e) { toast('读档失败：' + e.message, 'warning'); return false; }
 }
 
-async function orbChatDelete(file) {
-    const ch = orbChatChar();
+/** 存档改名：走酒馆的 renameChat（它内部还会清洗非法字符）
+    ⚠️ 名字带不带 .jsonl 这里不赌 —— 先按不带扩展名试，失败再用带扩展名的试一次。 */
+async function orbChatRename(file, newName) {
+    const ctx = orbChatCtx();
+    if (!ctx.renameChat) { toast('酒馆没暴露 renameChat', 'warning'); return false; }
+    const oldBase = String(file || '').replace(/\.jsonl$/i, '');
+    const nn = String(newName || '').trim();
+    if (!nn) { toast('名字不能为空', 'warning'); return false; }
+    try {
+        await ctx.renameChat(oldBase, nn);
+        toast('已改名：' + nn, 'success');
+        setTimeout(() => orbChatsFetch(), 900);
+        return true;
+    } catch (e) {
+        try {
+            await ctx.renameChat(String(file), nn);            // 兜底：带扩展名再试一次
+            toast('已改名：' + nn, 'success');
+            setTimeout(() => orbChatsFetch(), 900);
+            return true;
+        } catch (e2) {
+            toast('改名失败：' + (e2 && e2.message ? e2.message : e.message), 'warning');
+            return false;
+        }
+    }
+}
+
+async function orbChatDelete(file) {    const ch = orbChatChar();
     if (!ch) return false;
     try {
         const res = await fetch('/api/chats/delete', {
@@ -4478,6 +4503,7 @@ function orbChatRowsHTML() {
             + '</div>'
             + '<div class="ssp-orb-pacts">'
             + '<span class="ssp-pbtn' + (on ? ' primary' : '') + '" data-orb-chatload="' + esc(x.file) + '">' + (on ? '当前' : '读档') + '</span>'
+            + '<span class="ssp-pbtn" data-orb-chatren="' + esc(x.file) + '" data-orb-chatname="' + esc(x.name) + '"><i class="fa-solid fa-pen"></i></span>'
             + '<span class="ssp-pbtn danger" data-orb-chatdel="' + esc(x.file) + '" data-orb-chatname="' + esc(x.name) + '"><i class="fa-solid fa-trash"></i></span>'
             + '</div></div>';
     }).join('');
@@ -5487,6 +5513,17 @@ function bindOrb() {
         /* 存档页：刷新 / 读档 / 删除 / 清除搜索 */
         if (t.closest('[data-orb-chrefresh]')) { orbChatsFetch(); return; }
         if (t.closest('[data-orb-chclear]')) { orbChSearch = ''; renderOrbPanel(); return; }
+        const cren = t.closest('[data-orb-chatren]');
+        if (cren) {
+            const file = cren.dataset.orbChatren, nm = cren.dataset.orbChatname || file;
+            callGenericPopup('把存档「' + nm + '」改成什么名字？<br><i style="opacity:.6">（酒馆会自动清洗掉文件名里的非法字符）</i>',
+                POPUP_TYPE.INPUT, nm, { okButton: '改名', cancelButton: '取消' })
+                .then(r => {
+                    const val = (typeof r === 'string') ? r : '';
+                    if (val && val.trim() && val.trim() !== nm) orbChatRename(file, val.trim());
+                });
+            return;
+        }
         const cload = t.closest('[data-orb-chatload]');
         if (cload) { orbChatLoad(cload.dataset.orbChatload); return; }
         const cdel = t.closest('[data-orb-chatdel]');
