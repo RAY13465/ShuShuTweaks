@@ -4105,7 +4105,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.29.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.29.2';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4467,6 +4467,12 @@ function bindHdAvatars() {
         new MutationObserver(muts => {
             if (!hdAvatarWanted()) return;
             muts.forEach(mu => {
+                /* ⚠️ 关键：酒馆常常"先插入 <img>、后设 src"，属性变化不走 childList；
+                   About 版头那张大图就是这么被漏掉的（一直显示 96x144 的缩略图）。 */
+                if (mu.type === 'attributes' && mu.target && mu.target.tagName === 'IMG') {
+                    if (hdSwapOne(mu.target)) { try { window.__sspHdCount = (window.__sspHdCount || 0) + 1; } catch (e) { } }
+                    return;
+                }
                 mu.addedNodes && mu.addedNodes.forEach(node => {
                     if (!node || node.nodeType !== 1) return;
                     if (node.tagName === 'IMG') hdSwapOne(node);
@@ -4476,7 +4482,7 @@ function bindHdAvatars() {
                     }
                 });
             });
-        }).observe(document.body, { childList: true, subtree: true });
+        }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
     } catch (e) { }
     return true;
 }
