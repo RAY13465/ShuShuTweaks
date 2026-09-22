@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.18.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.18.2';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4521,7 +4521,7 @@ function orbPresetHTML() {
         + (orbPresetAuto() ? ' checked' : '') + '><span>切到绑定的角色时自动换预设（会弹提示）</span></label></div>'
         + '<div id="ssp_orb_preset_list">' + orbPresetRowsHTML() + '</div>'
         + '<div class="ssp-orb-empty" style="padding-top:6px">当前预设：<b>' + esc(orbPresetCur() || '(读不到)') + '</b>'
-        + '；「用这个」立刻切，「绑定」选角色（一张卡只认一个预设，换绑会盖掉）。</div>';
+        + '；「用这个」立刻切，「绑定」选角色 —— <b>一个预设能绑多个角色卡</b>（点几个绑几个），一张角色卡只认一个预设。</div>';
 }
 
 function orbPresetPickerHTML(name) {
@@ -4540,8 +4540,9 @@ function orbPresetPickerHTML(name) {
     return '<div class="ssp-orb-bindhead">'
         + '<span class="ssp-pbtn" data-orb-presetback="1"><i class="fa-solid fa-arrow-left"></i>返回</span>'
         + '<b>' + esc(name) + ' · 绑定角色</b>'
+        + '<span class="ssp-orb-charmark" style="margin-left:auto">已绑 ' + conns.length + ' 个</span>'
         + '</div>'
-        + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">点角色＝绑到它 / 再点＝解除。一张角色卡只认一个预设，绑新的会把旧的盖掉。</div>'
+        + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">点角色＝绑到它 / 再点＝解除。<b>一个预设可以绑多个角色卡</b>（点几个绑几个）；一张角色卡只认一个预设（绑新的会盖掉旧的）。</div>'
         + '<div class="ssp-orb-charrows">' + rows + '</div>'
         + (conns.length ? '<div class="ssp-orb-empty" style="padding-top:6px">已绑定：' + esc(conns.join('、')) + '</div>' : '');
 }
