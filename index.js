@@ -360,50 +360,30 @@ const CARD_STYLES = {
 #rm_print_characters_block .character_select.is_fav .avatar{ outline:none; }
     ` },
 
-    /* 叠层相册 —— 档案卡，悬停亮出真身 */
-    stack: { name: '叠层相册', hint: '档案卡，悬停亮出真身', css: `
-/* 叠层档案：
-   静止 = 不透明的「档案卡」—— 左边一张小照片、右边名字/简介，全是实心底 + 实色字，
-          不再压半透明遮罩，所以不悬停也一眼看清（以前就是被黑纱糊住啥也看不见）。
-   悬停 = 卡片抬起来，那张小照片**放大铺满整张卡**（真身），这层薄纱只在这时候出现，
-          用来保证名字压在图片上仍然读得清。
-   文字在静止状态是**垂直居中**的，但照片和名字都偏上，叠压时露出来的那半张也看得见。 */
+    /* 叠层相册 —— 花活 */
+    stack: { name: '叠层相册', hint: '花活', css: `
+/* 卡片互相压着，像一叠相片；指到哪张哪张抬起来。
+   —— 样式保持原样（立体感、叠压、悬停右移都不动），只把「静止时看不清」的三处调轻：
+      ① 遮罩：原来 0.78 的黑纱铺到 30% 才淡出 → 现在只压在文字那一小片，右边整张图是清的
+      ② 上压阴影：0.45 → 0.3（还留着，叠压的立体感靠它）
+      ③ 名字阴影加深一点（压在亮图上也不糊） */
 #rm_print_characters_block { padding-top:10px; }
-#rm_print_characters_block .character_select{ position:relative; height:var(--pv-h,78px); padding:0; overflow:hidden;
-  margin-top:calc(var(--pv-gap,6px) - 6px - var(--pv-h,78px) * var(--pv-overlay,20) / 100);
-  border-radius:var(--pv-radius,14px);
-  background:#17171d;
-  box-shadow:inset 3px 0 0 0 var(--SmartThemeQuoteColor, rgba(255,255,255,.28)), inset 0 0 0 1px rgba(255,255,255,.06);
-  transition:transform .22s ease, box-shadow .22s ease; }
+#rm_print_characters_block .character_select{ position:relative; height:var(--pv-h,78px); padding:0; overflow:visible;
+  margin-top:calc(var(--pv-gap,6px) - 6px - var(--pv-h,78px) * var(--pv-overlay,20) / 100); border-radius:var(--pv-radius,14px);
+  transition:transform .25s ease, margin .25s ease; }
 #rm_print_characters_block .character_select:first-child{ margin-top:0; }
-#rm_print_characters_block .character_select:hover{ transform:translateY(-2px) translateX(6px); z-index:9;
-  box-shadow:0 14px 30px rgba(0,0,0,.55), inset 3px 0 0 0 var(--SmartThemeQuoteColor, rgba(255,255,255,.28)); }
-/* 小照片 → 悬停铺满（真身）。照片顶部对齐：叠压时露出来的那一条里就能看见它 */
-#rm_print_characters_block .character_select .avatar{ position:absolute; left:12px; top:7px;
-  width:calc(var(--pv-h,78px) * .5); height:calc(var(--pv-h,78px) * .7);
-  border-radius:max(3px, calc(var(--pv-radius,14px) * .35)); overflow:hidden; align-self:auto; z-index:2;
-  box-shadow:0 4px 12px rgba(0,0,0,.5), 0 0 0 2px rgba(255,255,255,.13);
-  transition:left .26s ease, top .26s ease, width .26s ease, height .26s ease,
-             border-radius .26s ease, transform .26s ease, box-shadow .26s ease; }
-#rm_print_characters_block .character_select:hover .avatar{ left:0; top:0; width:100%; height:100%;
-  border-radius:inherit; box-shadow:none; }
-#rm_print_characters_block .character_select .avatar img{ width:100%; height:100%; object-fit:cover; object-position:center var(--pv-focus,32%);
-  border:0; border-radius:0; box-shadow:none; }
-/* 文字：静止是实心底上的实色字；悬停才浮出薄纱。
-   ⚠️ 必须**顶部对齐**：卡片互相叠压，只有上面那一条是露出来的 —— 居中的话名字正好压在边缘上。 */
-#rm_print_characters_block .character_select .character_select_container{ position:absolute; inset:0; z-index:3; width:auto;
-  padding:9px 14px 0 calc(var(--pv-h,78px) * .5 + 24px);
-  justify-content:flex-start; gap:2px; border-radius:inherit; background:transparent;
-  transition:padding .26s ease, background .26s ease; }
-#rm_print_characters_block .character_select:hover .character_select_container{
-  padding:10px 14px;
-  background:linear-gradient(to right, rgba(0,0,0,.74) 26%, rgba(0,0,0,.3) 62%, transparent 100%); }
+#rm_print_characters_block .character_select:hover{ background:transparent; transform:translateX(8px); z-index:9; }
+#rm_print_characters_block .character_select .avatar{ position:absolute; inset:0; width:100%; height:100%; border-radius:inherit;
+  overflow:hidden; align-self:auto; box-shadow:0 -5px 12px rgba(0,0,0,.3), 0 0 0 1px var(--SmartThemeBorderColor, rgba(255,255,255,.12)); }
+#rm_print_characters_block .character_select .avatar img{ width:100%; height:100%; object-fit:cover; border:0; border-radius:0; box-shadow:none; }
+#rm_print_characters_block .character_select .character_select_container{ position:absolute; inset:0; z-index:2; width:auto; padding:10px 14px;
+  justify-content:center; gap:2px; border-radius:inherit;
+  background:linear-gradient(to right, rgba(0,0,0,.55) 0%, rgba(0,0,0,.22) 42%, transparent 72%); }
 #rm_print_characters_block .character_select .character_name_block{ margin:0; }
-#rm_print_characters_block .character_select .ch_name{ font-size:var(--pv-name,15.5px); color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.45); }
-#rm_print_characters_block .character_select .ch_description{ margin:0; color:rgba(255,255,255,.62); }
+#rm_print_characters_block .character_select .ch_name{ font-size:var(--pv-name,15.5px); color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.85), 0 0 10px rgba(0,0,0,.5); }
+#rm_print_characters_block .character_select .ch_description{ margin:0; color:rgba(255,255,255,.78); text-shadow:0 1px 4px rgba(0,0,0,.7); }
 #rm_print_characters_block .character_select.is_fav .ch_name{ color:var(--golden); }
-#rm_print_characters_block .character_select.is_fav .avatar{ box-shadow:0 4px 12px rgba(0,0,0,.5), 0 0 0 2px var(--golden); }
-#rm_print_characters_block .character_select.is_fav:hover .avatar{ box-shadow:none; }
+#rm_print_characters_block .character_select.is_fav .avatar{ outline:none; box-shadow:0 -5px 12px rgba(0,0,0,.3), 0 0 0 2px var(--golden); }
     ` },
 
     /* 歌单行 —— 网易云那种一行一首 */
@@ -4038,7 +4018,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.12.4';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.12.5';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
