@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.14.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.15.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4376,6 +4376,7 @@ var orbBuilt = false;
 var orbOpenNow = false;
 var orbEditing = null;
 var orbTab = 'notes';       // 当前模块页（模块容器：以后加功能只加标签页）
+var orbBinding = null;      // 正在给哪个面具选绑定角色（null = 不在绑定模式）
 
 function orbNotes() {
     const s = getSettings();
@@ -4492,6 +4493,9 @@ function orbPersonaNew() {
 }
 
 function orbPersonaHTML() {
+    /* 绑定模式：正在给某个面具选角色 */
+    if (orbBinding) return orbBindPickerHTML(orbBinding);
+
     const list = orbPersonas();
     const act = orbActivePersona();
     if (!list.length) {
@@ -4500,17 +4504,92 @@ function orbPersonaHTML() {
     }
     const cards = list.map(p => {
         const on = (p.id === act);
+        const bound = orbBindNames(p.id);
         return '<div class="ssp-orb-face' + (on ? ' on' : '') + '" data-orb-persona="' + esc(p.id) + '" title="' + esc(p.name) + '">'
             + '<img src="' + orbPersonaThumb(p.id) + '" alt="">'
-            + '<span class="ssp-orb-face-n">' + esc(p.name) + '</span>'
             + (on ? '<span class="ssp-orb-face-t">当前</span>' : '')
+            + '<span class="ssp-orb-face-n">' + esc(p.name) + '</span>'
+            + '<span class="ssp-orb-bind' + (bound ? ' has' : '') + '" data-orb-bind="' + esc(p.id) + '"'
+            + ' title="' + (bound ? '已绑定：' + esc(bound) : '绑定角色（跟这个角色聊天时自动戴这个面具）') + '">'
+            + '<i class="fa-solid fa-link"></i>' + (bound ? esc(bound) : '绑定') + '</span>'
             + '</div>';
     }).join('');
     return '<div class="ssp-orb-faces">' + cards + '</div>'
         + '<div class="ssp-orb-foot">'
         + '<span class="ssp-pbtn primary" data-orb-newpersona="1"><i class="fa-solid fa-plus"></i>新建面具</span>'
         + '</div>'
-        + '<div class="ssp-orb-empty" style="padding-top:6px">点一个就换面具（走酒馆原生切换）；「新建面具」会打开酒馆的加面具流程。</div>';
+        + '<div class="ssp-orb-empty" style="padding-top:6px">点头像换面具；点卡片下面的「绑定 / 🔗」可以把这个面具绑到某个角色 —— 以后跟那个角色聊天就自动戴它。</div>';
+}
+
+/* ---------------------------- 面具 ↔ 角色 绑定 ----------------------------
+   数据：power_user.persona_descriptions[面具id].connections = [{type:'character', id:'角色头像文件名'}]
+   写：直接改上下文里的 live 对象 + saveSettingsDebounced()（实测可写可保存）。
+   ------------------------------------------------------------------------ */
+function orbCharList() {
+    let c = [];
+    try { c = (getContext() || {}).characters || []; } catch (e) { }
+    return c.map(x => ({ id: x.avatar, name: x.name }));
+}
+
+function orbBindConns(id) {
+    try {
+        const d = (getContext().powerUserSettings || {}).persona_descriptions || {};
+        const rec = d[id];
+        if (!rec) return [];
+        if (!Array.isArray(rec.connections)) rec.connections = [];
+        return rec.connections;
+    } catch (e) { return []; }
+}
+
+/** 绑定的角色名（逗号分隔，没绑定返回空串） */
+function orbBindNames(id) {
+    const chars = orbCharList();
+    return orbBindConns(id).map(c => {
+        const hit = chars.find(x => x.id === (c && c.id));
+        return hit ? hit.name : (c && c.id) || '?';
+    }).join('、');
+}
+
+function orbBindToggle(id, charId) {
+    try {
+        const d = getContext().powerUserSettings.persona_descriptions || {};
+        if (!d[id]) d[id] = { description: '', position: 0, connections: [] };
+        if (!Array.isArray(d[id].connections)) d[id].connections = [];
+        const i = d[id].connections.findIndex(c => c && c.id === charId);
+        if (i >= 0) d[id].connections.splice(i, 1);
+        else d[id].connections.push({ type: 'character', id: charId });
+        save();
+        return i < 0;                                  // true = 新绑上
+    } catch (e) { toast('绑定失败：' + e.message, 'warning'); return null; }
+}
+
+function orbBindClear(id) {
+    try {
+        const d = getContext().powerUserSettings.persona_descriptions || {};
+        if (d[id]) { d[id].connections = []; save(); }
+        return true;
+    } catch (e) { return false; }
+}
+
+function orbBindPickerHTML(id) {
+    const p = orbPersonas().find(x => x.id === id) || { name: id };
+    const conns = orbBindConns(id).map(c => c && c.id);
+    const chars = orbCharList();
+    const rows = chars.length ? chars.map(c => {
+        const on = conns.indexOf(c.id) >= 0;
+        return '<div class="ssp-orb-charrow' + (on ? ' on' : '') + '" data-orb-bindchar="' + esc(c.id) + '">'
+            + '<img src="/thumbnail?type=avatar&file=' + encodeURIComponent(c.id) + '" alt="">'
+            + '<span class="ssp-orb-charn">' + esc(c.name) + '</span>'
+            + '<span class="ssp-orb-charmark">' + (on ? '<i class="fa-solid fa-check"></i> 已绑定' : '<i class="fa-regular fa-circle"></i>') + '</span>'
+            + '</div>';
+    }).join('') : '<div class="ssp-orb-empty">没读到角色列表。</div>';
+    return '<div class="ssp-orb-bindhead">'
+        + '<span class="ssp-pbtn" data-orb-bindback="1"><i class="fa-solid fa-arrow-left"></i>返回</span>'
+        + '<b>' + esc(p.name) + ' · 绑定角色</b>'
+        + '<span class="ssp-pbtn danger" data-orb-bindclear="' + esc(id) + '">清空</span>'
+        + '</div>'
+        + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">点角色＝绑定/取消；跟已绑定的角色聊天时，酒馆会自动戴上这个面具。</div>'
+        + '<div class="ssp-orb-charrows">' + rows + '</div>';
 }
 
 function orbNotesHTML() {
@@ -4680,7 +4759,14 @@ function bindOrb() {
         /* 模块标签页 */
         const tabEl = t.closest('[data-orb-tab]');
         if (tabEl) { orbTab = tabEl.dataset.orbTab || 'notes'; orbEditing = null; renderOrbPanel(); return; }
-        /* 面具栏：选一个 / 新建 */
+        /* 面具栏：选一个 / 新建 / 绑定角色 */
+        if (t.closest('[data-orb-bindback]')) { orbBinding = null; renderOrbPanel(); return; }
+        const bindBtn = t.closest('[data-orb-bind]');
+        if (bindBtn) { orbBinding = bindBtn.dataset.orbBind; renderOrbPanel(); return; }
+        const bindChar = t.closest('[data-orb-bindchar]');
+        if (bindChar && orbBinding) { orbBindToggle(orbBinding, bindChar.dataset.orbBindchar); renderOrbPanel(); return; }
+        const bindClear = t.closest('[data-orb-bindclear]');
+        if (bindClear) { orbBindClear(bindClear.dataset.orbBindclear); toast('已清空绑定', 'info'); renderOrbPanel(); return; }
         const face = t.closest('[data-orb-persona]');
         if (face) { orbPersonaSwitch(face.dataset.orbPersona); renderOrbPanel(); return; }
         if (t.closest('[data-orb-newpersona]')) { orbPersonaNew(); return; }

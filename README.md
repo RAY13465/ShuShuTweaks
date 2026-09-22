@@ -640,3 +640,23 @@ row.remove();
 | 新建 | 点 #add_avatar_button（酒馆原生的隐藏 file input） |
 
 顺带把面板的模块容器做通了：标签页现在**能点、会切换**，以后加功能就是往 ORB_MODULES 里加一项 + 写个 render。
+
+## 🔗 面具 ↔ 角色 绑定 · v1.15.0 新增
+
+面具栏每张卡片下面多了一个「绑定 / 🔗」小标签：
+
+- 卡片上直接显示**已经绑给谁**（比如「林疏桐 → 周树生」）
+- 点它 → 进角色选择页（列出所有角色，头像 + 名字 + 勾选状态，可多选）
+- 再点一次同一个角色 = 取消；顶部还有「清空」一键解绑
+- 绑定后，**跟那个角色聊天时酒馆会自动戴上这个面具**（酒馆原生行为）
+
+### 数据怎么读写的
+
+| 项 | 说明 |
+|---|---|
+| 读 | SillyTavern.getContext().powerUserSettings.persona_descriptions[面具id].connections |
+| 结构 | 数组，每项 { type: "character", id: "角色头像文件名" }（酒馆原生格式，支持一个面具绑多个角色） |
+| 写 | 直接改上面这个 live 对象 → 再调 saveSettingsDebounced()（实测能落盘，刷新后仍在） |
+| 角色列表 | SillyTavern.getContext().characters（name + avatar） |
+
+实测：给你本来没绑定的面具绑一个角色 → 落盘 ✓ → 再解绑 → **原来的绑定一条没动** ✓。

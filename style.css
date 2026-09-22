@@ -612,3 +612,34 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     .ssp-orb-face { width: 68px; }
     .ssp-orb-face img { width: 54px; height: 54px; }
 }
+/* ---------- 面具 ↔ 角色 绑定 ---------- */
+.ssp-orb-face { width: 84px; }
+.ssp-orb-bind {
+    display: inline-flex; align-items: center; gap: 3px; max-width: 82px;
+    font-size: 9.5px; line-height: 1.3; padding: 1px 5px; border-radius: 999px;
+    border: 1px dashed rgba(255, 255, 255, .25); color: rgba(255, 255, 255, .55);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ssp-orb-bind:hover { border-color: #fff; color: #fff; border-style: solid; }
+.ssp-orb-bind.has { border-style: solid; border-color: rgba(255, 255, 255, .7); color: #fff; background: rgba(255, 255, 255, .12); }
+
+.ssp-orb-bindhead { display: flex; align-items: center; gap: 8px; padding: 2px 0 6px; }
+.ssp-orb-bindhead b { flex: 1 1 auto; font-size: 13px; }
+.ssp-orb-charrows { display: flex; flex-direction: column; gap: 4px; }
+.ssp-orb-charrow {
+    display: flex; align-items: center; gap: 9px; padding: 5px 8px; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, .16); border-radius: 9px; background: rgba(255, 255, 255, .03);
+}
+.ssp-orb-charrow:hover { background: rgba(255, 255, 255, .09); }
+.ssp-orb-charrow img { width: 30px; height: 30px; object-fit: cover; border-radius: 7px; border: 1px solid rgba(255, 255, 255, .18); }
+.ssp-orb-charn { flex: 1 1 auto; font-size: 12.5px; min-width: 0; }
+.ssp-orb-charmark { font-size: 11px; color: rgba(255, 255, 255, .45); }
+.ssp-orb-charrow.on { border-color: rgba(255, 255, 255, .75); background: rgba(255, 255, 255, .13); }
+.ssp-orb-charrow.on .ssp-orb-charmark { color: #fff; }
+
+@media (max-width: 560px) {
+    .ssp-orb-panel { width: 96vw; max-height: 88vh; }
+    #ssp_orb { right: 12px; bottom: 84px; }
+    .ssp-orb-face { width: 72px; }
+    .ssp-orb-face img { width: 54px; height: 54px; }
+}
