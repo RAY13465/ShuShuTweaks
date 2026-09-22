@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.18.2';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.19.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4657,10 +4657,72 @@ function orbPersonaSwitch(id) {
 }
 
 function orbPersonaNew() {
-    const btn = document.getElementById('add_avatar_button');
-    if (!btn) { toast('没找到酒馆的「加面具」按钮', 'warning'); return false; }
-    btn.click();                                  // 走酒馆原生新建流程（选图 → 起名）
+    /* 直接进「新建」表单：填名字/描述 → 保存时生成一张占位图并调酒馆的上传接口建出真面具。
+       （以前是点酒馆的隐藏 file input，等于把用户丢进文件选择框 —— 用户不干。） */
+    orbPersonaEdit = '__new__';
+    renderOrbPanel();
     return true;
+}
+
+/** 生成一张占位头像（深色底 + 名字首字），用于新建面具 */
+function orbPlaceholderBlob(name) {
+    return new Promise(resolve => {
+        try {
+            const w = 240, h = 360;
+            const cv = document.createElement('canvas');
+            cv.width = w; cv.height = h;
+            const g = cv.getContext('2d');
+            const grad = g.createLinearGradient(0, 0, w, h);
+            grad.addColorStop(0, '#2a2a33');
+            grad.addColorStop(1, '#141419');
+            g.fillStyle = grad; g.fillRect(0, 0, w, h);
+            g.strokeStyle = 'rgba(255,255,255,.22)'; g.lineWidth = 4; g.strokeRect(2, 2, w - 4, h - 4);
+            g.fillStyle = 'rgba(255,255,255,.9)';
+            g.font = '700 130px -apple-system,"Microsoft YaHei",sans-serif';
+            g.textAlign = 'center'; g.textBaseline = 'middle';
+            const ch = String(name || '新').trim().charAt(0) || '新';
+            g.fillText(ch, w / 2, h / 2);
+            cv.toBlob(b => resolve(b), 'image/png');
+        } catch (e) { resolve(null); }
+    });
+}
+
+/** 新建面具：上传占位图 → 写进酒馆的面具数据 → 返回新面具的 id */
+async function orbPersonaCreate(name, desc) {
+    const nm = String(name || '').trim() || '新面具';
+    try {
+        const blob = await orbPlaceholderBlob(nm);
+        if (!blob) { toast('占位图生成失败，改用酒馆的上传', 'warning'); return null; }
+        const ctx = getContext();
+        const file = new File([blob], 'persona.png', { type: 'image/png' });
+        const fd = new FormData();
+        fd.append('avatar', file);
+        fd.append('overwrite_name', nm);
+        const res = await fetch('/api/avatars/upload', {
+            method: 'POST',
+            headers: ctx.getRequestHeaders({ omitContentType: true }),
+            body: fd,
+        });
+        if (!res.ok) { toast('创建失败：' + res.status, 'warning'); return null; }
+        const data = await res.json().catch(() => ({}));
+        const path = data && data.path ? data.path : '';
+        const id = String(path).split('/').pop();
+        if (!id) { toast('创建失败：服务端没返回文件名', 'warning'); return null; }
+        /* 写进酒馆的面具数据（等于 initPersona 做的事） */
+        const pu = ctx.powerUserSettings;
+        if (!pu.personas) pu.personas = {};
+        pu.personas[id] = nm;
+        if (!pu.persona_descriptions) pu.persona_descriptions = {};
+        pu.persona_descriptions[id] = { description: String(desc || ''), position: 0, connections: [] };
+        save();
+        /* 通知酒馆（它会刷新自己的面具列表） */
+        try { if (ctx.eventSource && ctx.eventTypes && ctx.eventTypes.PERSONA_CREATED) await ctx.eventSource.emit(ctx.eventTypes.PERSONA_CREATED, { avatarId: id, name: nm, description: String(desc || '') }); } catch (e) { }
+        toast('已新建面具：' + nm, 'success');
+        return id;
+    } catch (e) {
+        toast('创建失败：' + e.message, 'warning');
+        return null;
+    }
 }
 
 function orbPersonaHTML() {
@@ -4765,20 +4827,24 @@ function orbPersonaSave(id, name, desc) {
 }
 
 function orbPersonaEditHTML(id) {
-    const p = orbPersonas().find(x => x.id === id) || { name: id };
+    const isNew = (id === '__new__');
+    const p = isNew ? { name: '' } : (orbPersonas().find(x => x.id === id) || { name: id });
     return '<div class="ssp-orb-bindhead">'
         + '<span class="ssp-pbtn" data-orb-pcancel="1"><i class="fa-solid fa-arrow-left"></i>返回</span>'
-        + '<b>编辑面具 · ' + esc(p.name) + '</b>'
+        + '<b>' + (isNew ? '新建面具' : '编辑面具 · ' + esc(p.name)) + '</b>'
         + '</div>'
         + '<div class="ssp-orb-fl"><span>名称</span>'
         + '<input class="ssp-inp" type="text" data-orb-pf="name" value="' + esc(p.name) + '" placeholder="面具名称（也就是 {{user}} 的名字）"></div>'
         + '<div class="ssp-orb-fl"><span>描述</span>'
-        + '<textarea class="ssp-inp ssp-orb-ta" data-orb-pf="desc" rows="8" placeholder="这个面具的人设描述（会作为用户设定进提示词）">' + esc(orbPersonaDesc(id)) + '</textarea></div>'
+        + '<textarea class="ssp-inp ssp-orb-ta" data-orb-pf="desc" rows="8" placeholder="这个面具的人设描述（会作为用户设定进提示词）">' + esc(isNew ? '' : orbPersonaDesc(id)) + '</textarea></div>'
         + '<div class="ssp-orb-edit-a">'
-        + '<span class="ssp-pbtn primary" data-orb-psave="' + esc(id) + '"><i class="fa-solid fa-check"></i>保存</span>'
+        + '<span class="ssp-pbtn primary" data-orb-psave="' + esc(id) + '"><i class="fa-solid fa-check"></i>' + (isNew ? '创建' : '保存') + '</span>'
         + '<span class="ssp-pbtn" data-orb-pcancel="1">取消</span>'
+        + (isNew ? '<span class="ssp-pbtn" data-orb-pupload="1"><i class="fa-solid fa-image"></i>改用酒馆上传（自己选图）</span>' : '')
         + '</div>'
-        + '<div class="ssp-orb-empty" style="padding-top:8px">改的是酒馆原生的面具数据（名称 = 你说话时显示的名字；描述 = 用户设定内容），跟酒馆自己的面板互通。</div>';
+        + (isNew
+            ? '<div class="ssp-orb-empty" style="padding-top:8px">直接填名字就能建 —— 头像先用一张自动生成的占位图（深色方块 + 名字首字），建完可以随时编辑；想用自己的图，点上面的「改用酒馆上传」。</div>'
+            : '<div class="ssp-orb-empty" style="padding-top:8px">改的是酒馆原生的面具数据（名称 = 你说话时显示的名字；描述 = 用户设定内容），跟酒馆自己的面板互通。</div>');
 }
 
 /* ---------------------------- 面具 ↔ 角色 绑定 ----------------------------
@@ -5125,9 +5191,29 @@ function bindOrb() {
             const pn = document.getElementById('ssp_orb_panel');
             const nEl = pn && pn.querySelector('[data-orb-pf="name"]');
             const dEl = pn && pn.querySelector('[data-orb-pf="desc"]');
-            if (orbPersonaSave(psave.dataset.orbPsave, nEl ? nEl.value : '', dEl ? dEl.value : '')) {
+            const pid = psave.dataset.orbPsave;
+            const pname = nEl ? nEl.value : '';
+            const pdesc = dEl ? dEl.value : '';
+            if (pid === '__new__') {
+                /* 新建：生成占位图 → 走酒馆上传接口 → 建完直接进编辑 */
+                if (!String(pname).trim()) { toast('先起个名字', 'warning'); return; }
+                orbPersonaCreate(pname, pdesc).then(newId => {
+                    if (!newId) return;
+                    orbPersonaEdit = newId;
+                    renderOrbPanel();
+                });
+                return;
+            }
+            if (orbPersonaSave(pid, pname, pdesc)) {
                 orbPersonaEdit = null; renderOrbPanel(); toast('面具已保存', 'success');
             }
+            return;
+        }
+        /* 新建时改用酒馆自己的上传（想自己选图） */
+        if (t.closest('[data-orb-pupload]')) {
+            const b = document.getElementById('add_avatar_button');
+            if (b) { b.click(); orbPersonaEdit = null; renderOrbPanel(); }
+            else toast('没找到酒馆的上传按钮', 'warning');
             return;
         }
         if (t.closest('[data-orb-bindback]')) { orbBinding = null; renderOrbPanel(); return; }
