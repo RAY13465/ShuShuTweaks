@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.19.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.20.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4382,6 +4382,137 @@ var orbPSearch = '';        // 面具页的搜索词（角色卡名 / 面具名 
 var orbPresetBinding = null;// 正在给哪个预设选绑定角色
 var orbPreSearch = '';      // 预设页搜索词
 
+/* ============================ 美化（主题）栏 ============================
+   跟预设栏一个套路：酒馆没有「主题绑角色」的原生功能，所以
+     读/切：驱动酒馆自己的主题下拉框 #themes（按文字找 option → 设 value → 派发 change）
+     绑定：themeBinds[角色头像] = 主题名，存本扩展设置
+     自动：切聊天时看当前角色绑了哪个主题 → 自动换 + 弹提示
+   ⚠️ 别假设 option 的 value 是什么（预设那边 value 就是序号）——
+      一律「按文字找到 option，再用它自己的 value」，两种都吃得下。
+   ========================================================================== */
+var orbThemeBinding = null;
+var orbThSearch = '';
+
+function orbThemeSel() { return document.getElementById('themes'); }
+function orbThemeList() {
+    const sel = orbThemeSel();
+    if (!sel) return [];
+    return Array.from(sel.options).map(o => (o.textContent || '').trim()).filter(Boolean);
+}
+function orbThemeCur() {
+    const sel = orbThemeSel();
+    if (!sel || sel.selectedIndex < 0 || !sel.options[sel.selectedIndex]) return '';
+    return (sel.options[sel.selectedIndex].textContent || '').trim();
+}
+function orbThemePick(name) {
+    const want = String(name || '').trim();
+    if (!want) return false;
+    const sel = orbThemeSel();
+    if (!sel) { toast('找不到酒馆的主题下拉框', 'warning'); return false; }
+    const opt = Array.from(sel.options).find(o => (o.textContent || '').trim() === want);
+    if (!opt) { toast('找不到主题「' + want + '」', 'warning'); return false; }
+    sel.value = opt.value;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+}
+function orbThemeBinds() {
+    const s = getSettings();
+    if (!s.themeBinds || typeof s.themeBinds !== 'object') s.themeBinds = {};
+    return s.themeBinds;
+}
+function orbThemeAuto() {
+    const s = getSettings();
+    if (typeof s.themeAuto !== 'boolean') s.themeAuto = true;
+    return s.themeAuto;
+}
+function orbThemeCharNames(name) {
+    const b = orbThemeBinds(), chars = orbCharList();
+    return Object.keys(b).filter(k => b[k] === name)
+        .map(k => (chars.find(c => c.id === k) || {}).name || k);
+}
+function orbThemeBind(charAvatar, name) {
+    const b = orbThemeBinds();
+    if (name) b[charAvatar] = name; else delete b[charAvatar];
+    save();
+}
+function orbThemeAutoApply() {
+    if (!orbThemeAuto()) return false;
+    const ch = orbPresetCurChar();                 // 复用：拿当前聊天角色
+    if (!ch) return false;
+    const want = orbThemeBinds()[ch.avatar];
+    if (!want) return false;
+    if (orbThemeCur() === want) return false;
+    if (orbThemeList().indexOf(want) < 0) { toast('绑的主题「' + want + '」已经找不到了', 'warning'); return false; }
+    if (orbThemePick(want)) {
+        toast('自动换美化：' + want + '（' + ch.name + ' 绑的）', 'info');
+        if (orbOpenNow) renderOrbPanel();
+        return true;
+    }
+    return false;
+}
+function orbThemeRowsHTML() {
+    const all = orbThemeList();
+    const cur = orbThemeCur();
+    if (!all.length) return '<div class="ssp-orb-empty">没读到主题（找不到酒馆的主题下拉框 #themes）。</div>';
+    const q = orbThSearch.toLowerCase();
+    const hit = all.filter(n => !q
+        || String(n).toLowerCase().indexOf(q) >= 0
+        || orbThemeCharNames(n).join('、').toLowerCase().indexOf(q) >= 0);
+    if (!hit.length) return '<div class="ssp-orb-empty">没有匹配「' + esc(orbThSearch) + '」的主题。<br>（搜的是：主题名 / 绑定在这上面的角色卡名）</div>';
+    const head = orbThSearch ? '<div class="ssp-orb-pcount">筛选出 ' + hit.length + ' / ' + all.length + ' 个主题</div>' : '';
+    const rows = hit.map(n => {
+        const on = (n === cur);
+        const names = orbThemeCharNames(n);
+        return '<div class="ssp-orb-prow' + (on ? ' on' : '') + '">'
+            + '<div class="ssp-orb-pmain">'
+            + '<div class="ssp-orb-pname">' + esc(n) + (on ? '<span class="ssp-orb-ptag">当前</span>' : '') + '</div>'
+            + '<div class="ssp-orb-pbind' + (names.length ? ' has' : '') + '"><i class="fa-solid fa-link"></i>'
+            + (names.length ? esc(names.join('、')) : '未绑定角色') + '</div>'
+            + '</div>'
+            + '<div class="ssp-orb-pacts">'
+            + '<span class="ssp-pbtn' + (on ? ' primary' : '') + '" data-orb-theme="' + esc(n) + '">' + (on ? '当前' : '用这个') + '</span>'
+            + '<span class="ssp-pbtn" data-orb-tbind="' + esc(n) + '"><i class="fa-solid fa-link"></i>绑定</span>'
+            + '</div></div>';
+    }).join('');
+    return head + '<div class="ssp-orb-plist">' + rows + '</div>';
+}
+function orbThemeHTML() {
+    if (orbThemeBinding) return orbThemePickerHTML(orbThemeBinding);
+    if (!orbThemeList().length) return orbThemeRowsHTML();
+    return '<div class="ssp-orb-pfilter">'
+        + '<i class="fa-solid fa-magnifying-glass"></i>'
+        + '<input class="ssp-inp" type="text" data-orb-thsearch="1" placeholder="搜主题 / 角色卡" value="' + esc(orbThSearch) + '">'
+        + (orbThSearch ? '<span class="ssp-pbtn" data-orb-thclear="1">清除</span>' : '')
+        + '</div>'
+        + '<div class="ssp-orb-pcount"><label class="ssp-orb-auto"><input type="checkbox" data-orb-thauto="1"'
+        + (orbThemeAuto() ? ' checked' : '') + '><span>切到绑定的角色时自动换美化（会弹提示）</span></label></div>'
+        + '<div id="ssp_orb_theme_list">' + orbThemeRowsHTML() + '</div>'
+        + '<div class="ssp-orb-empty" style="padding-top:6px">当前美化：<b>' + esc(orbThemeCur() || '(读不到)') + '</b>'
+        + '；「用这个」立刻换，「绑定」选角色 —— <b>一个主题能绑多个角色卡</b>，一张角色卡只认一个主题。</div>';
+}
+function orbThemePickerHTML(name) {
+    const b = orbThemeBinds();
+    const chars = orbCharList();
+    const rows = chars.length ? chars.map(c => {
+        const mine = (b[c.id] === name);
+        const other = (b[c.id] && b[c.id] !== name) ? b[c.id] : '';
+        return '<div class="ssp-orb-charrow' + (mine ? ' on' : '') + '" data-orb-tbindchar="' + esc(c.id) + '" data-orb-tbindname="' + esc(name) + '">'
+            + '<img src="/thumbnail?type=avatar&file=' + encodeURIComponent(c.id) + '" alt="">'
+            + '<span class="ssp-orb-charn">' + esc(c.name) + (other ? '<i style="opacity:.5"> · 现在绑的是「' + esc(other) + '」</i>' : '') + '</span>'
+            + '<span class="ssp-orb-charmark">' + (mine ? '<i class="fa-solid fa-check"></i> 已绑定' : '<i class="fa-regular fa-circle"></i>') + '</span>'
+            + '</div>';
+    }).join('') : '<div class="ssp-orb-empty">没读到角色列表。</div>';
+    const conns = orbThemeCharNames(name);
+    return '<div class="ssp-orb-bindhead">'
+        + '<span class="ssp-pbtn" data-orb-themeback="1"><i class="fa-solid fa-arrow-left"></i>返回</span>'
+        + '<b>' + esc(name) + ' · 绑定角色</b>'
+        + '<span class="ssp-orb-charmark" style="margin-left:auto">已绑 ' + conns.length + ' 个</span>'
+        + '</div>'
+        + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">点角色＝绑到它 / 再点＝解除。<b>一个主题可以绑多个角色卡</b>；一张角色卡只认一个主题（绑新的会盖掉旧的）。</div>'
+        + '<div class="ssp-orb-charrows">' + rows + '</div>'
+        + (conns.length ? '<div class="ssp-orb-empty" style="padding-top:6px">已绑定：' + esc(conns.join('、')) + '</div>' : '');
+}
+
 /* ============================ 预设（采样预设）栏 ============================
    酒馆没有「预设绑角色」的原生功能，所以：
      读/切：官方 API —— getPresetManager('openai') 的 getAllPresets / getSelectedPresetName / selectPreset
@@ -4602,6 +4733,7 @@ const ORB_MODULES = [
     { id: 'notes', name: '番外', icon: 'fa-feather-pointed', render: () => orbNotesHTML() },
     { id: 'persona', name: '面具', icon: 'fa-masks-theater', render: () => orbPersonaHTML() },
     { id: 'preset', name: '预设', icon: 'fa-sliders', render: () => orbPresetHTML() },
+    { id: 'theme', name: '美化', icon: 'fa-palette', render: () => orbThemeHTML() },
 ];
 function orbModule(id) { return ORB_MODULES.find(m => m.id === id) || null; }
 
@@ -5054,8 +5186,11 @@ function bindOrb() {
                 const evName = et[k];
                 if (!evName) return;
                 es.on(evName, () => {
-                    /* 切聊天时先看要不要自动换预设 */
-                    if (k === 'CHAT_CHANGED') { try { orbPresetAutoApply(); } catch (e) { } }
+                    /* 切聊天时先看要不要自动换预设 / 自动换美化 */
+                    if (k === 'CHAT_CHANGED') {
+                        try { orbPresetAutoApply(); } catch (e) { }
+                        try { orbThemeAutoApply(); } catch (e) { }
+                    }
                     if (!orbOpenNow) return;
                     /* 刷两次：事件刚发时酒馆可能还没把选中状态落下来 */
                     setTimeout(() => { if (orbOpenNow) renderOrbPanel(); }, 60);
@@ -5138,6 +5273,21 @@ function bindOrb() {
         }
     });
 
+    /* 美化页搜索 */
+    document.addEventListener('input', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbThsearch === undefined) return;
+        orbThSearch = el.value || '';
+        const box = document.getElementById('ssp_orb_theme_list');
+        if (box) box.innerHTML = orbThemeRowsHTML();
+        const bar = document.querySelector('.ssp-orb-pfilter');
+        if (bar) {
+            let c = bar.querySelector('[data-orb-thclear]');
+            if (orbThSearch && !c) { c = document.createElement('span'); c.className = 'ssp-pbtn'; c.setAttribute('data-orb-thclear', '1'); c.textContent = '清除'; bar.append(c); }
+            else if (!orbThSearch && c) c.remove();
+        }
+    });
+
     /* 预设页搜索 */
     document.addEventListener('input', ev => {
         const el = ev.target;
@@ -5158,8 +5308,28 @@ function bindOrb() {
         if (!t || !t.closest) return;
         if (t.closest('[data-orb-pclear]')) { orbPSearch = ''; renderOrbPanel(); return; }
         if (t.closest('[data-orb-close]')) { closeOrb(); return; }
-        /* 预设页：清除搜索 / 返回 / 用这个 / 绑定 / 选角色 / 自动开关 */
-        if (t.closest('[data-orb-preclear]')) { orbPreSearch = ''; renderOrbPanel(); return; }
+        /* 美化页：清除搜索 / 返回 / 用这个 / 绑定 / 选角色 / 自动开关 */
+        if (t.closest('[data-orb-thclear]')) { orbThSearch = ''; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-themeback]')) { orbThemeBinding = null; renderOrbPanel(); return; }
+        const thm = t.closest('[data-orb-theme]');
+        if (thm) { const n = thm.dataset.orbTheme; if (orbThemePick(n)) { toast('已换成美化：' + n, 'success'); renderOrbPanel(); } return; }
+        const tbind = t.closest('[data-orb-tbind]');
+        if (tbind) { orbThemeBinding = tbind.dataset.orbTbind; renderOrbPanel(); return; }
+        const tbc = t.closest('[data-orb-tbindchar]');
+        if (tbc) {
+            const charId = tbc.dataset.orbTbindchar, tname = tbc.dataset.orbTbindname;
+            const tb = orbThemeBinds();
+            orbThemeBind(charId, tb[charId] === tname ? '' : tname);
+            renderOrbPanel();
+            return;
+        }
+        if (t.closest('[data-orb-thauto]')) {
+            getSettings().themeAuto = Boolean(t.checked);
+            save();
+            toast(t.checked ? '自动换美化：开' : '自动换美化：关', 'info');
+            return;
+        }
+        /* 预设页：清除搜索 / 返回 / 用这个 / 绑定 / 选角色 / 自动开关 */        if (t.closest('[data-orb-preclear]')) { orbPreSearch = ''; renderOrbPanel(); return; }
         if (t.closest('[data-orb-presetback]')) { orbPresetBinding = null; renderOrbPanel(); return; }
         const prs = t.closest('[data-orb-preset]');
         if (prs) { const n = prs.dataset.orbPreset; if (orbPresetPick(n)) { toast('已换成预设：' + n, 'success'); renderOrbPanel(); } return; }
