@@ -708,3 +708,24 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     /* 搜索框和历史行都窄，滚动条别占太多 */
     .ssp-orb-panel .ssp-orb-body { padding: 9px 10px 11px; }
 }
+
+/* ===== 左下角魔法棒：悬浮球的收纳口（v1.25.0）===== */
+.ssp-orb-wand {
+    position: fixed; left: 14px; bottom: 14px; z-index: 3000;
+    width: 34px; height: 34px; border-radius: 50%;
+    display: grid; place-items: center; cursor: pointer;
+    background: linear-gradient(#1c1c22, #0e0e12);
+    border: 1px solid rgba(255, 255, 255, .2); color: rgba(255, 255, 255, .78);
+    font-size: 14px; box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+    transition: transform .16s ease, border-color .16s ease, color .16s ease;
+    user-select: none; touch-action: none;
+}
+.ssp-orb-wand:hover { transform: scale(1.08); border-color: rgba(255, 255, 255, .6); color: #fff; }
+/* 球被收进去时，魔法棒高亮一下，提示"球在里头" */
+.ssp-orb-wand.active { color: #fff; border-color: rgba(255, 255, 255, .75); box-shadow: 0 0 0 2px rgba(255, 255, 255, .15), 0 4px 14px rgba(0, 0, 0, .5); }
+
+/* 收纳态：球收进魔法棒（缩到 0 + 淡出，不占位置也不会被点到） */
+#ssp_orb.ssp-collapsed {
+    opacity: 0; transform: scale(.2); pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease;
+}

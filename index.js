@@ -4105,7 +4105,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.24.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.25.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4383,6 +4383,8 @@ var orbPersonaEdit = null;  // 正在编辑哪个面具（null = 不在编辑模
 var orbPSearch = '';        // 面具页的搜索词（角色卡名 / 面具名 / 描述）
 var orbPresetBinding = null;// 正在给哪个预设选绑定角色
 var orbPreSearch = '';      // 预设页搜索词
+var orbNSearch = '';        // 番外页搜索词
+var orbCollapsed = false;   // 悬浮球是否收纳进左下角魔法棒
 
 /* ============================ 存档（聊天记录）栏 ============================
    把酒馆的「聊天记录」搬进来：列出当前角色的所有 .jsonl 存档 → 读档 / 删除。
@@ -5197,9 +5199,30 @@ function orbBindPickerHTML(id) {
 }
 
 function orbNotesHTML() {
-    const list = orbNotes();
-    if (!list.length) return '<div class="ssp-orb-empty">还没有番外。点下面的「＋ 新的一条」就能存了 —— 存好之后可以一键复制，或者直接插进输入框。</div>';
-    return list.map(n => '<div class="ssp-orb-note" data-orb-note="' + esc(n.id) + '">'
+    return '<div class="ssp-orb-pfilter">'
+        + '<i class="fa-solid fa-magnifying-glass"></i>'
+        + '<input class="ssp-inp" type="text" data-orb-nsearch="1" placeholder="搜番外标题 / 正文" value="' + esc(orbNSearch) + '">'
+        + (orbNSearch ? '<span class="ssp-pbtn" data-orb-nclear="1">清除</span>' : '')
+        + '</div>'
+        + '<div id="ssp_orb_notes_list">' + orbNoteRowsHTML() + '</div>';
+}
+
+/** 一条番外是否命中搜索（标题 + 正文都算） */
+function orbNoteMatch(n, q) {
+    if (!q) return true;
+    const s = q.toLowerCase();
+    return String(n.title || '').toLowerCase().indexOf(s) >= 0
+        || String(n.text || '').toLowerCase().indexOf(s) >= 0;
+}
+
+/** 番外列表（搜索时只重画这一块，输入框不丢焦点） */
+function orbNoteRowsHTML() {
+    const all = orbNotes();
+    if (!all.length) return '<div class="ssp-orb-empty">还没有番外。点下面的「＋ 新的一条」就能存了 —— 存好之后可以一键复制，或者直接插进输入框。</div>';
+    const hit = all.filter(n => orbNoteMatch(n, orbNSearch));
+    if (!hit.length) return '<div class="ssp-orb-empty">没有匹配「' + esc(orbNSearch) + '」的番外。<br>（搜的是：标题 / 正文）</div>';
+    const head = orbNSearch ? '<div class="ssp-orb-pcount">筛选出 ' + hit.length + ' / ' + all.length + ' 条</div>' : '';
+    return head + hit.map(n => '<div class="ssp-orb-note" data-orb-note="' + esc(n.id) + '">'
         + '<div class="ssp-orb-note-h"><b>' + esc(n.title || '(没写标题)') + '</b>'
         + '<span class="ssp-orb-note-t">' + new Date(n.at || Date.now()).toLocaleDateString() + '</span></div>'
         + '<div class="ssp-orb-note-b">' + esc(String(n.text || '').slice(0, 160)) + (String(n.text || '').length > 160 ? '…' : '') + '</div>'
@@ -5303,6 +5326,21 @@ function mountOrb() {
     ball.innerHTML = '<span class="ssp-orb-diamond"></span><span class="ssp-orb-badge" id="ssp_orb_badge"></span>';
     document.body.append(ball);
 
+    /* ③ 左下角「魔法棒」按钮：球的收纳口 —— 点一下把球收进去 / 再点放出来。
+       球的展开与否存进设置（orbCollapsed），刷新后保持。 */
+    const oldWand = document.getElementById('ssp_orb_wand'); if (oldWand) oldWand.remove();
+    const wand = document.createElement('div');
+    wand.className = 'ssp-orb-wand';
+    wand.id = 'ssp_orb_wand';
+    wand.setAttribute('data-orb-wand', '1');
+    wand.title = '鼠鼠口袋：点一下把球收起来 / 放出来';
+    /* ⚠️ 跟球一样：不能用 CSS 的 bottom（酒馆里包含块高度会被算成 0 → 按钮飞到屏幕外）。
+       这里直接按视口算好 left/top。 */
+    wand.setAttribute('style', 'left:14px;top:' + Math.round(window.innerHeight - 34 - 14) + 'px;right:auto;bottom:auto;');
+    wand.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i>';
+    document.body.append(wand);
+    orbSetCollapsed(getSettings().orbCollapsed === true, true);
+
     /* ② 面板容器：全屏但 pointer-events:none，只让遮罩/面板收点击 */
     const root = document.createElement('div');
     root.id = 'ssp_orb_root';
@@ -5315,6 +5353,21 @@ function mountOrb() {
     renderOrbPanel();
     refreshOrbBadge();
     return true;
+}
+
+/** 收纳 / 展开悬浮球（魔法棒控制；silent=true 时不弹提示、不落盘，用于初始化） */
+function orbSetCollapsed(on, silent) {
+    orbCollapsed = Boolean(on);
+    const ball = document.getElementById('ssp_orb');
+    const wand = document.getElementById('ssp_orb_wand');
+    if (ball && ball.classList) ball.classList.toggle('ssp-collapsed', orbCollapsed);
+    if (wand && wand.classList) wand.classList.toggle('active', orbCollapsed);
+    if (!silent) {
+        getSettings().orbCollapsed = orbCollapsed;
+        save();
+        toast(orbCollapsed ? '球已收进魔法棒（点魔法棒放出来）' : '球放出来了', 'info');
+    }
+    return orbCollapsed;
 }
 
 function bindOrb() {
@@ -5423,6 +5476,21 @@ function bindOrb() {
         }
     });
 
+    /* 番外页搜索 */
+    document.addEventListener('input', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbNsearch === undefined) return;
+        orbNSearch = el.value || '';
+        const box = document.getElementById('ssp_orb_notes_list');
+        if (box) box.innerHTML = orbNoteRowsHTML();
+        const bar = document.querySelector('.ssp-orb-pfilter');
+        if (bar) {
+            let c = bar.querySelector('[data-orb-nclear]');
+            if (orbNSearch && !c) { c = document.createElement('span'); c.className = 'ssp-pbtn'; c.setAttribute('data-orb-nclear', '1'); c.textContent = '清除'; bar.append(c); }
+            else if (!orbNSearch && c) c.remove();
+        }
+    });
+
     /* 存档页搜索 */
     document.addEventListener('input', ev => {
         const el = ev.target;
@@ -5516,6 +5584,10 @@ function bindOrb() {
             if (orbTab === 'chat') orbChatsFetch();            // 存档页：打开就拉一次列表
             return;
         }
+        /* 番外页：清除搜索 */
+        if (t.closest('[data-orb-nclear]')) { orbNSearch = ''; renderOrbPanel(); return; }
+        /* 魔法棒：收纳 / 展开悬浮球 */
+        if (t.closest('[data-orb-wand]')) { orbSetCollapsed(!orbCollapsed); return; }
         /* 存档页：刷新 / 读档 / 删除 / 清除搜索 */
         if (t.closest('[data-orb-chrefresh]')) { orbChatsFetch(); return; }
         if (t.closest('[data-orb-chclear]')) { orbChSearch = ''; renderOrbPanel(); return; }
@@ -5618,60 +5690,19 @@ function bindOrb() {
             o.style.left = Math.round(window.innerWidth - w - right) + 'px';
             o.style.top = Math.round(window.innerHeight - h - bottom) + 'px';
             o.style.right = 'auto'; o.style.bottom = 'auto';
+            /* 魔法棒也跟着重算（它同样是 fixed + JS 定位） */
+            const wd = document.getElementById('ssp_orb_wand');
+            if (wd) {
+                wd.style.left = '14px';
+                wd.style.top = Math.round(window.innerHeight - (wd.offsetHeight || 34) - 14) + 'px';
+                wd.style.right = 'auto'; wd.style.bottom = 'auto';
+            }
         });
     }
     return true;
 }
 
 
-/* ===== 高清头像：全站范围（v1.24.0）=====
-   把页面上所有 /thumbnail?type=avatar&file=X 换成原图 /characters/X ——
-   聊天气泡、角色列表、群聊、详情页……凡是出现角色头像的地方都高清。
-   两种都覆盖：avatar → /characters/<file>；persona → /User Avatars/<file>（都实测 HTTP 200，不会裂图）。
-   ⚠️ 换完 src 就不再匹配 /thumbnail? 了，所以 MutationObserver 不会自己咬自己。
-   开关：设置面板卡片样式里的「高清头像」。 */
-function hdAvatarWanted() {
-    try { const s = getSettings(); return !(s.card && s.card.hd === false); } catch (e) { return true; }
-}
-function hdSwapOne(img) {
-    try {
-        const src = img.getAttribute('src') || '';
-        const m = /\/thumbnail\?[^#]*?type=(avatar|persona)[^#]*?[?&]file=([^&]+)/.exec(src);
-        if (!m) return false;
-        const file = decodeURIComponent(m[2]);
-        if (!file) return false;
-        const origin = (/type=persona/.test(src) ? '/User%20Avatars/' : '/characters/') + encodeURIComponent(file);
-        if (img.getAttribute('src') === origin) return false;
-        img.setAttribute('src', origin);
-        return true;
-    } catch (e) { return false; }
-}
-function hdSwapAll(root) {
-    if (!hdAvatarWanted()) return 0;
-    const scope = root && root.querySelectorAll ? root : document;
-    let n = 0;
-    scope.querySelectorAll('img[src*="/thumbnail?"]').forEach(img => { if (hdSwapOne(img)) n += 1; });
-    return n;
-}
-function bindHdAvatars() {
-    if (bindHdAvatars.done) return false;
-    bindHdAvatars.done = true;
-    hdSwapAll(document);
-    try {
-        new MutationObserver(muts => {
-            if (!hdAvatarWanted()) return;
-            muts.forEach(mu => {
-                mu.addedNodes && mu.addedNodes.forEach(node => {
-                    if (!node || node.nodeType !== 1) return;
-                    if (node.tagName === 'IMG') hdSwapOne(node);
-                    else if (node.querySelectorAll) hdSwapAll(node);
-                });
-            });
-        }).observe(document.body, { childList: true, subtree: true });
-    } catch (e) { /* 观察不到就算了，至少首屏换过了 */ }
-    return true;
-}
-/* ===== 高清头像 结束 ===== */
 function init() {
     const ctx = getContext();
     if (!ctx) { warn('拿不到 getContext()，扩展不启动'); return false; }
