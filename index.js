@@ -2167,6 +2167,21 @@ function detailAboutBlock(ch) {
     if (tags.length) {
         const tl = mkel('div', 'ssp-about-tags');
         tags.forEach(t => tl.append(mkel('span', 'ssp-about-tag', '#' + t)));
+        /* #标签要贴在**头像正下方**：不搬 DOM（搬了会被别的流程挪回去），
+           只把头像底边量出来写进 --ssp-tagtop，CSS 绝对定位把它摆到那儿。 */
+        const measureTagTop = () => {
+            try {
+                const av = document.getElementById('avatar_div_div');
+                const box2 = document.getElementById('avatar_div');
+                if (av && box2 && box2.style && box2.style.setProperty) {
+                    const top = av.getBoundingClientRect().bottom - box2.getBoundingClientRect().top + 8;
+                    if (top > 0) box2.style.setProperty('--ssp-tagtop', Math.round(top) + 'px');
+                }
+            } catch (e) { /* 量不到就用 CSS 默认值 */ }
+        };
+        measureTagTop();
+        /* ⚠️ 首次加载时头像可能还没排版（高度 0）→ 量的值会偏上。下一帧再量一次兜住。 */
+        try { if (typeof requestAnimationFrame === 'function') requestAnimationFrame(measureTagTop); } catch (e) { }
         box.append(tl);
     }
     return box;
@@ -2238,7 +2253,9 @@ const DETAIL_CSS = `
 #avatar_div .ssp-about-v{ flex:1 1 auto; min-width:0; font-size:13px; line-height:1.45;
   overflow:hidden; text-overflow:ellipsis; }
 #avatar_div .ssp-about-empty{ font-size:11.5px; opacity:.45; padding:2px 0 4px; }
-#avatar_div .ssp-about-tags{ display:flex; flex-wrap:wrap; gap:5px; margin-top:10px; }
+#avatar_div{ position:relative; }
+/* #标签：绝对定位到头像正下方（--ssp-tagtop 由 JS 量出头像底边写入），不再跟着字段列表走 */
+#avatar_div .ssp-about-tags{ display:flex; flex-wrap:wrap; gap:5px; position:absolute; left:0; top:var(--ssp-tagtop, 230px); margin:0; padding:0; z-index:2; max-width:100%; }
 #avatar_div .ssp-about-tag{
   font-size:11px; padding:2px 8px; border-radius:6px; opacity:.85;
   border:1px solid rgba(128,128,128,.45); background:rgba(128,128,128,.12); }
@@ -4078,7 +4095,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.12.12';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.12.13';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
