@@ -1022,6 +1022,197 @@ body.charListGrid #rm_print_characters_block .ch_additional_info{ display:${c.sh
 }
 
 /* ==========================================================================
+   思维链收纳（Thinking Shield）
+   --------------------------------------------------------------------------
+   这块是**从老的「🐭 鼠鼠小助手 ShuShu Tweaks」并进来的**（用户要求两个扩展合成一个）。
+   原文照搬、只改了设置读取方式（老的是 extension_settings.tavern_tweaks，
+   现在统一放在本扩展的设置里，并在 migrateTweaksSettings() 里自动迁移一次）。
+
+   三层防护，把 <think> 之类的思维链从正文挪进酒馆原生的折叠块（extra.reasoning）：
+     ① 生成前：generate_interceptor —— 任何生成（普通/续写/重roll/swipe）之前先清聊天记录，
+        模型拿到的 prompt 永远不带思维链，根治"续写把思维链吐回正文、格式被冲乱"
+     ② 显示时：messageFormatter 钩子（排在正则之前）—— 流式输出时那个没闭合的半截标签
+        也不会闪到屏幕上
+     ③ 存储层：MESSAGE_RECEIVED / GENERATION_ENDED / CHAT_CHANGED —— 把存量思维链也收纳掉
+   思维链**不会被删除**，都在折叠块里点开就能看/能改。
+   ========================================================================== */
+
+/** 老扩展的设置键（迁移用；只读不写） */
+const TWEAKS_MODULE_NAME = 'tavern_tweaks';
+let tweaksMigrated = false;
+
+/** 把老的 tavern_tweaks 设置搬过来（只搬一次，之后各走各的） */
+function migrateTweaksSettings(s) {
+    if (tweaksMigrated) return false;
+    tweaksMigrated = true;
+    try {
+        const old = getContext()?.extensionSettings?.[TWEAKS_MODULE_NAME];
+        if (!old || typeof old !== 'object') return false;
+        let moved = 0;
+        if (typeof old.shieldEnabled === 'boolean' && s.thinkShield === undefined) { s.thinkShield = old.shieldEnabled; moved += 1; }
+        if (typeof old.cleanHistoryOnChatLoad === 'boolean') { s.thinkOnChatLoad = old.cleanHistoryOnChatLoad; moved += 1; }
+        if (typeof old.thinkTags === 'string' && old.thinkTags.trim()) { s.thinkTags = old.thinkTags; moved += 1; }
+        if (moved) { log('已从老的「鼠鼠小助手」迁入', moved, '项设置'); }
+        return moved > 0;
+    } catch (e) { return false; }
+}
+
+/** 需要收纳的标签列表 */
+function thinkTags() {
+    return String(getSettings().thinkTags || 'think,thinking,thought')
+        .split(',').map(t => t.trim()).filter(Boolean);
+}
+
+function thinkEsc(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+/** 从文本里挑出思维链块，返回清理后的正文（含流式未闭合的半截标签） */
+function extractThinking(text, tags) {
+    if (typeof text !== 'string' || text.length === 0) return { text, blocks: [], changed: false };
+    const list = Array.isArray(tags) && tags.length ? tags : thinkTags();
+    const blocks = [];
+    let out = text;
+    for (const tag of list) {
+        const esc = thinkEsc(tag);
+        /* 完整闭合的 <tag>…</tag> */
+        out = out.replace(new RegExp(`<${esc}\\b[^>]*>([\\s\\S]*?)<\\/${esc}\\s*>`, 'gi'), (_, inner) => {
+            if (inner && inner.trim()) blocks.push(inner.trim());
+            return '';
+        });
+        /* 没闭合的 <tag>…（一直到末尾，流式续写时的典型形态） */
+        out = out.replace(new RegExp(`<${esc}\\b[^>]*>([\\s\\S]*)$`, 'gi'), (_, inner) => {
+            if (inner && inner.trim()) blocks.push(inner.trim());
+            return '';
+        });
+    }
+    const cleaned = out.replace(/\n{3,}/g, '\n\n').trim();
+    return { text: cleaned, blocks, changed: out !== text };
+}
+
+/** 把一条消息里的思维链挪进 extra.reasoning（原地改），返回是否有改动 */
+function applyThinkingShield(message) {
+    if (!message || message.is_user || message.is_system) return false;
+    if (typeof message.mes !== 'string') return false;
+    const result = extractThinking(message.mes, thinkTags());
+    if (!result.changed) return false;
+    message.mes = result.text;
+    const joined = result.blocks.join('\n\n').trim();
+    if (joined) {
+        message.extra = message.extra || {};
+        message.extra.reasoning = message.extra.reasoning
+            ? `${String(message.extra.reasoning).trim()}\n\n${joined}`
+            : joined;
+    }
+    return true;
+}
+
+async function saveChatSafe() {
+    const ctx = getContext();
+    try {
+        if (typeof ctx?.saveChat === 'function') await ctx.saveChat();
+        else if (typeof ctx?.saveChatConditional === 'function') await ctx.saveChatConditional();
+    } catch (e) { warn('保存聊天失败', e); }
+}
+
+/** 收纳过思维链、但界面还没重绘的消息 id（重绘后折叠块才会出现） */
+const pendingRefreshIds = new Set();
+
+async function refreshMessagesUI() {
+    if (pendingRefreshIds.size === 0) return;
+    const ctx = getContext();
+    const ids = [...pendingRefreshIds];
+    pendingRefreshIds.clear();
+    try {
+        if (typeof ctx?.reloadCurrentChat === 'function') { await ctx.reloadCurrentChat(); return; }
+    } catch (e) { warn('reloadCurrentChat 失败，改为逐条刷新', e); }
+    const { eventSource, event_types } = ctx ?? {};
+    if (!eventSource) return;
+    for (const id of ids) {
+        try { await eventSource.emit(event_types?.MESSAGE_EDITED ?? 'MESSAGE_EDITED', id); } catch (e) { /* 忽略单条 */ }
+    }
+}
+
+/** 生成拦截器（manifest.generate_interceptor 指定的全局函数名）
+    ⚠️ 名字必须和 manifest.json 里的 generate_interceptor 一致，改了要两边一起改 */
+globalThis.shushuPanelInterceptor = async function (chat) {
+    try {
+        if (!getSettings().thinkShield) return;
+        if (!Array.isArray(chat)) return;
+        let changed = false;
+        for (let i = 0; i < chat.length; i++) {
+            if (applyThinkingShield(chat[i])) { changed = true; pendingRefreshIds.add(i); }
+        }
+        if (changed) await saveChatSafe();
+    } catch (e) { warn('生成拦截器出错', e); }
+};
+
+/** 显示层兜底：在正则之前把思维链标签剥掉（含流式半截标签） */
+function registerThinkDisplayHook() {
+    const ctx = getContext();
+    const formatter = ctx?.messageFormatter;
+    if (!formatter || typeof formatter.addHook !== 'function') {
+        warn('这个酒馆版本没有 messageFormatter，显示层钩子没启用（存储层防护仍然有效）');
+        return false;
+    }
+    formatter.addHook((mes, hookCtx) => {
+        try {
+            if (!getSettings().thinkShield) return mes;
+            if (hookCtx?.isUser || hookCtx?.isSystem || hookCtx?.isReasoning) return mes;
+            const r = extractThinking(mes, thinkTags());
+            return r.changed ? r.text : mes;
+        } catch (e) { return mes; }
+    }, {
+        stage: formatter.stage?.BEFORE_REGEX ?? 'beforeRegex',
+        order: formatter.order?.EARLIEST ?? 0,
+    });
+    return true;
+}
+
+/** 事件层：生成结束 / 收到消息 / 切换聊天时清存量数据 */
+function registerThinkEvents() {
+    const ctx = getContext();
+    const { eventSource, event_types } = ctx ?? {};
+    if (!eventSource || !event_types) { warn('拿不到 eventSource，思维链收纳的事件层没启用'); return false; }
+
+    eventSource.on(event_types.MESSAGE_RECEIVED, async mesId => {
+        if (!getSettings().thinkShield) return;
+        const m = getContext()?.chat?.[mesId];
+        if (m && applyThinkingShield(m)) await saveChatSafe();
+    });
+
+    eventSource.on(event_types.GENERATION_ENDED, async () => {
+        if (!getSettings().thinkShield) return;
+        const chat = getContext()?.chat;
+        if (!Array.isArray(chat)) return;
+        let changed = false;
+        /* 只扫尾部几条：续写 / 重 roll 的影响范围都在后面 */
+        for (let i = Math.max(0, chat.length - 5); i < chat.length; i++) {
+            if (applyThinkingShield(chat[i])) { changed = true; pendingRefreshIds.add(i); }
+        }
+        if (changed) await saveChatSafe();
+        await refreshMessagesUI();
+    });
+
+    eventSource.on(event_types.GENERATION_STOPPED, async () => { await refreshMessagesUI(); });
+
+    eventSource.on(event_types.CHAT_CHANGED, async () => {
+        const s = getSettings();
+        if (!s.thinkShield || !s.thinkOnChatLoad) return;
+        const chat = getContext()?.chat;
+        if (!Array.isArray(chat)) return;
+        let changed = false;
+        for (let i = 0; i < chat.length; i++) {
+            if (applyThinkingShield(chat[i])) { changed = true; pendingRefreshIds.add(i); }
+        }
+        if (changed) {
+            await saveChatSafe();
+            await refreshMessagesUI();
+            toast('已收纳历史消息里的思维链（点开消息上方的「思考」折叠块就能看/改）', 'info');
+        }
+    });
+    return true;
+}
+
+/* ==========================================================================
    导入即更新（把「导入」「替换 / 更新」「从 URL 导入」合成一条路）
    --------------------------------------------------------------------------
    酒馆那三条路打的其实是同一个接口：POST /api/characters/import
@@ -2765,6 +2956,11 @@ function getSettings() {
     /* 导入即更新（合并 导入 / 替换 / URL导入）：默认开 */
     if (typeof s.importMerge !== 'boolean') s.importMerge = true;
     if (typeof s.importSimThreshold !== 'number') s.importSimThreshold = IMPORT_SIM_DEFAULT;
+    /* 思维链收纳（从老的「鼠鼠小助手 ShuShu Tweaks」并进来的功能）：默认开 */
+    if (typeof s.thinkShield !== 'boolean') s.thinkShield = true;
+    if (typeof s.thinkOnChatLoad !== 'boolean') s.thinkOnChatLoad = true;
+    if (typeof s.thinkTags !== 'string' || !s.thinkTags.trim()) s.thinkTags = 'think,thinking,thought';
+    migrateTweaksSettings(s);
     if (!s.devices || typeof s.devices !== 'object') s.devices = {};
     ['desktop', 'mobile'].forEach(dev => {
         const cur = s.devices[dev];
@@ -3663,6 +3859,17 @@ function mountDrawer() {
         视频页版：头像拉成 16:9 当播放器，标签变话题 chips、角色卡按钮变点赞栏、收藏变「订阅」。
         两种都保留下面的标签 / 创作者注释 / 角色描述。</div></div>
         <div class="ssp-cardsec">
+        <div class="ssp-crow"><span class="ssp-clabel">思维链收纳</span>
+        <label class="ssp-ccheck"><input type="checkbox" data-ssp-thinkshield="1" ${getSettings().thinkShield !== false ? 'checked' : ''}>
+        <span>把 &lt;think&gt; 之类的思维链挪进酒馆原生折叠块（续写不再吐回正文）</span></label></div>
+        <div class="ssp-crow"><span class="ssp-clabel">加载时清理</span>
+        <label class="ssp-ccheck"><input type="checkbox" data-ssp-thinkload="1" ${getSettings().thinkOnChatLoad !== false ? 'checked' : ''}>
+        <span>切换 / 加载聊天时顺手收纳历史消息里的思维链</span></label></div>
+        <div class="ssp-crow"><span class="ssp-clabel">思维链标签</span>
+        <input class="ssp-cinput" type="text" data-ssp-thinktags="1" value="${esc(getSettings().thinkTags || 'think,thinking,thought')}"></div>
+        <div class="ssp-note" style="opacity:.6">思维链**不会被删除**：都进了消息上方那个「思考」折叠块，点开能看、能复制、能编辑。
+        酒馆自带「高级格式化 → Reasoning → Add to Prompts」打开后，折叠块内容照样能送回模型。</div></div>
+        <div class="ssp-cardsec">
         <div class="ssp-crow"><span class="ssp-clabel">导入即更新</span>
         <label class="ssp-ccheck"><input type="checkbox" data-ssp-importmerge="1" ${importMergeOn() ? 'checked' : ''}>
         <span>「导入」认得出已有的卡时，问你更新还是另存（把替换/更新也并进来）</span></label></div>
@@ -3713,6 +3920,9 @@ function mountDrawer() {
             if (out) out.textContent = t.value + '%';
             return;
         }
+        if (t.dataset.sspThinkshield !== undefined) { getSettings().thinkShield = Boolean(t.checked); save(); toast(t.checked ? '思维链收纳：开' : '思维链收纳：关', 'info'); return; }
+        if (t.dataset.sspThinkload !== undefined) { getSettings().thinkOnChatLoad = Boolean(t.checked); save(); return; }
+        if (t.dataset.sspThinktags !== undefined) { getSettings().thinkTags = String(t.value || 'think,thinking,thought'); save(); return; }
         if (t.dataset.sspCardCheck) { c[t.dataset.sspCardCheck] = Boolean(t.checked); save(); applyCardStyle(); return; }
         if (t.dataset.sspCardColor) { setCardColor(t.dataset.sspCardColor, t.dataset.sspColorReset ? '#4a2b7d' : t.value, true); return; }
         if (t.dataset.sspCardText) { c[t.dataset.sspCardText] = t.value; save(); applyCardStyle(); return; }
@@ -3871,6 +4081,8 @@ function init() {
     document.addEventListener?.('pointerdown', onListPointerDown, true);
     bindFavStar();                                               // 列表卡片上的 ★ 能点（收藏/取消收藏）
     if (importMergeOn()) bindImportMerge();                      // 导入即更新（合并 导入 / 替换 / URL导入）
+    registerThinkDisplayHook();                                  // 思维链收纳：显示层兜底（流式半截标签也不上屏）
+    registerThinkEvents();                                       // 思维链收纳：生成结束/收到消息/换聊天时收纳
 
     try {
         ctx.eventSource?.on?.(ctx.eventTypes?.CHARACTER_PAGE_LOADED, () => reclaim('page-loaded'));
@@ -3907,6 +4119,8 @@ if (globalThis.__SSP_TEST__) {
         importRefresh, importTagsOf, importAsk, importHandleFile, onImportFileChange, onUrlImportClick,
         bindImportMerge, restoreImportMerge, importMatchReason, importTextSim, importSimThreshold, IMPORT_SIM_DEFAULT,
         importSnapshotExtras, importRestoreExtras,
+        extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
+        migrateTweaksSettings, TWEAKS_MODULE_NAME,
         restoreCardStyle, hdCardAvatars, cardDrawerHTML, mountDrawer, attrOf, setAttr,
         get boxOpen() { return boxOpen; }, set boxOpen(v) { boxOpen = v; },
         get renaming() { return renaming; }, set renaming(v) { renaming = v; },
