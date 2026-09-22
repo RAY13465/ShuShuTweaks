@@ -4104,7 +4104,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.15.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.16.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4377,6 +4377,7 @@ var orbOpenNow = false;
 var orbEditing = null;
 var orbTab = 'notes';       // 当前模块页（模块容器：以后加功能只加标签页）
 var orbBinding = null;      // 正在给哪个面具选绑定角色（null = 不在绑定模式）
+var orbPersonaEdit = null;  // 正在编辑哪个面具（null = 不在编辑模式）
 
 function orbNotes() {
     const s = getSettings();
@@ -4495,6 +4496,8 @@ function orbPersonaNew() {
 function orbPersonaHTML() {
     /* 绑定模式：正在给某个面具选角色 */
     if (orbBinding) return orbBindPickerHTML(orbBinding);
+    /* 编辑模式：正在改某个面具的名称/描述 */
+    if (orbPersonaEdit) return orbPersonaEditHTML(orbPersonaEdit);
 
     const list = orbPersonas();
     const act = orbActivePersona();
@@ -4502,23 +4505,81 @@ function orbPersonaHTML() {
         return '<div class="ssp-orb-empty">没读到面具。先在酒馆里打开一次「用户设定」面板，再回来看看。</div>'
             + '<div class="ssp-orb-foot"><span class="ssp-pbtn primary" data-orb-newpersona="1"><i class="fa-solid fa-plus"></i>新建面具</span></div>';
     }
-    const cards = list.map(p => {
+    const rows = list.map(p => {
         const on = (p.id === act);
         const bound = orbBindNames(p.id);
-        return '<div class="ssp-orb-face' + (on ? ' on' : '') + '" data-orb-persona="' + esc(p.id) + '" title="' + esc(p.name) + '">'
-            + '<img src="' + orbPersonaThumb(p.id) + '" alt="">'
-            + (on ? '<span class="ssp-orb-face-t">当前</span>' : '')
-            + '<span class="ssp-orb-face-n">' + esc(p.name) + '</span>'
-            + '<span class="ssp-orb-bind' + (bound ? ' has' : '') + '" data-orb-bind="' + esc(p.id) + '"'
-            + ' title="' + (bound ? '已绑定：' + esc(bound) : '绑定角色（跟这个角色聊天时自动戴这个面具）') + '">'
-            + '<i class="fa-solid fa-link"></i>' + (bound ? esc(bound) : '绑定') + '</span>'
-            + '</div>';
+        const desc = orbPersonaDesc(p.id);
+        return '<div class="ssp-orb-prow' + (on ? ' on' : '') + '">'
+            + '<img class="ssp-orb-pav" src="' + orbPersonaThumb(p.id) + '" data-orb-persona="' + esc(p.id) + '" title="点头像换面具" alt="">'
+            + '<div class="ssp-orb-pmain">'
+            + '<div class="ssp-orb-pname">' + esc(p.name) + (on ? '<span class="ssp-orb-ptag">当前</span>' : '') + '</div>'
+            + '<div class="ssp-orb-pdesc">' + (desc ? esc(desc.slice(0, 80)) + (desc.length > 80 ? '…' : '') : '<i>没写描述</i>') + '</div>'
+            + '<div class="ssp-orb-pbind' + (bound ? ' has' : '') + '"><i class="fa-solid fa-link"></i>' + (bound ? esc(bound) : '未绑定角色') + '</div>'
+            + '</div>'
+            + '<div class="ssp-orb-pacts">'
+            + '<span class="ssp-pbtn' + (on ? ' primary' : '') + '" data-orb-persona="' + esc(p.id) + '">' + (on ? '当前' : '换成这个') + '</span>'
+            + '<span class="ssp-pbtn" data-orb-bind="' + esc(p.id) + '"><i class="fa-solid fa-link"></i>绑定</span>'
+            + '<span class="ssp-pbtn" data-orb-pedit="' + esc(p.id) + '"><i class="fa-solid fa-pen"></i>编辑</span>'
+            + '</div></div>';
     }).join('');
-    return '<div class="ssp-orb-faces">' + cards + '</div>'
-        + '<div class="ssp-orb-foot">'
-        + '<span class="ssp-pbtn primary" data-orb-newpersona="1"><i class="fa-solid fa-plus"></i>新建面具</span>'
+    return '<div class="ssp-orb-plist">' + rows + '</div>'
+        + '<div class="ssp-orb-foot"><span class="ssp-pbtn primary" data-orb-newpersona="1"><i class="fa-solid fa-plus"></i>新建面具</span></div>'
+        + '<div class="ssp-orb-empty" style="padding-top:6px">点「换成这个」就换面具（走酒馆原生切换）；「绑定」可以绑到角色；「编辑」改名称和描述。</div>';
+}
+
+/* ---------------------------- 面具的读取 / 编辑 ----------------------------
+   名称：power_user.personas[面具id] = 字符串
+   描述：power_user.persona_descriptions[面具id].description
+   写：改上下文里的 live 对象 + saveSettingsDebounced()
+   ------------------------------------------------------------------------ */
+function orbPersonaDesc(id) {
+    try {
+        const d = (getContext().powerUserSettings || {}).persona_descriptions || {};
+        return (d[id] && d[id].description) || '';
+    } catch (e) { return ''; }
+}
+
+function orbPersonaSave(id, name, desc) {
+    try {
+        const pu = getContext().powerUserSettings;
+        if (!pu) return false;
+        if (!pu.personas) pu.personas = {};
+        const nm = String(name || '').trim();
+        if (nm) pu.personas[id] = nm;
+        if (!pu.persona_descriptions) pu.persona_descriptions = {};
+        if (!pu.persona_descriptions[id]) pu.persona_descriptions[id] = { connections: [] };
+        pu.persona_descriptions[id].description = String(desc || '');
+        save();
+        /* 名字改了的话，顺手把酒馆自己列表里那一条的文字也改掉（不然要刷新才看到） */
+        if (nm) {
+            document.querySelectorAll('#user_avatar_block .avatar-container').forEach(c => {
+                const img = c.querySelector('img');
+                const m = img && /[?&]file=([^&]+)/.exec(img.getAttribute('src') || '');
+                if (m && decodeURIComponent(m[1]) === id) {
+                    const n = c.querySelector('.ch_name, b');
+                    if (n) n.textContent = nm;
+                }
+            });
+        }
+        return true;
+    } catch (e) { toast('保存失败：' + e.message, 'warning'); return false; }
+}
+
+function orbPersonaEditHTML(id) {
+    const p = orbPersonas().find(x => x.id === id) || { name: id };
+    return '<div class="ssp-orb-bindhead">'
+        + '<span class="ssp-pbtn" data-orb-pcancel="1"><i class="fa-solid fa-arrow-left"></i>返回</span>'
+        + '<b>编辑面具 · ' + esc(p.name) + '</b>'
         + '</div>'
-        + '<div class="ssp-orb-empty" style="padding-top:6px">点头像换面具；点卡片下面的「绑定 / 🔗」可以把这个面具绑到某个角色 —— 以后跟那个角色聊天就自动戴它。</div>';
+        + '<div class="ssp-orb-fl"><span>名称</span>'
+        + '<input class="ssp-inp" type="text" data-orb-pf="name" value="' + esc(p.name) + '" placeholder="面具名称（也就是 {{user}} 的名字）"></div>'
+        + '<div class="ssp-orb-fl"><span>描述</span>'
+        + '<textarea class="ssp-inp ssp-orb-ta" data-orb-pf="desc" rows="8" placeholder="这个面具的人设描述（会作为用户设定进提示词）">' + esc(orbPersonaDesc(id)) + '</textarea></div>'
+        + '<div class="ssp-orb-edit-a">'
+        + '<span class="ssp-pbtn primary" data-orb-psave="' + esc(id) + '"><i class="fa-solid fa-check"></i>保存</span>'
+        + '<span class="ssp-pbtn" data-orb-pcancel="1">取消</span>'
+        + '</div>'
+        + '<div class="ssp-orb-empty" style="padding-top:8px">改的是酒馆原生的面具数据（名称 = 你说话时显示的名字；描述 = 用户设定内容），跟酒馆自己的面板互通。</div>';
 }
 
 /* ---------------------------- 面具 ↔ 角色 绑定 ----------------------------
@@ -4759,7 +4820,20 @@ function bindOrb() {
         /* 模块标签页 */
         const tabEl = t.closest('[data-orb-tab]');
         if (tabEl) { orbTab = tabEl.dataset.orbTab || 'notes'; orbEditing = null; renderOrbPanel(); return; }
-        /* 面具栏：选一个 / 新建 / 绑定角色 */
+        /* 面具栏：编辑 / 选一个 / 新建 / 绑定角色 */
+        if (t.closest('[data-orb-pcancel]')) { orbPersonaEdit = null; renderOrbPanel(); return; }
+        const pedit = t.closest('[data-orb-pedit]');
+        if (pedit) { orbPersonaEdit = pedit.dataset.orbPedit; orbBinding = null; renderOrbPanel(); return; }
+        const psave = t.closest('[data-orb-psave]');
+        if (psave) {
+            const pn = document.getElementById('ssp_orb_panel');
+            const nEl = pn && pn.querySelector('[data-orb-pf="name"]');
+            const dEl = pn && pn.querySelector('[data-orb-pf="desc"]');
+            if (orbPersonaSave(psave.dataset.orbPsave, nEl ? nEl.value : '', dEl ? dEl.value : '')) {
+                orbPersonaEdit = null; renderOrbPanel(); toast('面具已保存', 'success');
+            }
+            return;
+        }
         if (t.closest('[data-orb-bindback]')) { orbBinding = null; renderOrbPanel(); return; }
         const bindBtn = t.closest('[data-orb-bind]');
         if (bindBtn) { orbBinding = bindBtn.dataset.orbBind; renderOrbPanel(); return; }
