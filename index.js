@@ -922,7 +922,16 @@ function cardVarsCSS(c) {
 #rm_print_characters_block .character_select .character_select_container{
   align-items:${CARD_ALIGN_CSS[c.align]};
 }
-#rm_print_characters_block .character_select .ch_description{ font-size:var(--pv-desc,11.5px); }`;
+#rm_print_characters_block .character_select .ch_description{ font-size:var(--pv-desc,11.5px); }
+/* —— 卡片免疫层（只锁「形状 / 边框」，颜色字体仍然跟随主题）——
+   酒馆默认是圆形头像：avatar_style=ROUND 时那条 body:not(.big-avatars) .avatar img
+   会给头像上 border-radius:50%，主题/美化的 CSS 也可能插一脚；而我们的卡片是**铺满头像元素**的
+   → 头像一圆，整张卡就变成大弧线（用户截图里那个）。这里把圆角钉死在「头像容器自己的圆角」上：
+   各样式给 .avatar 设多少，图片就继承多少，外部规则再改不动。颜色/字号/阴影一律不碰。 */
+#rm_print_characters_block .character_select .avatar img,
+#rm_print_characters_block .character_select .avatar img.pointer{
+  border-radius:inherit !important; border:0 !important;
+}`;
 }
 
 /** 按当前旋钮把样式拼出来 */
@@ -4060,7 +4069,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.12.8';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.12.9';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
