@@ -4105,7 +4105,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.29.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.29.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4444,6 +4444,8 @@ function hdSwapOne(img) {
         const file = decodeURIComponent(m[2]);
         if (!file) return false;
         const origin = (/type=persona/.test(src) ? '/User%20Avatars/' : '/characters/') + encodeURIComponent(file);
+        /* ⚠️ 留个记号：src 被换掉之后，别的地方（比如面具切换）还得知道这是哪个文件 */
+        try { img.dataset.sspFile = file; img.dataset.sspKind = (/type=persona/.test(src) ? 'persona' : 'avatar'); } catch (e) { }
         if (img.getAttribute('src') === origin) return false;
         img.setAttribute('src', origin);
         return true;
@@ -5020,20 +5022,35 @@ function orbPersonas() {
 /** 当前戴着的面具 id（读酒馆列表里 .selected 那一项） */
 function orbActivePersona() {
     const sel = document.querySelector('#user_avatar_block .avatar-container.selected img');
-    const m = sel && /[?&]file=([^&]+)/.exec(sel.getAttribute('src') || '');
-    if (m) return decodeURIComponent(m[1]);
+    const f = orbElFile(sel);
+    if (f) return f;
     try { return (getContext().powerUserSettings || {}).default_persona || ''; } catch (e) { return ''; }
 }
 
 function orbPersonaThumb(id) { return '/thumbnail?type=persona&file=' + encodeURIComponent(id); }
 
 /** 选一个面具：点酒馆自己列表里对应那一项 */
+/** 从一个 <img>/元素上认出它的文件名。
+    优先读高清替换时留的记号（dataset.sspFile）—— 因为 src 可能已经被换成原图路径了；
+    退路：原生缩略图 ?file=xxx、或已经是原图的 /User%20Avatars/xxx、/characters/xxx。 */
+function orbElFile(el) {
+    if (!el) return '';
+    try {
+        if (el.dataset && el.dataset.sspFile) return el.dataset.sspFile;
+        const src = (el.getAttribute ? (el.getAttribute('src') || '') : '');
+        const m = /[?&]file=([^&]+)/.exec(src);
+        if (m) return decodeURIComponent(m[1]);
+        const m2 = /\/(?:User%20Avatars|User Avatars|characters)\/([^/?#]+)/.exec(src);
+        if (m2) return decodeURIComponent(m2[1]);
+    } catch (e) { }
+    return '';
+}
+
 function orbPersonaSwitch(id) {
     const items = Array.from(document.querySelectorAll('#user_avatar_block .avatar-container'));
     for (const c of items) {
         const img = c.querySelector('img');
-        const m = img && /[?&]file=([^&]+)/.exec(img.getAttribute('src') || '');
-        if (m && decodeURIComponent(m[1]) === id) {
+        if (orbElFile(img) === id) {
             c.click();
             toast('已换成：' + (orbPersonas().find(p => p.id === id) || {}).name, 'info');
             return true;
@@ -5202,8 +5219,7 @@ function orbPersonaSave(id, name, desc) {
         if (nm) {
             document.querySelectorAll('#user_avatar_block .avatar-container').forEach(c => {
                 const img = c.querySelector('img');
-                const m = img && /[?&]file=([^&]+)/.exec(img.getAttribute('src') || '');
-                if (m && decodeURIComponent(m[1]) === id) {
+                if (orbElFile(img) === id) {
                     const n = c.querySelector('.ch_name, b');
                     if (n) n.textContent = nm;
                 }
