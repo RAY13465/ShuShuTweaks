@@ -369,15 +369,19 @@ const CARD_STYLES = {
    悬停 = 整张完整浮出来（抬到最上层），遮罩整个取消 → **全实**。
    淡出位置跟着「叠压程度」自动走，不用另设旋钮。 */
 #rm_print_characters_block { padding-top:10px; }
+/* 露出来的那一截 = 100% − 叠压程度。--pv-vis 放在卡片上，图片渐隐和整体裁剪共用同一个值。
+   ⚠️ 光给 .avatar 做渐隐不够：**标签是文字层，不受那个 mask 管**，
+      于是下面那张卡被压住的标签照样透出来。所以整张卡再按同一条线 clip 一刀。 */
 #rm_print_characters_block .character_select{ position:relative; height:var(--pv-h,78px); padding:0; overflow:visible;
+  --pv-vis:calc(100% - var(--pv-overlay,20) * 1%);
+  clip-path:inset(0 0 calc(100% - var(--pv-vis)) 0);
   margin-top:calc(var(--pv-gap,6px) - 6px - var(--pv-h,78px) * var(--pv-overlay,20) / 100); border-radius:var(--pv-radius,14px);
-  transition:transform .25s ease, margin .25s ease; }
+  transition:transform .25s ease, margin .25s ease, clip-path .2s ease; }
 #rm_print_characters_block .character_select:first-child{ margin-top:0; }
-#rm_print_characters_block .character_select:hover{ background:transparent; transform:translateX(8px); z-index:9; }
-/* 露出来的那一截 = 100% − 叠压程度；淡出正好收在这条线上 */
+#rm_print_characters_block .character_select:hover{ background:transparent; transform:translateX(8px); z-index:9; clip-path:none; }
+/* 图片：上实下虚，淡出正好收在裁剪线上 */
 #rm_print_characters_block .character_select .avatar{ position:absolute; inset:0; width:100%; height:100%; border-radius:inherit;
   overflow:hidden; align-self:auto;
-  --pv-vis:calc(100% - var(--pv-overlay,20) * 1%);
   -webkit-mask-image:linear-gradient(to bottom, #000 0, #000 calc(var(--pv-vis) - 30%), transparent var(--pv-vis));
   mask-image:linear-gradient(to bottom, #000 0, #000 calc(var(--pv-vis) - 30%), transparent var(--pv-vis));
   box-shadow:0 -5px 12px rgba(0,0,0,.3), 0 0 0 1px var(--SmartThemeBorderColor, rgba(255,255,255,.12));
@@ -4056,7 +4060,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.12.7';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.12.8';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
