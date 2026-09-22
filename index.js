@@ -237,7 +237,7 @@ function ensureNewBtnEls() {
 
 /* ==== 生成区：角色卡样式数据（来源：角色卡美化-原型.html，别手改） 开始 ==== */
 /* ==========================================================================
-   鼠鼠面板工坊 · 角色卡样式数据
+   鼠鼠小助手 · 角色卡样式数据
    --------------------------------------------------------------------------
    这个文件是自动生成的（来源：角色卡美化-原型.html），别手改 ——
    要改样式就改原型、重新生成。
@@ -1039,22 +1039,24 @@ body.charListGrid #rm_print_characters_block .ch_additional_info{ display:${c.sh
 
 /** 老扩展的设置键（迁移用；只读不写） */
 const TWEAKS_MODULE_NAME = 'tavern_tweaks';
-let tweaksMigrated = false;
 
-/** 把老的 tavern_tweaks 设置搬过来（只搬一次，之后各走各的） */
+/** 把老的 tavern_tweaks 设置搬过来。
+    ⚠️ 只搬一次：标记写在**设置里**（不是内存变量）—— 内存变量每次刷新都会重置，
+    那样用户在抽屉里改完、一刷新又被老值盖回去了。 */
 function migrateTweaksSettings(s) {
-    if (tweaksMigrated) return false;
-    tweaksMigrated = true;
+    if (s.tweaksMigrated) return false;
+    s.tweaksMigrated = true;
+    let moved = 0;
     try {
         const old = getContext()?.extensionSettings?.[TWEAKS_MODULE_NAME];
-        if (!old || typeof old !== 'object') return false;
-        let moved = 0;
-        if (typeof old.shieldEnabled === 'boolean' && s.thinkShield === undefined) { s.thinkShield = old.shieldEnabled; moved += 1; }
-        if (typeof old.cleanHistoryOnChatLoad === 'boolean') { s.thinkOnChatLoad = old.cleanHistoryOnChatLoad; moved += 1; }
-        if (typeof old.thinkTags === 'string' && old.thinkTags.trim()) { s.thinkTags = old.thinkTags; moved += 1; }
-        if (moved) { log('已从老的「鼠鼠小助手」迁入', moved, '项设置'); }
-        return moved > 0;
-    } catch (e) { return false; }
+        if (old && typeof old === 'object') {
+            if (typeof old.shieldEnabled === 'boolean') { s.thinkShield = old.shieldEnabled; moved += 1; }
+            if (typeof old.cleanHistoryOnChatLoad === 'boolean') { s.thinkOnChatLoad = old.cleanHistoryOnChatLoad; moved += 1; }
+            if (typeof old.thinkTags === 'string' && old.thinkTags.trim()) { s.thinkTags = old.thinkTags; moved += 1; }
+        }
+    } catch (e) { /* 迁不动就算了，用默认值 */ }
+    if (moved) log('已从老的「鼠鼠小助手」迁入', moved, '项思维链设置');
+    return moved > 0;
 }
 
 /** 需要收纳的标签列表 */
@@ -1145,12 +1147,17 @@ globalThis.shushuPanelInterceptor = async function (chat) {
     } catch (e) { warn('生成拦截器出错', e); }
 };
 
-/** 显示层兜底：在正则之前把思维链标签剥掉（含流式半截标签） */
+/** 显示层兜底：在正则之前把思维链标签剥掉（含流式半截标签）
+    ⚠️ 实测：酒馆 1.18.0 **没有** messageFormatter 钩子系统（只有 DOMPurify 的 addHook），
+    所以这一层在你这版上是不生效的 —— 老扩展那版也只是默默打了个 warn。
+    真正干活的是①生成拦截器 和 ③事件层。这里保留代码：万一以后的酒馆版本提供这个钩子就自动生效。
+    替代方案：酒馆自带「高级格式化 → Reasoning → 思维链标签」本身就是原生的显示层剥离（推荐打开）。 */
 function registerThinkDisplayHook() {
     const ctx = getContext();
     const formatter = ctx?.messageFormatter;
     if (!formatter || typeof formatter.addHook !== 'function') {
-        warn('这个酒馆版本没有 messageFormatter，显示层钩子没启用（存储层防护仍然有效）');
+        log('酒馆这版没有 messageFormatter 钩子 → 显示层兜底跳过（①生成前清洗 + ③存储层收纳仍然有效；' +
+            '想连流式那半截也不上屏，用酒馆自带的「高级格式化 → Reasoning」）');
         return false;
     }
     formatter.addHook((mes, hookCtx) => {
@@ -2692,7 +2699,7 @@ function applyCardStyle() {
         hdCardAvatars(false);
         return { style: 'none', hd: 0, css: 0 };
     }
-    const css = '/* 鼠鼠面板工坊 · 角色卡样式：' + def.name + ' */\n' + cardAssembleCSS(c);
+    const css = '/* 鼠鼠小助手 · 角色卡样式：' + def.name + ' */\n' + cardAssembleCSS(c);
     let node = el;
     if (!node) {
         node = document.createElement('style');
@@ -2956,11 +2963,13 @@ function getSettings() {
     /* 导入即更新（合并 导入 / 替换 / URL导入）：默认开 */
     if (typeof s.importMerge !== 'boolean') s.importMerge = true;
     if (typeof s.importSimThreshold !== 'number') s.importSimThreshold = IMPORT_SIM_DEFAULT;
-    /* 思维链收纳（从老的「鼠鼠小助手 ShuShu Tweaks」并进来的功能）：默认开 */
+    /* 思维链收纳（从老的「鼠鼠小助手 ShuShu Tweaks」并进来的功能）
+       ⚠️ 迁移必须写在默认值**之前**：默认值先把字段填上的话，迁移就永远不生效了。
+       迁移标记也要存进设置里（只迁一次），否则每次刷新都会把用户的改动覆盖回去。 */
+    migrateTweaksSettings(s);
     if (typeof s.thinkShield !== 'boolean') s.thinkShield = true;
     if (typeof s.thinkOnChatLoad !== 'boolean') s.thinkOnChatLoad = true;
     if (typeof s.thinkTags !== 'string' || !s.thinkTags.trim()) s.thinkTags = 'think,thinking,thought';
-    migrateTweaksSettings(s);
     if (!s.devices || typeof s.devices !== 'object') s.devices = {};
     ['desktop', 'mobile'].forEach(dev => {
         const cur = s.devices[dev];
@@ -3814,7 +3823,7 @@ function guardTouchScroll() {
 
 function toast(msg, level = 'info') {
     const fn = globalThis.toastr?.[level];
-    if (typeof fn === 'function') fn(msg, '鼠鼠面板工坊');
+    if (typeof fn === 'function') fn(msg, '鼠鼠小助手');
     else log(msg);
 }
 
@@ -3828,7 +3837,7 @@ function mountDrawer() {
     const wrap = document.createElement('div');
     wrap.id = 'ssp_drawer';
     wrap.className = 'inline-drawer';
-    wrap.innerHTML = `<div class="inline-drawer-toggle inline-drawer-header"><b>🐭 鼠鼠面板工坊</b>
+    wrap.innerHTML = `<div class="inline-drawer-toggle inline-drawer-header"><b>🐭 鼠鼠小助手</b>
         <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
         <div class="inline-drawer-content">
         <div class="ssp-note">把角色面板做成可装配的模块：<b>头部 / 列表 / 底部栏</b> 三个分区，模块可以 1~2 层，每层放任意按钮。
