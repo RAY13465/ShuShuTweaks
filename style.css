@@ -31,9 +31,10 @@
 #ssp_zone_foot {
     position: sticky; bottom: 0; z-index: 5;
     padding: 4px 5px 5px; margin: 0;
-    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, .55));
+    /* 固定暗底（不吃主题）：浅色美化下它原来是跟着变亮的 */
+    background: rgba(24, 24, 28, .92);
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
-    border-top: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, .12));
+    border-top: 1px solid rgba(255, 255, 255, .12);
 }
 #ssp_zone_foot .ssp-row { justify-content: center; }   /* 默认居中；模块自己的对齐设置会以 inline 覆盖 */
 
@@ -55,7 +56,7 @@
 /* 常驻细条入口 */
 .ssp-toggle {
     display: flex; align-items: center; gap: 7px; padding: 4px 9px;
-    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, .16));
+    border: 1px solid rgba(255, 255, 255, .16);
     border-radius: 7px; background: rgba(255, 255, 255, .04);
     cursor: pointer; user-select: none; opacity: .78;
 }
@@ -66,8 +67,8 @@
 
 /* ---------- 装配方框 ---------- */
 .ssp-box {
-    margin-top: 5px; border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, .18));
-    border-radius: 9px; overflow: hidden; background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, .35));
+    margin-top: 5px; border: 1px solid rgba(255, 255, 255, .18);
+    border-radius: 9px; overflow: hidden; background: rgba(20, 20, 24, .88);
 }
 .ssp-boxhead {
     display: flex; align-items: center; gap: 6px; padding: 6px 9px;
@@ -252,7 +253,7 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-cyear { flex: 0 0 72px; }
 /* 颜色旋钮（歌单底色）：一个小色块 + 十六进制 + 复位 */
 .ssp-ccolor { flex: 0 0 auto; width: 46px; height: 24px; padding: 0; margin: 0; cursor: pointer;
-    border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,.2)); border-radius: 4px; background: none; }
+    border: 1px solid rgba(255,255,255,.2); border-radius: 4px; background: none; }
 .ssp-ccolor::-webkit-color-swatch-wrapper { padding: 2px; }
 .ssp-ccolor::-webkit-color-swatch { border: 0; border-radius: 2px; }
 .ssp-creset { flex: 0 0 auto; font-size: 11px; padding: 2px 8px; }
@@ -269,7 +270,15 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
    --------------------------------------------------------------------------
    设计约束：
      · 扁平 —— 不用渐变、不用高光、不用多层阴影；靠「发丝线 + 一点点底色」分区
-     · 颜色全走酒馆主题变量（--SmartTheme*），换主题自动跟着变；强调色用 --SmartThemeQuoteColor
+     · **配色写死，不跟酒馆主题走**（用户要求）。
+       ⚠️ 为什么：原先这几行读的是 --SmartTheme* 变量，于是浅色美化一进来
+         （.Base_L / 铅雪青 / 雪原诗 / 🍎苹果啵啵 …）面板底面被带成近白、
+         字色也被带成主题色 → 输入框变白、字也白 → **看不见**（有人反馈过）。
+       实测（23 个主题逐个切）：球的面板一直是深底浅字（写死的），
+       只有这个设置面板会跟着主题跑 —— 差别就在这几行变量上。
+       现在 substrate / ink / line 全部固定，换成任何美化都是同一副深色面板。
+       唯一保留可配的是「强调色 --ssp-accent」：它由扩展设置里的自定义强调色给出，
+       不填才退回固定色（不是主题色）。
      · 一行一个设置：左标题（+小字说明）右控件，行高统一 40px
      · 开关 / 滑块 / 输入框都自己画（appearance:none），和原生控件长得不一样才叫面板
    ========================================================================== */
@@ -287,19 +296,21 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 }
 
 #ssp_panel {
-    --ssp-accent: var(--SmartThemeQuoteColor, #b06cf0);
-    --ssp-line: rgba(128, 128, 128, .18);
+    /* 面板自己的固定色板（不吃主题）。要改面板长相就改这几个值。 */
+    --ssp-bg: #1c1c22;                 /* 底面：暗 */
+    --ssp-ink: #e8e8ee;                /* 正文：浅 */
+    --ssp-accent: var(--ssp-accent-custom, #b06cf0);   /* 强调色：只有它是可配的 */
+    --ssp-line: rgba(255, 255, 255, .16);
     --ssp-fill: rgba(255, 255, 255, .035);
     --ssp-fill2: rgba(255, 255, 255, .075);
-    --ssp-dim: color-mix(in srgb, var(--SmartThemeBodyColor, #e8e8ee) 55%, transparent);
+    --ssp-dim: rgba(232, 232, 238, .55);
     position: relative !important; z-index: 1 !important;
     margin: auto !important;
     width: min(560px, 100%); max-height: min(86vh, 940px);
     display: flex; flex-direction: column;
-    /* 面板底必须够实：直接用主题色的话后面聊天会透出来（看着很脏） */
-    background-color: #1c1c22;
-    background-color: color-mix(in srgb, var(--SmartThemeBlurTintColor, #1c1c22) 94%, #000);
-    color: var(--SmartThemeBodyColor, #e8e8ee);
+    /* 面板底必须够实：后面聊天不能透出来（看着很脏）。固定暗色，不读主题。 */
+    background-color: var(--ssp-bg);
+    color: var(--ssp-ink);
     border: 1px solid var(--ssp-line);
     border-radius: 14px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
@@ -382,12 +393,15 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 #ssp_panel .ssp-sw input:checked + i::after { transform: translateX(17px); }
 
 /* —— 输入框 / 下拉 / 滑块 —— */
+/* ⚠️ !important 是必须的：有几个"霸道美化"会直接给页面上的 input/textarea 刷底色
+   （实测雪原诗 → rgba(250,252,254,.98) 近纯白；bgcol / 简约阅读 → 底色字色一起换），
+   不钉死的话面板里就会出现「输入框变白、字也白」= 看不见（有人反馈过）。 */
 #ssp_panel .ssp-inp, #ssp_panel select.ssp-inp {
     min-height: 28px; padding: 3px 8px; font-size: 12px;
-    color: inherit; background: var(--ssp-fill2);
-    border: 1px solid var(--ssp-line); border-radius: 8px; outline: none;
+    color: var(--ssp-ink) !important; background: var(--ssp-fill2) !important;
+    border: 1px solid var(--ssp-line) !important; border-radius: 8px; outline: none;
 }
-#ssp_panel .ssp-inp:focus { border-color: var(--ssp-accent); }
+#ssp_panel .ssp-inp:focus { border-color: var(--ssp-accent) !important; }
 #ssp_panel .ssp-inp.wide { width: 168px; }
 #ssp_panel .ssp-range {
     -webkit-appearance: none; appearance: none;
@@ -494,7 +508,7 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     height: 100% !important;
     object-fit: cover !important;
     border-radius: var(--ssp-favradius, 5px) !important;
-    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, .16)) !important;
+    border: 1px solid rgba(255, 255, 255, .16) !important;
     box-shadow: none !important;
 }
 
@@ -575,11 +589,21 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-orb-panel .ssp-pbtn.primary { border-color: rgba(255, 255, 255, .8); background: rgba(255, 255, 255, .14); color: #fff; }
 .ssp-orb-panel .ssp-pbtn.danger { border-color: rgba(255, 255, 255, .3); color: #ffb3bb; }
 .ssp-orb-panel .ssp-pbtn.danger:hover { background: rgba(255, 90, 110, .18); }
+/* ⚠️ 球面板本体早就是写死的固定配色，但**输入框 / 主按钮**这两条原先没上 !important，
+   于是几个"霸道美化"能把它们打穿（实测）：
+     · 雪原诗        → 输入框底色被换成 rgba(250,252,254,.98) 近纯白
+     · bgcol / 简约阅读 → 底色和字色一起被带跑
+   表现就是用户反馈的「输入框变白、字也白，看不见」。这里把这两处钉死。
+   注：普通按钮（.ssp-pbtn 不带 primary）是透明底 + color:inherit，
+   那种要**故意**继承父级（比如白卡上的黑字按钮），所以不给它钉颜色，只钉有自己底色的 primary。 */
 .ssp-orb-panel .ssp-inp {
-    width: 100%; box-sizing: border-box; padding: 6px 9px; font-size: 12.5px; color: inherit;
-    background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .18); border-radius: 8px; outline: none;
+    width: 100%; box-sizing: border-box; padding: 6px 9px; font-size: 12.5px;
+    color: #e8e8ee !important;
+    background: rgba(255, 255, 255, .07) !important;
+    border: 1px solid rgba(255, 255, 255, .18) !important; border-radius: 8px; outline: none;
 }
-.ssp-orb-panel .ssp-inp:focus { border-color: rgba(255, 255, 255, .7); }
+.ssp-orb-panel .ssp-inp:focus { border-color: rgba(255, 255, 255, .7) !important; }
+.ssp-orb-panel .ssp-pbtn.primary { color: #fff !important; }
 .ssp-orb-ta { margin-top: 7px; resize: vertical; font-family: inherit; line-height: 1.6; min-height: 120px; }
 
 @media (max-width: 560px) {
@@ -665,6 +689,42 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-orb-pbind.has { opacity: .9; }
 .ssp-orb-pacts { flex: 0 0 auto; display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
 .ssp-orb-pacts .ssp-pbtn { justify-content: center; white-space: nowrap; }
+
+/* ---------- 世界书栏（角色卡 → 多本世界书）----------
+   复用上面 prow / plist 的骨架，这里只补「勾选框」和「绑定页的整行可选行」。
+   颜色是写死的白色系（不读主题变量）—— 球的面板整块都独立于主题，和设置面板一个策略。
+
+   ⚠️ 两种状态**必须画得不一样**（用户反馈过：两个都画成白框 → 切角色时白框留着，
+      看着像"新这张卡也绑了它"）：
+        .on / .ssp-wb-mine  = 正在配的这张卡绑了它 ← 白框（= 本页的操作对象）
+        .ssp-wb-active      = 本聊天正在生效       ← 左侧竖条 + 底色（和"绑定"无关）
+   这两个是独立的两件事，可以同时出现。 */
+.ssp-orb-wbox { flex: 0 0 auto; font-size: 15px; opacity: .45; line-height: 1; }
+.ssp-orb-prow.on .ssp-orb-wbox { opacity: 1; }
+.ssp-orb-prow[data-orb-wtoggle] { cursor: pointer; }
+/* 本聊天生效：左侧一道亮竖条，不动边框 —— 所以切角色时不会留下"白框"的错觉 */
+.ssp-orb-prow.ssp-wb-active { box-shadow: inset 3px 0 0 0 rgba(255, 255, 255, .55); }
+.ssp-orb-prow.ssp-wb-active:not(.on) { background: rgba(255, 255, 255, .055); }
+.ssp-orb-prow.ssp-wb-active.on { box-shadow: inset 3px 0 0 0 rgba(255, 255, 255, .9); }
+.ssp-orb-wlist { display: flex; flex-direction: column; gap: 4px; }
+.ssp-orb-wrow {
+    display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, .16); border-radius: 9px; background: rgba(255, 255, 255, .03);
+    font-size: 12.5px; transition: background .12s ease, border-color .12s ease;
+}
+.ssp-orb-wrow:hover { background: rgba(255, 255, 255, .09); }
+.ssp-orb-wrow.on { border-color: rgba(255, 255, 255, .75); background: rgba(255, 255, 255, .13); }
+.ssp-orb-wrow.on .ssp-orb-wbox { opacity: 1; }
+.ssp-orb-wname { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+.ssp-orb-wchip {
+    flex: 0 0 auto; font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+    background: rgba(255, 255, 255, .18); white-space: nowrap;
+}
+/* 窄屏：世界书行也允许换行（面板就 ~430px 宽，宁可换行也别横向藏） */
+@media (max-width: 560px) {
+    .ssp-orb-wrow { flex-wrap: wrap; }
+    .ssp-orb-wrow .ssp-orb-wchip { margin-left: auto; }
+}
 
 .ssp-orb-fl { display: block; margin-bottom: 9px; }
 .ssp-orb-fl > span { display: block; font-size: 11px; opacity: .6; margin-bottom: 4px; }

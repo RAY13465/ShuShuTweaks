@@ -2734,6 +2734,70 @@ function switchCardStyle(next) {
     return c;
 }
 
+/** 把「圆角 / 间距」这两个旋钮标成 !important。
+    ⚠️ 为什么必须这么干（实测过）：
+       酒馆自带主题 .Base_D / .Base_L 里有一条
+         `*:not(#chat, #chat *, .avatar, .avatar *) { border-radius: var(--Radius) !important; }`
+       而它们把 --Radius 设成 0px —— `*` 会把角色卡也扫进去，于是**卡片圆角被抹平**
+       （表现为"切到某些美化后我的角色卡美化就不对了"）。
+       生成后统一加 !important 比逐条去改模板稳（模板以后加新块也不会漏）。 */
+function cardImportantify(css) {
+    let out = String(css || '')
+        .replace(/(border-radius\s*:\s*var\(--pv-radius[^;)]*\))(?!\s*!important)/g, '$1 !important')
+        .replace(/(margin(?:-bottom|-top)?\s*:\s*[^;{}]*var\(--pv-gap[^;)]*\)(?:[^;{}]*)?)(?!\s*!important)/g, '$1 !important')
+        .replace(/(gap\s*:\s*[^;{}]*var\(--pv-gap[^;)]*\))(?!\s*!important)/g, '$1 !important');
+    /* 只给「学生证」补一条纸底兜底。
+       ⚠️ 为什么必须这么干（实测，两次踩）：
+         主题可以直接给卡片写
+           `.character_select.entity_block, .avatar-container { background: linear-gradient(...) !important; }`
+         选择器比我们更具体 + 带 !important，于是：
+           ① background-color 被顶掉 → 纸底变主题色
+           ② 就算只锁住 color，那层暗渐变还盖在上面 → 看着还是黑的
+         所以要 color + image 一起锁：纸白就是纸白，不跟美化走（用户明确要的"写死"）。
+         确认过：8 种卡片样式没有任何一种靠 .character_select 的 background-image
+         （歌单行的渐变画在列表容器上），所以 image:none 不会连累别的样式。
+         hover 一起写，免得鼠标划过又变回主题色。 */
+    if (/--id-paper/.test(out)) {
+        out += '\n/* 纸底兜底（见 cardImportantify 注释）：color + image 一起锁死 */\n'
+            + '#rm_print_characters_block .character_select, #rm_print_characters_block .character_select:hover{'
+            + 'background-color:var(--id-paper,#f6f6f8) !important; background-image:none !important;}\n'
+            + '#rm_print_characters_block .character_select .avatar, #rm_print_characters_block .character_select:hover .avatar{'
+            + 'background-color:#fff !important; background-image:none !important;}\n';
+        /* 文字免疫层：颜色 / 字号 / 字体继承一起钉死。
+           ⚠️ 为什么（实测跨 23 个主题量的）：
+             主题会直接写 `.ch_name{ color:…; font-size:12px }`、`.tags_inline .tag{ color:… }`，
+             选择器比样式本体更具体 → 卡片自己的 `color:var(--id-ink)` 和 `font-size:var(--pv-name)`
+             全被顶掉。墨色纸卡(#f6f6f8)上换成主题的浅色小字 → **看不见**（用户反馈的就是这个）。
+             颜色一律取当前「证件配色」的 --id-ink/--id-label/--id-strong：
+             纸白/牛皮档是深墨、暗夜档自动变浅（--id-ink 本来就按档给），所以三个档都清楚。
+           font-family 用 `inherit`：拦住主题给单个元素换字体，又保留用户现在看到的那套字。
+           学生证编号那行本来就是 Arial Black，不动它。 */
+        out += '/* 文字免疫层：颜色/字号/字体继承钉死（见 cardImportantify 注释）*/\n'
+            + '#rm_print_characters_block .character_select .ch_name,'
+            + '#rm_print_characters_block .character_select .ch_name span,'
+            + '#rm_print_characters_block .character_select.is_fav .ch_name,'
+            + '#rm_print_characters_block .character_select .tags_inline,'
+            + '#rm_print_characters_block .character_select.is_fav .tags_inline,'
+            + '#rm_print_characters_block .character_select .tags_inline .tag,'
+            + '#rm_print_characters_block .character_select.is_fav .tags_inline .tag{'
+            + 'font-family:inherit !important; color:var(--id-ink,#3c3c42) !important;}\n'
+            + '#rm_print_characters_block .character_select .ch_name,'
+            + '#rm_print_characters_block .character_select.is_fav .ch_name{'
+            + 'font-size:var(--pv-name,16px) !important;}\n'
+            + '#rm_print_characters_block .character_select .ch_name::before,'
+            + '#rm_print_characters_block .character_select .tags_inline::before{'
+            + 'color:var(--id-label,#8d8d95) !important;}\n'
+            + '#rm_print_characters_block .character_select .character_select_container{'
+            + 'font-family:inherit !important; color:var(--id-ink,#3c3c42) !important;}\n'
+            + '#rm_print_characters_block .character_select .ch_description{'
+            + 'font-family:inherit !important; color:var(--id-strong,#5c5c63) !important;'
+            + 'font-size:var(--pv-desc,11.5px) !important;}\n'
+            + '#rm_print_characters_block .character_select .tags_inline .tag{'
+            + 'font-size:10px !important; background:transparent !important;}\n';
+    }
+    return out;
+}
+
 /** 把配置变成现实（幂等）。样式=原版时连 style 标签一起撤掉。 */
 function applyCardStyle() {
     const c = cardStyleSettings();
@@ -2744,7 +2808,7 @@ function applyCardStyle() {
         hdCardAvatars(false);
         return { style: 'none', hd: 0, css: 0 };
     }
-    const css = '/* 鼠鼠小助手 · 角色卡样式：' + def.name + ' */\n' + cardAssembleCSS(c);
+    const css = '/* 鼠鼠小助手 · 角色卡样式：' + def.name + ' */\n' + cardImportantify(cardAssembleCSS(c));
     let node = el;
     if (!node) {
         node = document.createElement('style');
@@ -4105,7 +4169,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.29.2';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.30.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4499,6 +4563,9 @@ var orbPSearch = '';        // 面具页的搜索词（角色卡名 / 面具名 
 var orbPresetBinding = null;// 正在给哪个预设选绑定角色
 var orbPreSearch = '';      // 预设页搜索词
 var orbNSearch = '';        // 番外页搜索词
+var orbWbBinding = null;    // 正在给哪个角色卡配世界书（null = 不在绑定模式）
+var orbWbSearch = '';       // 世界书页搜索词
+var orbWbNames = [];        // 世界书名缓存（读不到就退回酒馆的 #world_info 下拉）
 var orbCollapsed = false;   // 悬浮球是否收纳进左下角魔法棒
 
 /* ============================ 存档（聊天记录）栏 ============================
@@ -4775,6 +4842,407 @@ function orbThemePickerHTML(name) {
         + (conns.length ? '<div class="ssp-orb-empty" style="padding-top:6px">已绑定：' + esc(conns.join('、')) + '</div>' : '');
 }
 
+/* ============================ 世界书栏（角色卡 → 多个世界书）============================
+   用户要的：**一张角色卡绑多本世界书**，切到这张卡就都生效。
+
+   ⚠️ 为什么不用酒馆原生的「Additional Lorebooks」：
+     那份数据存在**客户端内存对象** world_info.charLore 里，而本扩展读不到它 ——
+     实测（真页面 + CDP 探过）三条路全不通：
+       · SillyTavern.getContext().worldInfo          → undefined
+       · SillyTavern.getContext().powerUserSettings.world_info → undefined
+       · getWorldInfoSettings()                      → 上下文里没有这个导出
+     而且这份酒馆构建把角色面板的「Link to World Info」菜单项也注释掉了
+     （script.js 里 `$('#set_character_world').on('click', ...)` 那行是注释状态），
+     所以这条路彻底走不通，**做不到和酒馆原生绑定互通**（别去试，试过）。
+
+   所以改成：**绑定表自己存**（s.worldBinds[角色文件名] = [书名…]），
+   切角色时把绑定的书**加进当前聊天的生效列表**（酒馆自己的 #world_info 多选框）。
+
+   「不污染」是这一栏的核心承诺 —— 扩展加进去的书会被记账（s.worldApplied[聊天id].prev），
+   切走时**精确还原成你原来手动勾的那几本**：
+     · 扩展只碰自己加进去/移除的那几本，你手动勾的别人一概不动
+     · 切角色时把上一个聊天的账清掉（还原 + 删记录）
+     · 面板里有「还原这个聊天」的手动出口，随时可退
+
+   两个概念在面板上分开显示，不混为一谈：
+     · **绑定**：这张角色卡配了哪几本（存扩展设置，跟着酒馆备份走、切角色永远在）
+     · **本聊天生效**：酒馆那个多选框里现在勾着哪几本（绑定的 + 你自己勾的）
+   ========================================================================== */
+
+/** 角色卡标识 / 缓存键 —— 和酒馆 getCharaFilename() 一致：去掉图片扩展名（utils.js:1343） */
+function orbWbCharKey(avatar) {
+    const a = String(avatar || '');
+    return a ? a.replace(/\.[^/.]+$/, '') : '';
+}
+/** 当前开着的聊天是哪个角色（拿不到就是 null） */
+function orbWbCurChar() {
+    try {
+        const ctx = getContext() || {};
+        const ch = (ctx.characters || [])[ctx.characterId];
+        return ch && ch.avatar ? { id: ch.avatar, key: orbWbCharKey(ch.avatar), name: ch.name } : null;
+    } catch (e) { return null; }
+}
+/** 当前聊天 id（拿不到返回空串）—— 换聊天要按它分别记账 */
+function orbWbChatId() {
+    try { return String((getContext() || {}).getCurrentChatId?.() || ''); } catch (e) { return ''; }
+}
+/** 记账表的键：一个角色可能有好几个聊天，所以按「角色文件::聊天id」分开记 */
+function orbWbChatKey() {
+    const ch = orbWbCurChar();
+    if (!ch) return '';
+    return ch.id + '::' + orbWbChatId();
+}
+
+/** 绑定表（角色文件名 → 书名数组）*/
+function orbWbBinds() {
+    const s = getSettings();
+    if (!s.worldBinds || typeof s.worldBinds !== 'object' || Array.isArray(s.worldBinds)) s.worldBinds = {};
+    return s.worldBinds;
+}
+/** 记账表（聊天键 → {prev:[…], ext:[…], at:时间}）*/
+function orbWbApplied() {
+    const s = getSettings();
+    if (!s.worldApplied || typeof s.worldApplied !== 'object' || Array.isArray(s.worldApplied)) s.worldApplied = {};
+    return s.worldApplied;
+}
+function orbWbRecord(key) { return key ? (orbWbApplied()[key] || null) : null; }
+
+/** 某张角色卡绑了哪几本书（读的时候就去重，写脏了也能吃） */
+function orbWbBound(key) {
+    if (!key) return [];
+    const list = orbWbBinds()[key];
+    return Array.isArray(list) ? Array.from(new Set(list.filter(Boolean))) : [];
+}
+/** 整表替换某张卡的绑定（空数组＝解绑）*/
+function orbWbSetBound(key, books) {
+    if (!key) { toast('没认出来这张角色卡（拿不到头像文件名）', 'warning'); return false; }
+    const b = orbWbBinds();
+    const next = Array.from(new Set((books || []).filter(Boolean)));
+    if (!next.length) delete b[key]; else b[key] = next;
+    save();
+    return true;
+}
+/** 加/减一本书（返回加完之后的清单）*/
+function orbWbToggleBound(key, name) {
+    const cur = orbWbBound(key).slice();
+    const i = cur.indexOf(name);
+    if (i >= 0) cur.splice(i, 1); else cur.push(name);
+    orbWbSetBound(key, cur);
+    return orbWbBound(key);
+}
+/** 反向查：谁绑了这本书（返回角色名数组）*/
+function orbWbCharNames(name) {
+    const b = orbWbBinds(), chars = orbCharList();
+    return Object.keys(b)
+        .filter(k => Array.isArray(b[k]) && b[k].indexOf(name) >= 0)
+        .map(k => (chars.find(c => orbWbCharKey(c.id) === k) || {}).name || k);
+}
+/** 这本书有没有绑在任何一张卡上 */
+function orbWbIsBound(name) { return orbWbCharNames(name).length > 0; }
+
+/** 世界书清单：优先上下文（st-context.js 的 getWorldInfoNames），退回酒馆的下拉框 */
+function orbWorldList() {
+    let names = [];
+    try { names = (getContext() || {}).getWorldInfoNames?.() || []; } catch (e) { }
+    if (!names.length) {
+        const sel = document.getElementById('world_info');
+        if (sel) names = Array.from(sel.options || []).map(o => (o.textContent || '').trim()).filter(Boolean);
+    }
+    if (names.length) orbWbNames = names.slice();
+    return (names.length ? names : orbWbNames).slice();
+}
+/* ============================ 世界书栏 · 同步引擎 ============================
+   ⚠️ 这一版把上一版的设计**简化掉了**。上一版允许"手动在聊天里启用某本"，
+   于是生效列表里会留着**跟当前角色卡无关**的书，面板还得给它挂个「本聊天生效」标签 ——
+   用户切卡后看到上一张卡点过的书还亮着「本聊天生效」，整个是脏的（实测反馈）。
+
+   现在的模型（干净版）：
+     · **绑定即生效**：一张卡绑定哪几本，本聊天就启用哪几本，一一对应
+     · 面板上只有三种状态：生效中（已绑+已启用）／已绑·未启用（异常态）／没绑
+       —— 不再有"本聊天生效但不属于这张卡"这种东西
+     · 切卡时：把**本扩展为这张卡启用过的**书撤掉，再启用新卡绑定的那几本
+       （只动扩展自己启用过的，用户手动勾的一本不碰；撤销后如果原状里有，会补回来）
+     · 换聊天时重置记账：新聊天有自己的世界书状态，不继承上一个聊天的账
+   ========================================================================== */
+
+/** 本聊天真正生效的世界书（读酒馆自己那个多选框 #world_info） */
+function orbWbActive() {
+    const sel = document.getElementById('world_info');
+    if (!sel) return [];
+    return Array.from(sel.selectedOptions || []).map(o => (o.textContent || '').trim()).filter(Boolean);
+}
+/** 记账：本扩展在这个聊天里启用过哪几本（键＝聊天） */
+function orbWbEnabled(key) {
+    const r = orbWbRecord(key);
+    return (r && Array.isArray(r.ext)) ? r.ext.filter(Boolean) : [];
+}
+/** 记一笔：谁在什么时候启用了哪几本 */
+function orbWbEnabledSet(key, books) {
+    const next = Array.from(new Set((books || []).filter(Boolean)));
+    if (!next.length) { delete orbWbApplied()[key]; save(); return; }
+    orbWbApplied()[key] = { ext: next, at: Date.now() };
+    save();
+}
+
+/** 只在多选框上做增删（不记账）—— 内部用 */
+function orbWbSelApply(add, del) {
+    const sel = document.getElementById('world_info');
+    if (!sel) return null;
+    const wantAdd = (add || []).filter(Boolean);
+    const wantDel = (del || []).filter(Boolean);
+    if (!wantAdd.length && !wantDel.length) return { added: [], removed: [] };
+    Array.from(sel.options || []).forEach(o => {
+        const n = (o.textContent || '').trim();
+        if (wantAdd.indexOf(n) >= 0) o.selected = true;
+        if (wantDel.indexOf(n) >= 0) o.selected = false;
+    });
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return { added: wantAdd, removed: wantDel };
+}
+
+/** 把当前聊天的生效列表**对齐到这张角色卡的绑定**，并记账我们启用了哪些。
+    返回 {added, removed} 或 null（拿不到多选框）。 */
+function orbWbSyncChar() {
+    if (!orbWbAuto()) return null;
+    const sel = document.getElementById('world_info');
+    if (!sel) { toast('拿不到酒馆的世界书选择框（#world_info），先刷新一下页面', 'warning'); return null; }
+    const ch = orbWbCurChar();
+    if (!ch) return null;
+    const key = orbWbChatKey();
+    const all = orbWorldList();
+    const bound = orbWbBound(ch.key);
+    const gone = bound.filter(n => all.indexOf(n) < 0);
+    if (gone.length) toast('绑的世界书找不到了：' + gone.join('、'), 'warning');
+    const want = bound.filter(n => all.indexOf(n) >= 0);
+
+    let cur = orbWbActive();
+    const enabled = orbWbEnabled(key);                                  // 我们上次启用过的
+    const enabledNow = enabled.filter(n => cur.indexOf(n) >= 0);        // 其中现在还开着的
+    /* 该撤的：我们启用过、但现在不在这张卡的绑定里了；顺带把它从"用户原状"里修掉 */
+    const del = enabledNow.filter(n => want.indexOf(n) < 0);
+    /* 该补的：这张卡绑了、但当前没生效的 */
+    const add = want.filter(n => cur.indexOf(n) < 0);
+    /* 还要把"我们启用过但已不在原状里的"从账上抹掉，免得以后重复撤 */
+    const keepEnabled = enabledNow.filter(n => want.indexOf(n) >= 0);
+    orbWbEnabledSet(key, keepEnabled);
+
+    if (!del.length && !add.length) return { added: [], removed: [] };
+    const r = orbWbSelApply(add, del);
+    if (!r) return null;
+    orbWbEnabledSet(key, keepEnabled.concat(add));
+    return { added: add, removed: del };
+}
+
+/** 旧名保留（面板/事件里都还在调）：等于 orbWbSyncChar */
+function orbWbApplyForChar() {
+    const r = orbWbSyncChar();
+    return !!(r && (r.added.length || r.removed.length));
+}
+
+/** 撤销：把本扩展在这个聊天里启用过的书撤掉（用户手动勾的一本不碰），并删掉记账。
+    kind='restore'（手动「还原这个聊天」按钮）：撤掉我们启用过的，并把同时被撤掉的原状补回来。
+    kind='reset'  （切聊天/切角色）：只撤掉我们启用过的 + 删记账 ——
+       新聊天有自己的世界书状态、由酒馆自己加载，不需要我们补回任何东西。 */
+function orbWbCleanup(key, kind) {
+    const sel = document.getElementById('world_info');
+    const enabled = orbWbEnabled(key);
+    if (sel && enabled.length) {
+        const cur = orbWbActive();
+        const now = enabled.filter(n => cur.indexOf(n) >= 0);
+        if (now.length) orbWbSelApply([], now);
+        if (kind === 'restore') {
+            /* 旧数据里可能存过 prev（用户原状）；撤掉之后把本该有的补回来 */
+            const rec = orbWbRecord(key);
+            const prev = (rec && Array.isArray(rec.prev)) ? rec.prev : [];
+            const cur2 = orbWbActive();
+            const back = prev.filter(n => cur2.indexOf(n) < 0 && now.indexOf(n) < 0);
+            if (back.length) orbWbSelApply(back, []);
+        }
+    }
+    if (key) { delete orbWbApplied()[key]; save(); }
+    return true;
+}
+
+/* 手动「还原这个聊天」：撤销我们启用过的书（用户手动勾的不动） */
+function orbWbRestoreCur() {
+    const key = orbWbChatKey();
+    if (!key) { toast('还没打开聊天', 'warning'); return false; }
+    if (!orbWbRecord(key)) { toast('这个聊天没有本扩展启用过的世界书', 'info'); return false; }
+    orbWbCleanup(key, 'restore');
+    orbWbAutoArmed.delete(key);
+    toast('已把本扩展启用的世界书撤掉', 'success');
+    return true;
+}
+/** 切聊天 / 切角色时调用。
+    ⚠️ 这里踩过两次坑，都记下来：
+      ① 曾经在切换时"还原上一个聊天"→ 那时多选框里已经是**新聊天**的状态，
+         拿它当旧聊天的现状去补书，结果把上一张卡的书串进了新聊天。
+      ② 曾经把「本扩展启用过哪几本」的记账**跨聊天留着** → 切到新卡后，
+         上一张卡点过的书还挂着「本聊天生效」，看着像新卡也认它（用户反馈"你就做干净一点"）。
+    现在的做法：切换时①把上一个聊天的记账连同我们启用过的书一起撤掉（**只撤我们启用过的**），
+    ②然后按新角色重新对齐。新聊天有自己的世界书状态、由酒馆自己加载，我们不需要补回任何东西。 */
+var orbWbLastKey = '';
+var orbWbAutoArmed = new Set();   // 这次切换里已经对齐过的聊天键（防止刷两次重复弹提示）
+function orbWbOnChatChanged() {
+    const nowKey = orbWbChatKey();
+    if (orbWbLastKey && orbWbLastKey !== nowKey) {
+        try { orbWbCleanup(orbWbLastKey, 'reset'); } catch (e) { }
+        orbWbAutoArmed.delete(orbWbLastKey);
+    }
+    orbWbLastKey = nowKey;
+    if (!nowKey) return;
+    if (orbWbAutoArmed.has(nowKey)) return;
+    [300, 900, 1800].forEach(ms => {
+        setTimeout(() => {
+            if (orbWbChatKey() !== nowKey) return;             // 又切走了，别乱动
+            if (orbWbAutoArmed.has(nowKey)) return;
+            const done = orbWbApplyForChar();
+            /* 没绑书也算处理过了，省得反复空转 */
+            orbWbAutoArmed.add(nowKey);
+            if (done && orbOpenNow && orbTab === 'world') renderOrbPanel();
+        }, ms);
+    });
+}
+/** 这一栏要不要自动套用（默认开；关掉就只留手动） */
+function orbWbAuto() {
+    const s = getSettings();
+    if (typeof s.worldAuto !== 'boolean') s.worldAuto = true;
+    return s.worldAuto;
+}
+
+/** 切到这一页时刷一次世界书清单（新建/导入的世界书要能看见） */
+function orbWorldRefresh() {
+    orbWorldList();
+    /* 下拉选项是酒馆自己填的；酒馆那边还没填过就让它去拿一次（异步，回来再重画） */
+    const sel = document.getElementById('world_info');
+    const isEmpty = !sel || (sel.options || []).length <= 1;
+    if (isEmpty) {
+        try {
+            const p = (getContext() || {}).updateWorldInfoList?.();
+            if (p && p.then) p.then(() => { orbWorldList(); if (orbOpenNow && orbTab === 'world') renderOrbPanel(); }).catch(() => { });
+        } catch (e) { }
+    }
+}
+
+/** 这本书现在是什么状态：'active' 已绑且已启用 / 'bound' 已绑但还没启用（异常态） / '' 没绑
+    ⚠️ 干净版**只有这两种**（都基于"这张卡绑了吗"）。
+    以前还有第三种「本聊天生效但不属于这张卡」→ 用户切卡后看到上一张卡点过的书还挂着这个标签，
+    整个是脏的（实测反馈）。现在那种情况不再显示任何标签。 */
+function orbWbState(name) {
+    const ch = orbWbTargetChar();
+    if (!ch) return '';
+    if (orbWbBound(ch.key).indexOf(name) < 0) return '';
+    return orbWbActive().indexOf(name) >= 0 ? 'active' : 'bound';
+}
+/** 这一页取哪个角色的清单：优先当前聊天角色；抽屉里给了 avatar 就听它的 */
+function orbWbTargetChar() {
+    const cur = orbWbCurChar();
+    if (orbWbBinding) {
+        const chars = orbCharList();
+        const c = chars.find(x => x.id === orbWbBinding);
+        if (c) return { id: c.id, key: orbWbCharKey(c.id), name: c.name };
+    }
+    return cur;
+}
+
+function orbWorldRowsHTML() {
+    const all = orbWorldList();
+    const ch = orbWbTargetChar();
+    if (!all.length) {
+        return '<div class="ssp-orb-empty">没读到世界书清单。<br>'
+            + '（世界书是空的，或者酒馆那边还没加载完 —— 刷新一下页面再进来看看）</div>';
+    }
+    const bound = ch ? orbWbBound(ch.key) : [];
+    const q = orbWbSearch.toLowerCase();
+    const hit = all.filter(n => !q
+        || String(n).toLowerCase().indexOf(q) >= 0
+        || orbWbCharNames(n).join('、').toLowerCase().indexOf(q) >= 0);
+    if (!hit.length) return '<div class="ssp-orb-empty">没有匹配「' + esc(orbWbSearch) + '」的世界书。<br>（搜的是：世界书名 / 绑过它的角色卡名）</div>';
+    const head = orbWbSearch ? '<div class="ssp-orb-pcount">筛选出 ' + hit.length + ' / ' + all.length + ' 本世界书</div>' : '';
+    const rows = hit.map(n => {
+        const st = orbWbState(n);
+        const mine = (bound.indexOf(n) >= 0);
+        /* 干净版：白框（.on）＋ 🔖 只表示「这张卡绑了它」。
+           绑了就是生效中（绑定即生效），所以竖条和它永远同步 ——
+           不再有"本聊天生效但不属于这张卡"这种悬空状态（用户反馈过那是脏的）。 */
+        const others = orbWbCharNames(n).filter(x => !ch || x !== ch.name);
+        const tip = !ch ? '先在酒馆里打开一个聊天，才能给角色卡配绑定'
+            : (mine ? '点一下＝从「' + ch.name + '」解绑，并从本聊天撤掉'
+                : '点一下＝绑给「' + ch.name + '」，并在本聊天启用');
+        return '<div class="ssp-orb-prow' + (mine ? ' on ssp-wb-mine ssp-wb-active' : '') + '"'
+            + (ch ? ' data-orb-wtoggle="' + esc(n) + '"' : '') + ' title="' + esc(tip) + '">'
+            + '<div class="ssp-orb-wbox"><i class="fa-solid ' + (mine ? 'fa-bookmark' : 'fa-square') + '"></i></div>'
+            + '<div class="ssp-orb-pmain">'
+            + '<div class="ssp-orb-pname">' + esc(n)
+            + (st === 'active' ? '<span class="ssp-orb-ptag">生效中</span>' : '')
+            + (st === 'bound' ? '<span class="ssp-orb-ptag">已绑·未启用</span>' : '')
+            + '</div>'
+            + '<div class="ssp-orb-pbind' + (others.length ? ' has' : '') + '"><i class="fa-solid fa-link"></i>'
+            + (others.length ? esc(others.join('、') + ' 也绑了') : '没有别的角色卡绑它') + '</div>'
+            + '</div></div>';
+    }).join('');
+    return head + '<div class="ssp-orb-plist">' + rows + '</div>';
+}
+
+function orbWorldHTML() {
+    const all = orbWorldList();
+    const ch = orbWbTargetChar();
+    const cur = orbWbCurChar();
+    const act = orbWbActive();
+    const bound = ch ? orbWbBound(ch.key) : [];
+    const applied = bound.filter(n => act.indexOf(n) >= 0);       // 绑了且已启用
+    const otherChar = (orbWbBinding && (!cur || orbWbBinding !== cur.id)) ? ch : null;
+
+    const foot = '<div class="ssp-orb-empty" style="padding-top:6px">'
+        + (ch
+            ? '正在配 <b>' + esc(ch.name) + '</b>' + (otherChar ? '（不是当前聊天的角色）' : '')
+                + '：绑了 <b>' + bound.length + '</b> 本' + (bound.length ? '（' + esc(bound.join('、')) + '）' : '') + '<br>'
+            : '还没打开聊天 —— 先在酒馆里打开一个聊天，这里才能给角色卡配绑定。<br>')
+        + (ch && bound.length
+            ? '本聊天已按这张卡启用：<b>' + esc(applied.length ? applied.join('、') : '（还没启用）') + '</b>'
+            : '')
+        + '<br><span style="opacity:.75">点世界书名 = 加/减这张卡的绑定 —— '
+        + '<b>绑上就启用、解绑就撤掉</b>，一一对应，不会留下跟这张卡无关的书。'
+        + '<b>一张卡能绑多本</b>；切到别的卡时，这里会换成那张卡的绑定。</span>'
+        + '</div>';
+
+    const bar = '<div class="ssp-orb-pfilter">'
+        + '<i class="fa-solid fa-magnifying-glass"></i>'
+        + '<input class="ssp-inp" type="text" data-orb-wsearch="1" placeholder="搜世界书 / 角色卡" value="' + esc(orbWbSearch) + '">'
+        + (orbWbSearch ? '<span class="ssp-pbtn" data-orb-wclear="1">清除</span>' : '')
+        + '</div>';
+
+    const tools = '<div class="ssp-orb-pcount">'
+        + '<label class="ssp-orb-auto"><input type="checkbox" data-orb-wauto="1"' + (orbWbAuto() ? ' checked' : '')
+        + '><span>切到绑定的角色卡时自动启用（切走自动撤掉）</span></label>'
+        + (applied.length ? '<br><span class="ssp-pbtn" data-orb-wrestore="1"><i class="fa-solid fa-rotate-left"></i>'
+            + '撤掉本扩展启用的 ' + applied.length + ' 本（手动勾的不动）</span>' : '')
+        + (otherChar ? '<br><span class="ssp-pbtn" data-orb-wback="1"><i class="fa-solid fa-arrow-left"></i>回到当前聊天角色</span>' : '')
+        + (bound.length ? '<br><span class="ssp-pbtn" data-orb-wclearall="1"><i class="fa-solid fa-eraser"></i>清空「'
+            + esc(ch.name) + '」的全部绑定</span>' : '')
+        + '</div>';
+
+    /* 抽屉里给了 avatar（不在绑定页了，改成"切到别的角色配"入口）—— 这里给一个选角色的下拉 */
+    const chars = orbCharList();
+    const picker = (cur && chars.length)
+        ? '<div class="ssp-orb-pcount">给别的角色卡配：<select class="ssp-inp" data-orb-wchar="1" style="max-width:220px">'
+            + '<option value="">（当前：' + esc(cur.name) + '）</option>'
+            + chars.filter(c => c.id !== cur.id).map(c => '<option value="' + esc(c.id) + '"'
+                + (orbWbBinding === c.id ? ' selected' : '') + '>' + esc(c.name) + '</option>').join('')
+            + '</select></div>'
+        : '';
+
+    if (!all.length) return orbWorldRowsHTML() + bar + tools + foot;
+    return bar + tools + picker + '<div id="ssp_orb_world_list">' + orbWorldRowsHTML() + '</div>' + foot;
+}
+
+/** 这一页不再需要单独的绑定页（绑定就地点；orbWbBinding 现在只表示"在看哪张卡"） */
+function orbWorldPickerHTML(charAvatar) {
+    orbWbBinding = charAvatar || null;
+    return orbWorldHTML();
+}
+
+
 /* ============================ 预设（采样预设）栏 ============================
    酒馆没有「预设绑角色」的原生功能，所以：
      读/切：官方 API —— getPresetManager('openai') 的 getAllPresets / getSelectedPresetName / selectPreset
@@ -4996,6 +5464,7 @@ const ORB_MODULES = [
     { id: 'persona', name: '面具', icon: 'fa-masks-theater', render: () => orbPersonaHTML() },
     { id: 'preset', name: '预设', icon: 'fa-sliders', render: () => orbPresetHTML() },
     { id: 'theme', name: '美化', icon: 'fa-palette', render: () => orbThemeHTML() },
+    { id: 'world', name: '世界书', icon: 'fa-book-atlas', render: () => orbWorldHTML() },
     { id: 'chat', name: '存档', icon: 'fa-box-archive', render: () => orbChatHTML() },
 ];
 function orbModule(id) { return ORB_MODULES.find(m => m.id === id) || null; }
@@ -5422,6 +5891,42 @@ function refreshOrbBadge() {
     return true;
 }
 
+/** 锁住悬浮球的「皮肤」属性。
+    ⚠️ 为什么必须这么干（实测过，不是猜）：
+       酒馆自带主题 .Base_D / .Base_L 里有一条
+         `*:not(#chat, #chat *, .avatar, .avatar *) { border-radius: var(--Radius) !important; }`
+       而这两个主题把 --Radius 设为 0px。**`*` 选择器会把本扩展的球一起扫进去**，
+       而且带 !important —— 所以切到这些主题时：
+         · 球（本来 border-radius:50%）被抹成 0 → 看着"变方"
+         · 里面的菱形（rotate(45deg) + radius:3px）也一起变
+       我方 CSS 再怎么写选择器也压不过带 !important 的 `*`（特异性比不过通配符链）。
+       所以改用**内联 !important**：内联的 !important 优先级高于任何外部 !important 规则。
+       只锁几何/配色这几项，不动 left/top（那是 JS 按视口算的）和过渡。 */
+function lockOrbSkin() {
+    try {
+        const ball = document.getElementById('ssp_orb');
+        if (!ball || !ball.style || !ball.style.setProperty) return false;
+        const P = (k, v) => ball.style.setProperty(k, v, 'important');
+        P('width', '52px'); P('height', '52px');
+        P('border-radius', '50%');
+        P('background', 'linear-gradient(#1c1c22, #0e0e12)');
+        P('border', '1px solid rgba(255,255,255,.22)');
+        P('box-shadow', '0 6px 20px rgba(0,0,0,.5)');
+        P('display', 'grid'); P('place-items', 'center');
+        P('overflow', 'visible');            // 角标要露在球外面
+        const dia = ball.querySelector('.ssp-orb-diamond');
+        if (dia && dia.style && dia.style.setProperty) {
+            const Q = (k, v) => dia.style.setProperty(k, v, 'important');
+            Q('width', '20px'); Q('height', '20px');
+            Q('transform', 'rotate(45deg)');
+            Q('border-radius', '3px');
+            Q('background', 'linear-gradient(135deg,#ffffff,#9a9aa2)');
+            Q('box-shadow', 'inset 0 0 0 1px rgba(0,0,0,.35), 0 0 10px rgba(0,0,0,.45)');
+        }
+        return true;
+    } catch (e) { return false; }
+}
+
 function mountOrb() {
     if (orbBuilt && document.getElementById('ssp_orb')) return true;
     if (!document.body) return false;
@@ -5457,6 +5962,7 @@ function mountOrb() {
     }
     ball.innerHTML = '<span class="ssp-orb-diamond"></span><span class="ssp-orb-badge" id="ssp_orb_badge"></span>';
     document.body.append(ball);
+    lockOrbSkin();      // 锁皮肤：免得主题里那条带 !important 的 `*{border-radius:…}` 把球压成方的
 
     /* ③ 左下角「魔法棒」按钮：球的收纳口 —— 点一下把球收进去 / 再点放出来。
        球的展开与否存进设置（orbCollapsed），刷新后保持。 */
@@ -5542,11 +6048,68 @@ function orbSetCollapsed(on, silent) {
     return orbCollapsed;
 }
 
+/** 换主题后保护一遍自己的两处外观：
+     ① 球的皮肤（主题里带 !important 的 `*{border-radius:…}` 会把它压方）
+     ② 卡片样式表（同一条规则会把卡片圆角抹平 → 重新注入一次带 !important 的版本）
+    酒馆没有「主题已切换」事件导出，所以盯主题下拉 + 盯 body 的 class/style（主题会往 body 挂 class）。 */
+function protectSkinAfterThemeChange() {
+    [0, 120, 400].forEach(ms => setTimeout(() => {
+        try { lockOrbSkin(); } catch (e) { }
+        try { applyCardStyle(); } catch (e) { }
+    }, ms));
+}
+
+/** 换角色卡时重画面板。
+    ⚠️ 之前只挂了 CHAT_CHANGED —— 所以在**角色列表里换卡**（没换聊天）时，
+       面板还显示着上一个角色的绑定，看着就像"绑定没跟着卡走"。挂 CHARACTER_PAGE_LOADED 补上。
+       酒馆落 characterId 是异步的，所以延后几次各刷一遍。 */
+var orbLastCharId = null;
+function orbOnCharChanged() {
+    const now = (orbWbCurChar() || {}).id || '';
+    if (now === orbLastCharId) return;
+    orbLastCharId = now;
+    orbWbAutoArmed = new Set();     // 换角色了，允许新角色重新套用一次
+    [0, 150, 500].forEach(ms => setTimeout(() => {
+        orbLastCharId = (orbWbCurChar() || {}).id || '';
+        if (orbOpenNow) renderOrbPanel();
+    }, ms));
+    if (now) [400, 1200].forEach(ms => setTimeout(() => { try { orbWbOnChatChanged(); } catch (e) { } }, ms));
+}
+
 function bindOrb() {
     if (bindOrb.done) return false;
     bindOrb.done = true;
     const getBall = () => document.getElementById('ssp_orb');
     let dragging = false, moved = false, sx = 0, sy = 0, ox = 0, oy = 0;
+
+    try {
+        const sel = document.getElementById('themes');
+        if (sel && !bindOrb.themeBound) {
+            bindOrb.themeBound = true;
+            sel.addEventListener('change', protectSkinAfterThemeChange);
+        }
+        if (window.MutationObserver && document.body && !bindOrb.skinObs) {
+            bindOrb.skinObs = true;
+            let t = 0;
+            new MutationObserver(() => {
+                if (t) return;
+                t = setTimeout(() => { t = 0; protectSkinAfterThemeChange(); }, 60);
+            }).observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
+        }
+    } catch (e) { }
+
+    /* 兜底轮询：面板开着时，只要「当前聊天角色」和上次记的不一样就重画。
+       解决换卡后面板还显示上一个角色的问题（事件有时序问题，轮询最省心，也很轻）。 */
+    try {
+        if (!bindOrb.charPoll) {
+            bindOrb.charPoll = true;
+            setInterval(() => {
+                if (!orbOpenNow) return;
+                const now = (orbWbCurChar() || {}).id || '';
+                if (now !== orbLastCharId) orbOnCharChanged();
+            }, 1200);
+        }
+    } catch (e) { }
 
     /* ⚠️ 实时同步：酒馆换面具/新建/改名/删面具、切聊天时，只要面板开着就跟着刷。
        之前是「换完立刻重画」→ 但酒馆那边的选中状态是异步落的，重画时读到的还是旧值，
@@ -5560,10 +6123,11 @@ function bindOrb() {
                 const evName = et[k];
                 if (!evName) return;
                 es.on(evName, () => {
-                    /* 切聊天时先看要不要自动换预设 / 自动换美化 */
+                    /* 切聊天时先看要不要自动换预设 / 自动换美化 / 自动套用世界书 */
                     if (k === 'CHAT_CHANGED') {
                         try { orbPresetAutoApply(); } catch (e) { }
                         try { orbThemeAutoApply(); } catch (e) { }
+                        try { orbWbOnChatChanged(); } catch (e) { }
                     }
                     if (!orbOpenNow) return;
                     /* 刷两次：事件刚发时酒馆可能还没把选中状态落下来 */
@@ -5702,6 +6266,29 @@ function bindOrb() {
         }
     });
 
+    /* 世界书页：换一张角色卡来配（下拉框走 change，不是 click） */
+    document.addEventListener('change', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbWchar === undefined) return;
+        orbWbBinding = el.value || null;
+        renderOrbPanel();
+    });
+
+    /* 世界书页搜索（和上面几页一样：只重画列表，输入框焦点不丢） */
+    document.addEventListener('input', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbWsearch === undefined) return;
+        orbWbSearch = el.value || '';
+        const box = document.getElementById('ssp_orb_world_list');
+        if (box) box.innerHTML = orbWorldRowsHTML();
+        const bar = document.querySelector('.ssp-orb-pfilter');
+        if (bar) {
+            let c = bar.querySelector('[data-orb-wclear]');
+            if (orbWbSearch && !c) { c = document.createElement('span'); c.className = 'ssp-pbtn'; c.setAttribute('data-orb-wclear', '1'); c.textContent = '清除'; bar.append(c); }
+            else if (!orbWbSearch && c) c.remove();
+        }
+    });
+
     document.addEventListener('click', ev => {
         const t = ev.target;
         if (!t || !t.closest) return;
@@ -5758,12 +6345,64 @@ function bindOrb() {
             toast(t.checked ? '自动换预设：开' : '自动换预设：关', 'info');
             return;
         }
+        /* 世界书页：清除搜索 / 返回当前角色 / 点书名＝加/减这张卡的绑定 /
+           自动开关 / 还原这个聊天 / 清空这张卡的绑定 / 换一张角色卡配 */
+        if (t.closest('[data-orb-wclear]')) { orbWbSearch = ''; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-wback]')) { orbWbBinding = null; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-wrestore]')) { orbWbRestoreCur(); renderOrbPanel(); return; }
+        if (t.closest('[data-orb-wauto]')) {
+            getSettings().worldAuto = Boolean(t.checked);
+            save();
+            toast(t.checked ? '切角色自动启用世界书：开' : '切角色自动启用世界书：关', 'info');
+            return;
+        }
+        const wClearAll = t.closest('[data-orb-wclearall]');
+        if (wClearAll) {
+            const ch0 = orbWbTargetChar();
+            if (!ch0) { toast('先在酒馆里打开一个聊天', 'warning'); return; }
+            const had = orbWbBound(ch0.key);
+            if (!had.length) { toast('这张卡本来就没绑世界书', 'info'); return; }
+            getContext().callGenericPopup('清空「' + ch0.name + '」绑定的全部 ' + had.length + ' 本世界书？<br>'
+                + '<i style="opacity:.6">（只清绑定关系，不会删世界书文件）</i>',
+                getContext().POPUP_TYPE.CONFIRM, '', { okButton: '清空', cancelButton: '算了' })
+                .then(r => {
+                    if (r !== getContext().POPUP_RESULT.AFFIRMATIVE) return;
+                    /* 先把它加进去的还回去，再清绑定，顺序反了会留下我们加的书 */
+                    if (orbWbChatKey() && orbWbRecord(orbWbChatKey())) orbWbCleanup(orbWbChatKey());
+                    orbWbSetBound(ch0.key, []);
+                    toast('已清空「' + ch0.name + '」的世界书绑定', 'success');
+                    if (orbOpenNow) renderOrbPanel();
+                });
+            return;
+        }
+        const wToggle = t.closest('[data-orb-wtoggle]');
+        if (wToggle) {
+            /* 点书名＝改这张角色卡的绑定。干净版：改完让本聊天的生效列表**对齐这张卡**
+               （绑上就启用、解绑就撤掉），一一对应，不留跟这张卡无关的书。 */
+            const name = wToggle.dataset.orbWtoggle;
+            const ch = orbWbTargetChar();
+            if (!ch) { toast('先在酒馆里打开一个聊天，才能给角色卡配绑定', 'warning'); return; }
+            const wasBound = orbWbBound(ch.key).indexOf(name) >= 0;
+            orbWbToggleBound(ch.key, name);
+            if (wasBound) {
+                toast('已解绑并从本聊天撤掉：' + name, 'info');
+            } else {
+                toast('已绑定并在本聊天启用：' + name, 'success');
+            }
+            orbWbSyncChar();     // 让生效列表跟这张卡的绑定对齐
+            renderOrbPanel();
+            return;
+        }
+        const wChar = t.closest('[data-orb-wchar]');
+        if (wChar && wChar.tagName === 'SELECT') { /* 下面 change 事件里处理 */ return; }
         /* 模块标签页 */
         const tabEl = t.closest('[data-orb-tab]');
         if (tabEl) {
             orbTab = tabEl.dataset.orbTab || 'notes'; orbEditing = null;
+            orbWbBinding = null;
             renderOrbPanel();
             if (orbTab === 'chat') orbChatsFetch();            // 存档页：打开就拉一次列表
+            if (orbTab === 'world') orbWorldRefresh();         // 世界书页：顺手刷一次清单
             return;
         }
         /* 番外页：清除搜索 */
@@ -5914,10 +6553,10 @@ function init() {
     bindPocketMenuEntry();                                            // 「鼠鼠口袋」入口挂进扩展程序展开栏
 
     try {
-        ctx.eventSource?.on?.(ctx.eventTypes?.CHARACTER_PAGE_LOADED, () => reclaim('page-loaded'));
+        ctx.eventSource?.on?.(ctx.eventTypes?.CHARACTER_PAGE_LOADED, () => { reclaim('page-loaded'); try { orbOnCharChanged(); } catch (e) { } });
         ctx.eventSource?.on?.(ctx.eventTypes?.CHARACTER_EDITOR_OPENED, () => reclaim('editor-opened'));
-        ctx.eventSource?.on?.(ctx.eventTypes?.CHAT_CHANGED, () => reclaim('chat-changed'));
-        ctx.eventSource?.on?.(ctx.eventTypes?.APP_READY, () => { ensureMount(); mountDrawer(); reclaim('app-ready'); });
+        ctx.eventSource?.on?.(ctx.eventTypes?.CHAT_CHANGED, () => { reclaim('chat-changed'); try { orbOnCharChanged(); } catch (e) { } });
+        ctx.eventSource?.on?.(ctx.eventTypes?.APP_READY, () => { ensureMount(); mountDrawer(); reclaim('app-ready'); try { orbOnCharChanged(); } catch (e) { } });
     } catch (e) { warn('事件挂载失败', e); }
 
     log('v0.3.0 已加载（' + activeDevice() + '）');
@@ -5951,7 +6590,17 @@ if (globalThis.__SSP_TEST__) {
         extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
         migrateTweaksSettings, TWEAKS_MODULE_NAME,
         restoreCardStyle, hdCardAvatars, cardDrawerHTML, mountDrawer, attrOf, setAttr,
-        mountOrb, bindOrb, openOrb, closeOrb, orbNotes, orbSaveNote, orbDelNote, orbInsert, orbCopy, refreshOrbBadge, ORB_MODULES, orbModule,
+        mountOrb, bindOrb, openOrb, closeOrb, lockOrbSkin, orbNotes, orbSaveNote, orbDelNote, orbInsert, orbCopy, refreshOrbBadge, ORB_MODULES, orbModule,
+        orbWbCharKey, orbWbCurChar, orbWbChatId, orbWbChatKey, orbWbBinds, orbWbApplied, orbWbRecord,
+        orbWbBound, orbWbSetBound, orbWbToggleBound, orbWbCharNames, orbWbIsBound, orbWbAuto, orbWbState, orbWbTargetChar,
+        orbWorldList, orbWbActive, orbWbEnabled, orbWbEnabledSet, orbWbSelApply, orbWbSyncChar,
+        orbWbApplyForChar, orbWbCleanup, orbWbRestoreCur, orbWbOnChatChanged,
+        orbWorldRefresh, orbWorldHTML, orbWorldRowsHTML, orbWorldPickerHTML,
+        orbOnCharChanged, protectSkinAfterThemeChange, cardImportantify,
+        get orbLastCharId() { return orbLastCharId; }, set orbLastCharId(v) { orbLastCharId = v; },
+        get orbWbBinding() { return orbWbBinding; }, set orbWbBinding(v) { orbWbBinding = v; },
+        get orbWbSearch() { return orbWbSearch; }, set orbWbSearch(v) { orbWbSearch = v; },
+        get orbWbLastKey() { return orbWbLastKey; }, set orbWbLastKey(v) { orbWbLastKey = v; },
         mountSettingsPanel, openSettingsPanel, closeSettingsPanel, panelOpen, settingsPanelHTML, bindSettings, refreshCardSection, trimListCreatorNotes,
         get boxOpen() { return boxOpen; }, set boxOpen(v) { boxOpen = v; },
         get renaming() { return renaming; }, set renaming(v) { renaming = v; },
