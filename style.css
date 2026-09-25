@@ -753,11 +753,16 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-en-acts { display: flex; gap: 6px; flex-wrap: wrap; }
 .ssp-en-form .ssp-orb-ta { min-height: 96px; max-height: 240px; }
 
-/* 窄屏：条目行允许换行 */
+/* 窄屏：条目行 / 世界书行允许换行 */
 @media (max-width: 560px) {
     .ssp-en-row { flex-wrap: wrap; }
     .ssp-en-main { flex: 1 1 60%; }
     .ssp-en-f2 .ssp-en-f { flex: 1 1 100%; }
+    /* 世界书行现在右边有两个按钮（📁 + 📖）—— 名字区限宽，不然它 flex-grow 会吃满整行、
+       把两个按钮顶到下面一行去（实测行高从 49 涨到 109）。 */
+    .ssp-orb-prow { flex-wrap: wrap; }
+    .ssp-orb-prow .ssp-orb-pmain { flex: 1 1 45%; max-width: 58%; }
+    .ssp-orb-prow .ssp-wb-catbtn, .ssp-orb-prow .ssp-wb-open { flex: 0 0 auto; padding: 3px 5px; }
 }
 
 .ssp-orb-fl { display: block; margin-bottom: 9px; }
@@ -771,6 +776,30 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-orb-pfilter > i { font-size: 12px; opacity: .5; }
 .ssp-orb-pfilter .ssp-inp { flex: 1 1 auto; }
 .ssp-orb-pcount { font-size: 11px; opacity: .55; padding: 0 2px 7px; }
+/* ---------- 世界书分类（文件夹）标签栏 ---------- */
+.ssp-orb-catbar { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 0 8px; }
+.ssp-wb-cat {
+    display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+    font-size: 11px; line-height: 1.5; padding: 2px 9px; border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, .18); background: rgba(255, 255, 255, .04);
+    color: inherit; white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis;
+}
+.ssp-wb-cat i { font-size: 9.5px; opacity: .5; font-style: normal; }
+.ssp-wb-cat:hover { background: rgba(255, 255, 255, .1); }
+.ssp-wb-cat.on { border-color: rgba(255, 255, 255, .75); background: rgba(255, 255, 255, .16); font-weight: 700; }
+.ssp-wb-cat.on i { opacity: .8; }
+.ssp-wb-catadd, .ssp-wb-catedit { padding: 2px 8px; opacity: .7; }
+.ssp-orb-catedit { padding: 0 0 8px; }
+.ssp-orb-catedit-r { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+.ssp-orb-catedit-r .ssp-inp { flex: 1 1 auto; min-width: 0; }
+/* 行上的「归到分类」按钮 + 就地展开的分类挑选 */
+.ssp-orb-prowwrap.picking .ssp-orb-prow { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.ssp-wb-catbtn.has { opacity: 1; }
+.ssp-orb-catpick {
+    display: flex; flex-wrap: wrap; gap: 5px; padding: 7px 9px;
+    border: 1px solid rgba(255, 255, 255, .22); border-top: none;
+    border-radius: 0 0 9px 9px; background: rgba(255, 255, 255, .06);
+}
 /* 番外页：「＋ 新的一条」放在列表**上面**（原来钉在面板底部，存完要滑到底才能再点） */
 .ssp-orb-nnew { display: flex; justify-content: flex-end; padding: 0 0 8px; }
 /* ---------- 预设页：自动切换开关 ---------- */

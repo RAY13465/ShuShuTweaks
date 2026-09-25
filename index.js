@@ -4169,7 +4169,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.3';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.4';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4565,6 +4565,12 @@ var orbPreSearch = '';      // 预设页搜索词
 var orbNSearch = '';        // 番外页搜索词
 var orbWbBinding = null;    // 正在给哪个角色卡配世界书（null = 不在绑定模式）
 var orbWbSearch = '';       // 世界书页搜索词
+/* 世界书分类（文件夹）：点标签只看那一类。
+   ALL = 全部；'' = 未分类；其余 = 分类名。一本书最多归一个分类。 */
+const ORB_WB_CAT_ALL = '__all__';
+var orbWbCat = ORB_WB_CAT_ALL;   // 当前选中的分类标签
+var orbWbCatEdit = false;        // 是否展开「分类管理」（改名 / 删除）
+var orbWbCatPick = null;         // 正在给哪本书挑分类（书名字符串），null = 没在挑
 var orbWbNames = [];        // 世界书名缓存（读不到就退回酒馆的 #world_info 下拉）
 /* 世界书栏「展开某本书的条目」那一页的状态 */
 var orbWbEntriesBook = '';  // 非空 = 正在看这本书的条目
@@ -4949,6 +4955,106 @@ function orbWbCharNames(name) {
 }
 /** 这本书有没有绑在任何一张卡上 */
 function orbWbIsBound(name) { return orbWbCharNames(name).length > 0; }
+
+/* ===== 世界书分类（文件夹）—— 只存在本扩展设置里，不碰酒馆自己的世界书 =====
+   模型：s.worldCats = { 分类名: [世界书名…] }，一本书**最多归一个分类**（用户要的是"文件夹"）。
+   没有归类的书 = 未分类（不写进表里）。 */
+function orbWbCats() {
+    const s = getSettings();
+    if (!s.worldCats || typeof s.worldCats !== 'object' || Array.isArray(s.worldCats)) s.worldCats = {};
+    return s.worldCats;
+}
+/** 分类名列表（按名字排序，只保留非空的） */
+function orbWbCatNames() {
+    const c = orbWbCats();
+    return Object.keys(c).filter(k => String(k || '').trim()).sort((a, b) => a.localeCompare(b, 'zh'));
+}
+/** 这本书属于哪个分类（'' = 未分类） */
+function orbWbCatOf(name) {
+    const c = orbWbCats();
+    const n = String(name || '');
+    for (const k of Object.keys(c)) {
+        if (Array.isArray(c[k]) && c[k].indexOf(n) >= 0) return k;
+    }
+    return '';
+}
+/** 某分类里有几本书（只有真的存在这书才算，避免删书后留幽灵） */
+function orbWbCatCount(cat) {
+    const c = orbWbCats();
+    if (!cat) return orbWorldList().filter(n => !orbWbCatOf(n)).length;
+    const list = Array.isArray(c[cat]) ? c[cat] : [];
+    const all = orbWorldList();
+    return list.filter(n => all.indexOf(n) >= 0).length;
+}
+/** 建一个分类；名重复就返回 false */
+function orbWbCatAdd(name) {
+    const n = String(name || '').trim();
+    if (!n) return false;
+    const c = orbWbCats();
+    if (c[n]) return false;
+    c[n] = [];
+    save();
+    return true;
+}
+/** 删分类（只是解散文件夹，书本身不受影响） */
+function orbWbCatDel(name) {
+    const c = orbWbCats();
+    if (!c[name]) return false;
+    delete c[name];
+    save();
+    return true;
+}
+/** 改名（连带把里面的书挪过去） */
+function orbWbCatRename(from, to) {
+    const c = orbWbCats();
+    const n = String(to || '').trim();
+    if (!c[from] || !n) return false;
+    if (n === from) return true;
+    if (c[n]) return false;                    // 目标重名
+    c[n] = c[from];
+    delete c[from];
+    if (orbWbCat === from) orbWbCat = n;       // 当前正看着这个分类就跟过去
+    save();
+    return true;
+}
+/** 把一本书放进某个分类；cat 传 '' = 移出分类（未分类）。
+    ⚠️ 先从所有分类里摘掉，保证"一本书只在一个分类里"。 */
+function orbWbCatSet(book, cat) {
+    const n = String(book || '').trim();
+    if (!n) return false;
+    const c = orbWbCats();
+    Object.keys(c).forEach(k => {
+        if (Array.isArray(c[k])) c[k] = c[k].filter(x => x !== n);
+    });
+    const t = String(cat || '').trim();
+    if (t) {
+        if (!Array.isArray(c[t])) c[t] = [];
+        c[t].push(n);
+    }
+    save();
+    return true;
+}
+
+/** 问一个分类名（走酒馆的输入弹窗；拿不到就退回 window.prompt）。
+    done(name) 拿到非空名字就调用 —— 重名判断交给调用方，因为「新建」和「改名」规则不同。 */
+function orbWbAskCatName(title, def, done) {
+    const ctx = getContext() || {};
+    const finish = (v) => {
+        const n = String(v || '').trim();
+        if (!n) return;
+        done(n);
+    };
+    try {
+        if (typeof ctx.callGenericPopup === 'function') {
+            ctx.callGenericPopup(title, ctx.POPUP_TYPE.INPUT, def || '')
+                .then(r => finish(typeof r === 'string' ? r : ''))
+                .catch(() => { });
+            return true;
+        }
+    } catch (e) { }
+    try { finish(globalThis.prompt ? globalThis.prompt(title, def || '') : ''); } catch (e) { }
+    return true;
+}
 
 /** 世界书清单：优先上下文（st-context.js 的 getWorldInfoNames），退回酒馆的下拉框 */
 function orbWorldList() {
@@ -5669,14 +5775,26 @@ function orbWorldRowsHTML() {
     }
     const bound = ch ? orbWbBound(ch.key) : [];
     const q = orbWbSearch.toLowerCase();
-    const hit = all.filter(n => !q
+    /* 先按分类标签过滤，再按搜索词过滤（两者叠加） */
+    const inCat = all.filter(n => orbWbCat === ORB_WB_CAT_ALL ? true
+        : (orbWbCat === '' ? !orbWbCatOf(n) : orbWbCatOf(n) === orbWbCat));
+    const hit = inCat.filter(n => !q
         || String(n).toLowerCase().indexOf(q) >= 0
         || orbWbCharNames(n).join('、').toLowerCase().indexOf(q) >= 0);
-    if (!hit.length) return '<div class="ssp-orb-empty">没有匹配「' + esc(orbWbSearch) + '」的世界书。<br>（搜的是：世界书名 / 绑过它的角色卡名）</div>';
-    const head = orbWbSearch ? '<div class="ssp-orb-pcount">筛选出 ' + hit.length + ' / ' + all.length + ' 本世界书</div>' : '';
+    if (!hit.length) {
+        if (orbWbSearch) return '<div class="ssp-orb-empty">没有匹配「' + esc(orbWbSearch) + '」的世界书。<br>（搜的是：世界书名 / 绑过它的角色卡名）</div>';
+        if (orbWbCat === '') return '<div class="ssp-orb-empty">所有世界书都分好类了。<br>（点书名右边那个 <i class="fa-solid fa-folder"></i> 能把书从分类里拿出来）</div>';
+        if (orbWbCat !== ORB_WB_CAT_ALL) return '<div class="ssp-orb-empty">「' + esc(orbWbCat) + '」里还没有书。<br>（点书名右边那个 <i class="fa-solid fa-folder"></i> 把书归进来）</div>';
+        return '<div class="ssp-orb-empty">没读到世界书清单。<br>（世界书是空的，或者酒馆那边还没加载完 —— 刷新一下页面再进来看看）</div>';
+    }
+    const head = (orbWbSearch || orbWbCat !== ORB_WB_CAT_ALL)
+        ? '<div class="ssp-orb-pcount">' + (orbWbCat !== ORB_WB_CAT_ALL ? '「' + esc(orbWbCat || '未分类') + '」' : '')
+            + (orbWbSearch ? '筛出 ' : '共 ') + hit.length + ' / ' + all.length + ' 本世界书</div>'
+        : '';
     const rows = hit.map(n => {
         const st = orbWbState(n);
         const mine = (bound.indexOf(n) >= 0);
+        const cat = orbWbCatOf(n);
         /* 干净版：白框（.on）＋ 🔖 只表示「这张卡绑了它」。
            绑了就是生效中（绑定即生效），所以竖条和它永远同步 ——
            不再有"本聊天生效但不属于这张卡"这种悬空状态（用户反馈过那是脏的）。 */
@@ -5684,7 +5802,18 @@ function orbWorldRowsHTML() {
         const tip = !ch ? '先在酒馆里打开一个聊天，才能给角色卡配绑定'
             : (mine ? '点一下＝从「' + ch.name + '」解绑，并从本聊天撤掉'
                 : '点一下＝绑给「' + ch.name + '」，并在本聊天启用');
-        return '<div class="ssp-orb-prow' + (mine ? ' on ssp-wb-mine ssp-wb-active' : '') + '"'
+        /* 分类挑选用抽屉式（就地展开），不放 select —— 手机上好点 */
+        const picker = (orbWbCatPick === n)
+            ? '<div class="ssp-orb-catpick">'
+                + '<span class="ssp-pbtn' + (!cat ? ' primary' : '') + '" data-orb-wcatset="' + esc(n) + '" data-cat="">未分类</span>'
+                + orbWbCatNames().map(c => '<span class="ssp-pbtn' + (cat === c ? ' primary' : '') + '"'
+                    + ' data-orb-wcatset="' + esc(n) + '" data-cat="' + esc(c) + '">' + esc(c) + '</span>').join('')
+                + '<span class="ssp-pbtn" data-orb-wcatnew="' + esc(n) + '"><i class="fa-solid fa-plus"></i>新建分类并归入</span>'
+                + '<span class="ssp-pbtn" data-orb-wcatclose="1">收起</span>'
+                + '</div>'
+            : '';
+        return '<div class="ssp-orb-prowwrap' + (orbWbCatPick === n ? ' picking' : '') + '">'
+            + '<div class="ssp-orb-prow' + (mine ? ' on ssp-wb-mine ssp-wb-active' : '') + '"'
             + (ch ? ' data-orb-wtoggle="' + esc(n) + '"' : '') + ' title="' + esc(tip) + '">'
             + '<div class="ssp-orb-wbox"><i class="fa-solid ' + (mine ? 'fa-bookmark' : 'fa-square') + '"></i></div>'
             + '<div class="ssp-orb-pmain">'
@@ -5695,9 +5824,15 @@ function orbWorldRowsHTML() {
             + '<div class="ssp-orb-pbind' + (others.length ? ' has' : '') + '"><i class="fa-solid fa-link"></i>'
             + (others.length ? esc(others.join('、') + ' 也绑了') : '没有别的角色卡绑它') + '</div>'
             + '</div>'
+            /* 归到哪个分类（文件夹）：点了就地展开一排分类按钮 */
+            + '<span class="ssp-pbtn ssp-wb-catbtn' + (cat ? ' has' : '') + '" data-orb-wcatpick="' + esc(n) + '"'
+            + ' title="' + (cat ? '在分类「' + esc(cat) + '」里 —— 点一下改' : '归到一个分类（文件夹）') + '">'
+            + '<i class="fa-solid ' + (cat ? 'fa-folder-open' : 'fa-folder') + '"></i></span>'
             /* 这一本书里的条目：点进去看 / 开关 / 改（用户要的"连里面条目也可以开"） */
             + '<span class="ssp-pbtn ssp-wb-open" data-orb-wentries="' + esc(n) + '"'
             + ' title="展开这本书里的条目，逐条开关 / 编辑">📖</span>'
+            + '</div>'
+            + picker
             + '</div>';
     }).join('');
     return head + '<div class="ssp-orb-plist">' + rows + '</div>';
@@ -5787,6 +5922,28 @@ function orbWorldHTML() {
         + (orbWbSearch ? '<span class="ssp-pbtn" data-orb-wclear="1">清除</span>' : '')
         + '</div>';
 
+    /* 分类标签栏：全部 / 未分类 / 各分类。当前选中的高亮。 */
+    const cats = orbWbCatNames();
+    const allCount = all.length;
+    const uncatCount = orbWbCatCount('');
+    const tab = (val, label, n) => '<span class="ssp-wb-cat' + (orbWbCat === val ? ' on' : '') + '"'
+        + ' data-orb-wcat="' + esc(val) + '" title="只看这一类的世界书">' + esc(label)
+        + (n !== null ? '<i>' + n + '</i>' : '') + '</span>';
+    const catBar = '<div class="ssp-orb-catbar">'
+        + tab(ORB_WB_CAT_ALL, '全部', allCount)
+        + tab('', '未分类', uncatCount)
+        + cats.map(c => tab(c, c, orbWbCatCount(c))).join('')
+        + '<span class="ssp-wb-cat ssp-wb-catadd" data-orb-wcatadd="1" title="新建一个分类（文件夹）"><i class="fa-solid fa-folder-plus"></i></span>'
+        + (cats.length ? '<span class="ssp-wb-cat ssp-wb-catedit" data-orb-wcatedit="1" title="管理分类（改名 / 删除）"><i class="fa-solid fa-pen"></i></span>' : '')
+        + '</div>'
+        /* 分类管理：改名 / 删除 */
+        + (orbWbCatEdit && cats.length
+            ? '<div class="ssp-orb-catedit">' + cats.map(c => '<div class="ssp-orb-catedit-r">'
+                + '<input class="ssp-inp" type="text" data-orb-wcatrename="' + esc(c) + '" value="' + esc(c) + '">'
+                + '<span class="ssp-pbtn danger" data-orb-wcatdel="' + esc(c) + '" title="解散这个分类（里面的书不会丢）"><i class="fa-solid fa-trash"></i></span>'
+                + '</div>').join('') + '<div class="ssp-orb-pcount" style="padding:2px 0 0">改名后按回车（或点别处）生效；解散分类只是去掉文件夹，书本身不动。</div></div>'
+            : '');
+
     const tools = '<div class="ssp-orb-pcount">'
         + '<label class="ssp-orb-auto"><input type="checkbox" data-orb-wauto="1"' + (orbWbAuto() ? ' checked' : '')
         + '><span>切到绑定的角色卡时自动启用（切走自动撤掉）</span></label>'
@@ -5807,8 +5964,8 @@ function orbWorldHTML() {
             + '</select></div>'
         : '';
 
-    if (!all.length) return orbWorldRowsHTML() + bar + tools + foot;
-    return bar + tools + picker + '<div id="ssp_orb_world_list">' + orbWorldRowsHTML() + '</div>' + foot;
+    if (!all.length) return orbWorldRowsHTML() + bar + catBar + tools + foot;
+    return bar + catBar + tools + picker + '<div id="ssp_orb_world_list">' + orbWorldRowsHTML() + '</div>' + foot;
 }
 
 /** 这一页不再需要单独的绑定页（绑定就地点；orbWbBinding 现在只表示"在看哪张卡"） */
@@ -6909,19 +7066,29 @@ function bindOrb() {
         renderOrbPanel();
     });
 
-    /* 世界书页搜索（和上面几页一样：只重画列表，输入框焦点不丢） */
+    /* 世界书分类：改名（失焦/回车时提交；重名或空名就还原） */
+    document.addEventListener('change', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbWcatrename === undefined) return;
+        const from = el.dataset.orbWcatrename;
+        const to = String(el.value || '').trim();
+        if (!to || to === from) { el.value = from; return; }
+        if (!orbWbCatRename(from, to)) { toast('「' + to + '」已经存在了', 'warning'); el.value = from; return; }
+        toast('分类改名：' + from + ' → ' + to, 'success');
+        renderOrbPanel();
+    });
+
+    /* 世界书页搜索。
+       ⚠️ 这里跟番外/面具页不一样，**整页重画**而不是只换列表：
+       分类标签栏上的计数（共 N 本）和上面那行「筛出 X / Y」都得跟着搜索词变，
+       只换列表的话标签栏会停在旧数字上（自己踩过）。代价是输入框会失焦一次。 */
     document.addEventListener('input', ev => {
         const el = ev.target;
         if (!el || !el.dataset || el.dataset.orbWsearch === undefined) return;
         orbWbSearch = el.value || '';
-        const box = document.getElementById('ssp_orb_world_list');
-        if (box) box.innerHTML = orbWorldRowsHTML();
-        const bar = document.querySelector('.ssp-orb-pfilter');
-        if (bar) {
-            let c = bar.querySelector('[data-orb-wclear]');
-            if (orbWbSearch && !c) { c = document.createElement('span'); c.className = 'ssp-pbtn'; c.setAttribute('data-orb-wclear', '1'); c.textContent = '清除'; bar.append(c); }
-            else if (!orbWbSearch && c) c.remove();
-        }
+        renderOrbPanel();
+        const again = document.querySelector('[data-orb-wsearch]');
+        if (again) { try { again.focus(); again.setSelectionRange(again.value.length, again.value.length); } catch (e) { } }
     });
 
     /* 世界书栏「条目页」搜索 */
@@ -7020,6 +7187,62 @@ function bindOrb() {
             getSettings().presetAuto = Boolean(t.checked);
             save();
             toast(t.checked ? '自动换预设：开' : '自动换预设：关', 'info');
+            return;
+        }
+        /* ---- 世界书分类（文件夹）----
+           ⚠️ 必须放在「点书名＝绑定」和「📖 展开条目」**前面**：
+           分类按钮和 📖 都长在那一行**里面**，行本身也可点，先判细的才不会误触发。 */
+        const catTab = t.closest('[data-orb-wcat]');
+        if (catTab) {
+            orbWbCat = catTab.dataset.orbWcat || '';
+            orbWbCatPick = null;
+            renderOrbPanel();
+            return;
+        }
+        if (t.closest('[data-orb-wcatpick]')) {
+            const n = t.closest('[data-orb-wcatpick]').dataset.orbWcatpick;
+            orbWbCatPick = (orbWbCatPick === n) ? null : n;
+            renderOrbPanel();
+            return;
+        }
+        if (t.closest('[data-orb-wcatclose]')) { orbWbCatPick = null; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-wcatedit]')) { orbWbCatEdit = !orbWbCatEdit; renderOrbPanel(); return; }
+        const catSet = t.closest('[data-orb-wcatset]');
+        if (catSet) {
+            orbWbCatSet(catSet.dataset.orbWcatset, catSet.dataset.cat || '');
+            orbWbCatPick = null;
+            toast('已归到「' + ((catSet.dataset.cat || '') || '未分类') + '」', 'success');
+            renderOrbPanel();
+            return;
+        }
+        const catNew = t.closest('[data-orb-wcatnew]');
+        if (catNew) {
+            const book = catNew.dataset.orbWcatnew;
+            orbWbAskCatName('新分类叫什么？（比如：世界观 / 人物 / 规则）', '', (n) => {
+                if (orbWbCatAdd(n)) orbWbCatSet(book, n);    // 顺手把这本书归进去
+                else if (orbWbCatOf(book) !== n) orbWbCatSet(book, n);   // 已存在就直接归进去
+                orbWbCatPick = null;
+                toast('已归到「' + n + '」', 'success');
+                renderOrbPanel();
+            });
+            return;
+        }
+        const catDel = t.closest('[data-orb-wcatdel]');
+        if (catDel) {
+            const n = catDel.dataset.orbWcatdel;
+            orbWbCatDel(n);
+            if (orbWbCat === n) orbWbCat = ORB_WB_CAT_ALL;
+            toast('解散了「' + n + '」（书本身没动）', 'info');
+            renderOrbPanel();
+            return;
+        }
+        if (t.closest('[data-orb-wcatadd]')) {
+            orbWbAskCatName('新分类叫什么？（比如：世界观 / 人物 / 规则）', '', (n) => {
+                const isNew = orbWbCatAdd(n);
+                orbWbCat = n;                      // 不管新旧，建完/输重名都切过去看
+                toast(isNew ? '建好了「' + n + '」，点书名右边那个文件夹图标把书归进来' : '切到已有的「' + n + '」', isNew ? 'success' : 'info');
+                renderOrbPanel();
+            });
             return;
         }
         /* 世界书页：清除搜索 / 返回当前角色 / 点书名＝加/减这张卡的绑定 /
@@ -7376,6 +7599,11 @@ if (globalThis.__SSP_TEST__) {
         orbDlcBook, orbDlcConstantDefault, orbDlcEnsureBook, orbDlcFirstRun, orbDlcAddSeed, orbDlcFetch, orbDlcEnsure, orbDlcHTML, orbDlcRowsHTML,
         DLC_SEED, orbMakeEntry, orbEntryAddMany, orbEntriesCount,
         orbWbOpenEntries, orbWbCloseEntries, orbWbEntriesFetch, orbWbEntriesHTML,
+        orbWbCats, orbWbCatNames, orbWbCatOf, orbWbCatCount, orbWbCatAdd, orbWbCatDel, orbWbCatRename, orbWbCatSet,
+        get orbWbCat() { return orbWbCat; }, set orbWbCat(v) { orbWbCat = v; },
+        get orbWbCatEdit() { return orbWbCatEdit; }, set orbWbCatEdit(v) { orbWbCatEdit = v; },
+        get orbWbCatPick() { return orbWbCatPick; }, set orbWbCatPick(v) { orbWbCatPick = v; },
+        ORB_WB_CAT_ALL,
         get orbWbEntriesBook() { return orbWbEntriesBook; }, set orbWbEntriesBook(v) { orbWbEntriesBook = v; },
         get orbWbEntries() { return orbWbEntries; }, set orbWbEntries(v) { orbWbEntries = v; },
         get orbWbEntryOpen() { return orbWbEntryOpen; }, set orbWbEntryOpen(v) { orbWbEntryOpen = v; },
