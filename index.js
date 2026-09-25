@@ -4169,7 +4169,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.7';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.8';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5099,7 +5099,12 @@ function orbCatPickHTML(cfg) {
         + '<!-- catpick -->'
         + '<span class="ssp-pbtn' + (!c.cur ? ' primary' : '') + '" ' + at(c.S, c.book) + kind + ' data-cat="">未分类</span>'
         + list.map(x => '<span class="ssp-pbtn' + (c.cur === x ? ' primary' : '') + '" ' + at(c.S, c.book) + kind + ' data-cat="' + esc(x) + '">' + esc(x) + '</span>').join('')
-        + '<span class="ssp-pbtn" ' + at(c.P, c.book) + kind + ' data-orb-catpicknew="1"><i class="fa-solid fa-plus"></i>' + esc(c.newLabel || '新建分类并归入') + '</span>'
+        /* ⚠️ 这个「新建分类并归入」**不能再挂 at(c.P, …)**：
+           那样它同时带 data-orb-catpick="<书>" 和 data-orb-catpicknew="1"，
+           而处理器先判 catpick → 每次点它都被当成"切换挑分类抽屉"，
+           输入框永远展不开（用户反馈"点不开"）。只留 catpicknew，并带上"给谁归"。 */
+        + '<span class="ssp-pbtn" data-orb-catpicknew="' + esc(c.book) + '"' + kind + '>'
+        + '<i class="fa-solid fa-plus"></i>' + esc(c.newLabel || '新建分类并归入') + '</span>'
         + '<span class="ssp-pbtn" data-orb-catclose="1">收起</span>'
         + '</div>';
 }
