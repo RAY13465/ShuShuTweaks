@@ -4169,7 +4169,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6504,6 +6504,43 @@ function lockOrbSkin() {
     } catch (e) { return false; }
 }
 
+/** 把球的位置钳进视口。
+    ⚠️ 为什么必须钳（真 bug）：位置存的是"离右边/下边的距离"，那是**当初那台设备的像素值**。
+       用户在桌面上把球拖到某处（比如 right:554），换到手机上（视口 390 宽）算出来是
+       left = 390 - 52 - 554 = **-216** → 球跑到屏幕左边外面，**根本点不到**，
+       于是打不开鼠鼠口袋、也就"点不了世界书条目"（用户就是这么报的）。
+       钳制后：位置先按比例缩放（多屏都合理），再夹在视口内保证一定看得见。 */
+function orbClampEdge() {
+    try {
+        const W = Math.max(200, window.innerWidth || 0);
+        const H = Math.max(200, window.innerHeight || 0);
+        const vs = 52, pad = 6;
+        const maxR = Math.max(pad, W - vs - pad);
+        const maxB = Math.max(pad, H - vs - pad);
+        let { right, bottom } = orbEdge || { right: 18, bottom: 96 };
+        if (!isFinite(right)) right = 18;
+        if (!isFinite(bottom)) bottom = 96;
+        if (right > maxR) right = Math.round(right * (maxR / Math.max(right, 1)));
+        if (bottom > maxB) bottom = Math.round(bottom * (maxB / Math.max(bottom, 1)));
+        orbEdge = {
+            right: Math.max(pad, Math.min(maxR, Math.round(right))),
+            bottom: Math.max(pad, Math.min(maxB, Math.round(bottom))),
+        };
+    } catch (e) { }
+    return orbEdge;
+}
+/** 按当前 orbEdge 把球摆好（挂载 / resize 共用） */
+function orbPlaceBall() {
+    const ball = document.getElementById('ssp_orb');
+    if (!ball || !ball.style) return false;
+    orbClampEdge();
+    const w = ball.offsetWidth || 52, h = ball.offsetHeight || 52;
+    ball.style.left = Math.round(window.innerWidth - w - orbEdge.right) + 'px';
+    ball.style.top = Math.round(window.innerHeight - h - orbEdge.bottom) + 'px';
+    ball.style.right = 'auto'; ball.style.bottom = 'auto';
+    return true;
+}
+
 function mountOrb() {
     if (orbBuilt && document.getElementById('ssp_orb')) return true;
     if (!document.body) return false;
@@ -6523,7 +6560,7 @@ function mountOrb() {
         }
     }
     orbEdge = pos ? { right: pos.right, bottom: pos.bottom } : { right: 18, bottom: 96 };
-
+    orbClampEdge();     // ⚠️ 挂载时也要钳；否则换到窄屏（手机）球会跑到屏幕外
     /* ① 球：直接挂 body（不进任何容器） */
     const ball = document.createElement('div');
     ball.className = 'ssp-orb';
@@ -6532,14 +6569,10 @@ function mountOrb() {
     /* ⚠️ 位置不能用 CSS 的 bottom：酒馆里球的包含块高度会被算成 0，
        bottom:96px 于是变成 top:-148px（球飞到屏幕外，用户以为没有球）。
        实测 left/right 正常、坏的只有纵向 → 直接按视口把 left/top 算好写进去。 */
-    {
-        const vs = 52;
-        ball.setAttribute('style', 'left:' + Math.round(window.innerWidth - vs - orbEdge.right) + 'px;top:'
-            + Math.round(window.innerHeight - vs - orbEdge.bottom) + 'px;right:auto;bottom:auto;');
-    }
     ball.innerHTML = '<span class="ssp-orb-diamond"></span><span class="ssp-orb-badge" id="ssp_orb_badge"></span>';
     document.body.append(ball);
     lockOrbSkin();      // 锁皮肤：免得主题里那条带 !important 的 `*{border-radius:…}` 把球压成方的
+    orbPlaceBall();     // 位置：先钳进视口再写（换窄屏时球不会跑到屏幕外）
 
     /* ③ 左下角「魔法棒」按钮：球的收纳口 —— 点一下把球收进去 / 再点放出来。
        球的展开与否存进设置（orbCollapsed），刷新后保持。 */
@@ -6761,8 +6794,10 @@ function bindOrb() {
         if (moved) {
             const r = o.getBoundingClientRect();
             orbEdge = { right: Math.round(window.innerWidth - r.right), bottom: Math.round(window.innerHeight - r.bottom) };
+            orbClampEdge();
             getSettings().orbPos = { right: Math.max(0, orbEdge.right), bottom: Math.max(0, orbEdge.bottom) };
             save();
+            orbPlaceBall();      // 拖到边缘外也保证回到可见范围
         } else if (orbOpenNow) closeOrb(); else openOrb();
     }, true);
 
@@ -7227,14 +7262,7 @@ function bindOrb() {
     if (!bindOrb.resizeBound) {
         bindOrb.resizeBound = true;
         window.addEventListener('resize', () => {
-            const o = getBall();
-            if (!o) return;
-            const w = o.offsetWidth || 52, h = o.offsetHeight || 52;
-            const right = Math.max(4, Math.min(window.innerWidth - w - 4, orbEdge.right));
-            const bottom = Math.max(4, Math.min(window.innerHeight - h - 4, orbEdge.bottom));
-            o.style.left = Math.round(window.innerWidth - w - right) + 'px';
-            o.style.top = Math.round(window.innerHeight - h - bottom) + 'px';
-            o.style.right = 'auto'; o.style.bottom = 'auto';
+            orbPlaceBall();      // 内部会先 orbClampEdge() 再摆位
             /* 魔法棒也跟着重算（它同样是 fixed + JS 定位） */
             const wd = document.getElementById('ssp_orb_wand');
             if (wd) {
@@ -7314,7 +7342,9 @@ if (globalThis.__SSP_TEST__) {
         extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
         migrateTweaksSettings, TWEAKS_MODULE_NAME,
         restoreCardStyle, hdCardAvatars, cardDrawerHTML, mountDrawer, attrOf, setAttr,
-        mountOrb, bindOrb, openOrb, closeOrb, lockOrbSkin, orbNotes, orbSaveNote, orbDelNote, orbInsert, orbCopy, refreshOrbBadge, ORB_MODULES, orbModule,
+        mountOrb, bindOrb, openOrb, closeOrb, lockOrbSkin, orbClampEdge, orbPlaceBall, orbNotes, orbSaveNote, orbDelNote, orbInsert, orbCopy, refreshOrbBadge, ORB_MODULES, orbModule,
+        get orbEdge() { return orbEdge; }, set orbEdge(v) { orbEdge = v; },
+        get orbOpenNow() { return orbOpenNow; }, set orbOpenNow(v) { orbOpenNow = v; },
         orbWbCharKey, orbWbCurChar, orbWbChatId, orbWbChatKey, orbWbBinds, orbWbApplied, orbWbRecord,
         orbWbBound, orbWbSetBound, orbWbToggleBound, orbWbCharNames, orbWbIsBound, orbWbAuto, orbWbState, orbWbTargetChar,
         orbWorldList, orbWbActive, orbWbEnabled, orbWbEnabledSet, orbWbSelApply, orbWbSyncChar,
