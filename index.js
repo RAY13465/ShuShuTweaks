@@ -4169,7 +4169,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.9';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.10';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4859,6 +4859,7 @@ function orbThemeHTML() {
         + (orbThemeAuto() ? ' checked' : '') + '><span>切到绑定的角色时自动换美化（会弹提示）</span></label></div>'
         + '<div class="ssp-orb-pcount">'
         + '<span class="ssp-pbtn primary" data-orb-thedit="1"><i class="fa-solid fa-pen-ruler"></i>改当前美化（CSS）</span>'
+        + '<span class="ssp-pbtn" data-orb-thcreate="1"><i class="fa-solid fa-plus"></i>新建美化</span>'
         + '<span class="ssp-pbtn" data-orb-thexport="1"><i class="fa-solid fa-file-export"></i>导出当前美化</span>'
         + '</div>'
         + '<div id="ssp_orb_theme_list">' + orbThemeRowsHTML() + '</div>'
@@ -4903,6 +4904,78 @@ function orbThemeSyncToSt(css) {
         return true;
     } catch (e) { return false; }
 }
+
+/** 主题的 39 个字段（照酒馆 getThemeObject() 抄的，兜底用） */
+const ORB_THEME_KEYS = ['name', 'blur_strength', 'main_text_color', 'italics_text_color', 'underline_text_color',
+    'quote_text_color', 'blur_tint_color', 'chat_tint_color', 'user_mes_blur_tint_color', 'bot_mes_blur_tint_color',
+    'shadow_color', 'shadow_width', 'border_color', 'font_scale', 'fast_ui_mode', 'waifuMode', 'avatar_style',
+    'chat_display', 'toastr_position', 'noShadows', 'chat_width', 'timer_enabled', 'timestamps_enabled',
+    'timestamp_model_icon', 'mesIDDisplay_enabled', 'hideChatAvatars_enabled', 'message_token_count_enabled',
+    'expand_message_actions', 'enableZenSliders', 'enableLabMode', 'hotswap_enabled', 'custom_css', 'bogus_folders',
+    'zoomed_avatar_magnification', 'reduced_motion', 'compact_input_area', 'show_swipe_num_all_messages',
+    'click_to_edit', 'media_display'];
+
+/** 组装一个"标准主题对象"。
+    ⚠️ 别直接把 powerUserSettings 整个复制过来：那是 136 个键（含一堆跟主题无关的），
+    酒馆自己的主题文件只有固定 39 个字段（实测 .Base_D.json）。结构不对的话
+    以后切回这个主题会带进乱七八糟的设置。
+    做法：先问酒馆要**当前主题文件**（/api/themes/get）照抄结构，拿不到才用 39 键白名单兜底。 */
+async function orbThemeObject(name, css) {
+    let base = null;
+    try {
+        const ctx = getContext() || {};
+        const headers = Object.assign({ 'Content-Type': 'application/json' }, ctx.getRequestHeaders ? ctx.getRequestHeaders() : {});
+        const cur = orbThemeCur();
+        if (cur) {
+            const r = await fetch('/api/themes/get', { method: 'POST', headers, body: JSON.stringify({ name: cur }) });
+            if (r.ok) { const j = await r.json(); if (j && typeof j === 'object') base = j; }
+        }
+    } catch (e) { }
+    let src = base;
+    if (!src) {
+        let pu = {};
+        try { pu = (getContext() || {}).powerUserSettings || {}; } catch (e) { }
+        src = {};
+        ORB_THEME_KEYS.forEach(k => { if (k in pu) src[k] = pu[k]; });
+    }
+    const t = {};
+    ORB_THEME_KEYS.forEach(k => { if (k in src) t[k] = src[k]; });
+    /* 白名单之外、但酒馆文件里确实有的字段也一并带上（版本不同字段会变，别丢） */
+    Object.keys(src).forEach(k => { if (!(k in t) && k !== 'themes') t[k] = src[k]; });
+    t.name = String(name || '').trim();
+    if (typeof css === 'string') t.custom_css = css;
+    return t;
+}
+
+/** 新建一个美化（主题）：把"现在这套设置"存成一个新主题。
+    name 为空时用酒馆的输入弹窗问；建完自动切过去。返回新主题名或 null。 */
+async function orbThemeCreate(name, css) {
+    let nm = String(name || '').trim();
+    if (!nm) {
+        nm = await orbAskText('新美化叫什么？（会把「当前这套设置 + 你改的 CSS」存成一个新主题）', '');
+        if (!nm) return null;
+    }
+    const body = await orbThemeObject(nm, typeof css === 'string' ? css : orbThemeCss());
+    try {
+        const ctx = getContext() || {};
+        const headers = Object.assign({ 'Content-Type': 'application/json' }, ctx.getRequestHeaders ? ctx.getRequestHeaders() : {});
+        const r = await fetch('/api/themes/save', { method: 'POST', headers, body: JSON.stringify(body) });
+        if (!r.ok) { toast('新建失败：酒馆返回 ' + r.status, 'warning'); return null; }
+        /* 把新主题补进下拉框并选中（酒馆自己的 saveTheme 就是这么做的） */
+        const sel = orbThemeSel();
+        if (sel && !Array.from(sel.options).some(o => (o.textContent || '').trim() === nm)) {
+            const o = document.createElement('option');
+            o.value = nm; o.textContent = nm;
+            sel.appendChild(o);
+        }
+        orbThemePick(nm);
+        toast('建好了新美化：' + nm + '（现在是它）', 'success');
+        return nm;
+    } catch (e) {
+        toast('新建失败：' + (e && e.message), 'warning');
+        return null;
+    }
+}
 /** 点酒馆自己的按钮（更新当前 / 另存为新 / 导出）。返回按钮在不在。 */
 function orbThemeClickSt(id) {
     const b = document.getElementById(id);
@@ -4927,12 +5000,13 @@ function orbThemeEditHTML() {
         + ' placeholder="/* 例：body { --SmartThemeBodyColor: #e8e8ee; } */">' + esc(css) + '</textarea>'
         + '<div class="ssp-orb-catpick" style="margin-top:6px">'
         + '<span class="ssp-pbtn primary" data-orb-thcssupdate="1"><i class="fa-solid fa-floppy-disk"></i>更新当前美化</span>'
-        + '<span class="ssp-pbtn" data-orb-thcsssave="1"><i class="fa-solid fa-plus"></i>另存为新美化</span>'
+        + '<span class="ssp-pbtn" data-orb-thcreate="1"><i class="fa-solid fa-plus"></i>存成新美化</span>'
         + '<span class="ssp-pbtn" data-orb-thexport="1"><i class="fa-solid fa-file-export"></i>导出</span>'
         + '<span class="ssp-pbtn danger" data-orb-thcssreset="1" title="放弃这次改动，读回酒馆里那份">还原</span>'
         + '</div>'
         + '<div class="ssp-orb-empty" style="padding-top:6px">'
-        + '⚠️ 改坏了不要紧：点「还原」把酒馆里存的那份读回来，或者用上面的「导出」先备份一下。</div>';
+        + '⚠️ 改坏了不要紧：点「还原」把酒馆里存的那份读回来，或者用上面的「导出」先备份一下。<br>'
+        + '「存成新美化」= 把<b>现在这套设置 + 你改的 CSS</b> 存成一个新主题（酒馆会问你名字），不会动你原来的美化。</div>';
 }
 function orbThemePickerHTML(name) {
     const b = orbThemeBinds();
@@ -5199,6 +5273,23 @@ function orbCatNewHTML(cfg) {
         + '<span class="ssp-pbtn" data-orb-catnewcancel="1">取消</span>'
         + '</div>';
 }
+/** 问一段文字，promise 版（走酒馆的输入弹窗；拿不到就退回 window.prompt）。
+    拿到空内容 / 弹窗不可用 → resolve(null)。新建美化用得上。 */
+function orbAskText(title, def) {
+    return new Promise(resolve => {
+        const ctx = getContext() || {};
+        const finish = (v) => { const n = String(v || '').trim(); resolve(n || null); };
+        try {
+            if (typeof ctx.callGenericPopup === 'function') {
+                ctx.callGenericPopup(title, ctx.POPUP_TYPE.INPUT, def || '')
+                    .then(r => finish(typeof r === 'string' ? r : '')).catch(() => resolve(null));
+                return;
+            }
+        } catch (e) { }
+        try { finish(globalThis.prompt ? globalThis.prompt(title, def || '') : ''); } catch (e) { resolve(null); }
+    });
+}
+
 /** 点「＋」时问一个分类名（走酒馆的输入弹窗；拿不到就退回 prompt）。done(name) 拿到非空名才调用 */
 function orbAskCatName(title, def, done) {
     const ctx = getContext() || {};
@@ -7575,12 +7666,10 @@ function bindOrb() {
             renderOrbPanel();
             return;
         }
-        if (t.closest('[data-orb-thcsssave]')) {
+        /* 新建美化：把"现在这套设置 + 你改的 CSS"存成一个新主题（走酒馆的 /api/themes/save） */
+        if (t.closest('[data-orb-thcreate]')) {
             const css = orbThemeCss();
-            orbThemeSyncToSt(css);
-            orbThemePreview(css);
-            if (orbThemeClickSt('ui-preset-save-button')) toast('另存为新美化（酒馆会问你名字）', 'success');
-            renderOrbPanel();
+            orbThemeCreate('', css).then(nm => { if (nm) { orbThemeEdit = false; renderOrbPanel(); } });
             return;
         }
         if (t.closest('[data-orb-thexport]')) {
@@ -8123,6 +8212,7 @@ if (globalThis.__SSP_TEST__) {
         get orbThemeEdit() { return orbThemeEdit; }, set orbThemeEdit(v) { orbThemeEdit = v; },
         get orbThemeDraft() { return orbThemeDraft; }, set orbThemeDraft(v) { orbThemeDraft = v; },
         orbThemeEditHTML, orbThemeCss, orbThemePreview, orbThemeSyncToSt, orbThemeClickSt,
+        orbThemeObject, orbThemeCreate, orbAskText,
         get orbDelConfirm() { return orbDelConfirm; }, set orbDelConfirm(v) { orbDelConfirm = v; },
         get orbWbCatEdit() { return orbWbCatEdit; }, set orbWbCatEdit(v) { orbWbCatEdit = v; },
         get orbWbCatPick() { return orbWbCatPick; }, set orbWbCatPick(v) { orbWbCatPick = v; },
