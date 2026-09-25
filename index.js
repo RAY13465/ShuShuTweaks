@@ -4169,7 +4169,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.2';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.3';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6378,6 +6378,10 @@ function orbNotesHTML() {
         + '<input class="ssp-inp" type="text" data-orb-nsearch="1" placeholder="搜番外标题 / 正文" value="' + esc(orbNSearch) + '">'
         + (orbNSearch ? '<span class="ssp-pbtn" data-orb-nclear="1">清除</span>' : '')
         + '</div>'
+        /* ⚠️ 这个按钮**必须留在列表外面**：搜索框输入时只会重画 #ssp_orb_notes_list，
+           放进去的话每敲一个字按钮就跟着重建，点击/焦点都会被打断。
+           用户反馈"新建在底下太麻烦"（原来钉在面板最底部，存完要滑到底才能再点）→ 移到列表上面。 */
+        + '<div class="ssp-orb-nnew"><span class="ssp-pbtn primary" data-orb-act="new"><i class="fa-solid fa-plus"></i>新的一条</span></div>'
         + '<div id="ssp_orb_notes_list">' + orbNoteRowsHTML() + '</div>';
 }
 
@@ -6427,7 +6431,7 @@ function orbPanelHTML() {
             + '<span class="ssp-pbtn" data-orb-act="cancel">取消</span>'
             + (e.id ? '<span class="ssp-pbtn danger" data-orb-act="del" data-id="' + esc(e.id) + '"><i class="fa-solid fa-trash"></i>删掉这条</span>' : '')
             + '</div></div>'
-            : cur.render() + (cur.id === 'notes' ? '<div class="ssp-orb-foot"><span class="ssp-pbtn primary" data-orb-act="new"><i class="fa-solid fa-plus"></i>新的一条</span></div>' : ''))
+            : cur.render())
         + '</div>';
 }
 
