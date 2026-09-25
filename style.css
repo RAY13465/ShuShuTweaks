@@ -726,6 +726,40 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     .ssp-orb-wrow .ssp-orb-wchip { margin-left: auto; }
 }
 
+/* ---------- 世界书条目 / DLC 条目（两处共用一套长相）----------
+   状态点照抄酒馆自己那套语义：🔵常驻 🟢关键词触发 🔗向量化 ❌已关闭。
+   交互（用户定的）：**点整行＝开关这一条**；✏＝编辑；🗑＝删（只 DLC 栏有）。 */
+.ssp-en-row { align-items: center; }
+.ssp-en-row.off { opacity: .5; }
+.ssp-orb-state { flex: 0 0 auto; font-size: 13px; line-height: 1.5; user-select: none; }
+.ssp-en-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ssp-en-main b { font-size: 12.5px; font-weight: 700; word-break: break-word; }
+.ssp-en-meta { font-size: 10.5px; opacity: .55; font-style: normal; word-break: break-word; }
+.ssp-en-edit { flex: 0 0 auto; padding: 3px 7px; }
+.ssp-wb-open { flex: 0 0 auto; padding: 3px 6px; font-size: 11px; }
+.ssp-en-del { flex: 0 0 auto; padding: 3px 6px; }
+/* 编辑表单：整行铺开 */
+.ssp-en-form {
+    display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px;
+    padding: 9px 10px; border: 1px solid rgba(255, 255, 255, .22); border-radius: 9px;
+    background: rgba(255, 255, 255, .045);
+}
+.ssp-en-f { display: flex; flex-direction: column; gap: 3px; }
+.ssp-en-f > span { font-size: 10.5px; opacity: .6; }
+.ssp-en-f .ssp-inp { width: 100%; }
+.ssp-en-f2 { display: flex; gap: 8px; flex-wrap: wrap; }
+.ssp-en-f2 .ssp-en-f { flex: 1 1 90px; min-width: 0; }
+.ssp-en-state { display: flex; flex-direction: column; gap: 4px; }
+.ssp-en-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.ssp-en-form .ssp-orb-ta { min-height: 96px; max-height: 240px; }
+
+/* 窄屏：条目行允许换行 */
+@media (max-width: 560px) {
+    .ssp-en-row { flex-wrap: wrap; }
+    .ssp-en-main { flex: 1 1 60%; }
+    .ssp-en-f2 .ssp-en-f { flex: 1 1 100%; }
+}
+
 .ssp-orb-fl { display: block; margin-bottom: 9px; }
 .ssp-orb-fl > span { display: block; font-size: 11px; opacity: .6; margin-bottom: 4px; }
 

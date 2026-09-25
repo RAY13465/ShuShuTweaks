@@ -4169,7 +4169,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.30.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.0';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4566,6 +4566,16 @@ var orbNSearch = '';        // 番外页搜索词
 var orbWbBinding = null;    // 正在给哪个角色卡配世界书（null = 不在绑定模式）
 var orbWbSearch = '';       // 世界书页搜索词
 var orbWbNames = [];        // 世界书名缓存（读不到就退回酒馆的 #world_info 下拉）
+/* 世界书栏「展开某本书的条目」那一页的状态 */
+var orbWbEntriesBook = '';  // 非空 = 正在看这本书的条目
+var orbWbEntries = [];      // 缓存该书的条目
+var orbWbEntriesLoaded = false;
+var orbWbEntriesErr = '';
+var orbWbEntryOpen = null;  // 正在编辑的 uid 或 'new'
+var orbWbEntrySearch = '';
+var orbWbEntryDraft = null; // 新建草稿
+/* DLC 栏状态 */
+var orbDlcSearch = '';
 var orbCollapsed = false;   // 悬浮球是否收纳进左下角魔法棒
 
 /* ============================ 存档（聊天记录）栏 ============================
@@ -5043,8 +5053,7 @@ function orbWbApplyForChar() {
     kind='restore'（手动「还原这个聊天」按钮）：撤掉我们启用过的，并把同时被撤掉的原状补回来。
     kind='reset'  （切聊天/切角色）：只撤掉我们启用过的 + 删记账 ——
        新聊天有自己的世界书状态、由酒馆自己加载，不需要我们补回任何东西。 */
-function orbWbCleanup(key, kind) {
-    const sel = document.getElementById('world_info');
+function orbWbCleanup(key, kind) {    const sel = document.getElementById('world_info');
     const enabled = orbWbEnabled(key);
     if (sel && enabled.length) {
         const cur = orbWbActive();
@@ -5061,6 +5070,512 @@ function orbWbCleanup(key, kind) {
     }
     if (key) { delete orbWbApplied()[key]; save(); }
     return true;
+}
+
+/* ============================ 条目层（世界书里的每一条）============================
+   世界书是「一本一本」的，每本里有很多**条目**。酒馆原生只能去它的编辑器里逐条点开，
+   很麻烦 —— 这里把条目直接摊到鼠鼠面板上：**看、开关、改、新建、删**。
+
+   条目结构（读真书文件确认过）：
+     整本 = { entries: { "0": {…}, "1": {…} } }     ← 键就是 uid（顺序数字）
+     条目 = { uid, comment(标题), content(正文), key(触发词,逗号分隔),
+              constant(常驻), vectorized(向量化), disable(禁用), displayIndex, order, depth,
+              position, probability, … }
+
+   酒馆自己那套「状态」图标（原文见 public/index.html 的 entryStateSelector）：
+      🔵 constant（常驻，一直在提示词里） / 🟢 normal（关键词触发） / 🔗 vectorized / ❌ disabled
+   本扩展照抄这套语义，所以面板上的点和酒馆编辑器里看到的一致。
+
+   ⚠️ 落盘规矩：只改我们碰的那几个字段，然后整份 data 交给 saveWorldInfo。
+   loadWorldInfo 返回的对象就是酒馆缓存里的同一份引用，所以改完存回是安全的；
+   但**每次要用都重新 load**，不要缓存整本（免得覆盖掉用户在酒馆编辑器里的手改）。
+   ========================================================================== */
+
+/** 条目状态 → 酒馆那套图标 */
+function orbEntryIcon(e) {
+    if (!e || e.disable) return '❌';
+    if (e.constant === true) return '🔵';
+    if (e.vectorized === true) return '🔗';
+    return '🟢';
+}
+/** 状态的人话说明（面板上用） */
+function orbEntryStateText(e) {
+    if (!e || e.disable) return '已关闭';
+    if (e.constant === true) return '常驻';
+    if (e.vectorized === true) return '向量化';
+    return '关键词触发';
+}
+/** 关键词触发时，把触发词显示出来（截断） */
+function orbEntryKeys(e) {
+    const k = e && e.key;
+    if (Array.isArray(k)) return k.filter(Boolean).join('、');
+    return String(k || '').trim();
+}
+/** 正文字数（粗略，给人看个量级） */
+function orbEntryLen(e) {
+    return String((e && e.content) || '').replace(/\s+/g, '').length;
+}
+/** 这本世界书里有哪些条目（按 displayIndex/uid 排好） */
+async function orbEntriesOf(book) {
+    const name = String(book || '').trim();
+    if (!name) return [];
+    let data = null;
+    try {
+        const load = (getContext() || {}).loadWorldInfo;
+        if (typeof load === 'function') data = await load(name);
+    } catch (e) { }
+    if (!data) {
+        /* 退路：直接读文件（酒馆的 /api/worldinfo/get） */
+        try {
+            const r = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers: Object.assign({ 'Content-Type': 'application/json' }, (getContext() || {}).getRequestHeaders?.() || {}),
+                body: JSON.stringify({ name }),
+            });
+            if (r.ok) data = await r.json();
+        } catch (e) { }
+    }
+    const ents = (data && data.entries) || {};
+    const out = Object.keys(ents).map(k => ents[k]).filter(Boolean);
+    out.sort((a, b) => {
+        const da = Number(a.displayIndex), db = Number(b.displayIndex);
+        if (isFinite(da) && isFinite(db) && da !== db) return da - db;
+        return (Number(a.uid) || 0) - (Number(b.uid) || 0);
+    });
+    return out;
+}
+
+/** 造一个酒馆认的条目对象（真书的形状）。新建单条 / 批量写入 / 预置示例都走它。 */
+function orbMakeEntry(uid, f) {
+    const o = f || {};
+    return {
+        uid,
+        key: Array.isArray(o.key) ? o.key.filter(Boolean) : String(o.key || '').split(',').map(s => s.trim()).filter(Boolean),
+        keysecondary: [],
+        comment: String(o.comment || '').trim() || ('新条目 ' + uid),
+        content: String(o.content || ''),
+        constant: o.constant !== false,
+        vectorized: false,
+        selective: true,
+        selectiveLogic: 0,
+        addMemo: true,
+        order: 100,
+        position: 0,
+        disable: false,
+        displayIndex: uid,
+        excludeRecursion: false,
+        preventRecursion: false,
+        delayUntilRecursion: false,
+        probability: 100,
+        useProbability: true,
+        depth: 4,
+        group: '',
+        groupOverride: false,
+        groupWeight: 100,
+        scanDepth: null,
+        caseSensitive: null,
+        matchWholeWords: null,
+        useGroupScoring: null,
+        automationId: '',
+        role: 0,
+        sticky: 0,
+        cooldown: 0,
+        delay: 0,
+    };
+}
+
+/** 在指定书里新建一个条目。默认 🔵 常驻（用户要的"补一段世界观"路径最短）。
+    fields 可给 comment / content / key / constant。返回新条目或 null。 */
+async function orbEntryAdd(book, fields) {
+    const name = String(book || '').trim();
+    if (!name) { toast('没指定世界书', 'warning'); return null; }
+    const ctx = getContext() || {};
+    const f = fields || {};
+    try {
+        const data = await ctx.loadWorldInfo?.(name);
+        if (!data) { toast('读不到世界书「' + name + '」', 'warning'); return null; }
+        if (!data.entries || typeof data.entries !== 'object') data.entries = {};
+        /* 下一个空 uid：从 0 往上找第一个没被占的 */
+        let uid = 0;
+        while (data.entries[uid] !== undefined) uid += 1;
+        const entry = orbMakeEntry(uid, f);
+        data.entries[uid] = entry;
+        await ctx.saveWorldInfo?.(name, data);
+        return entry;
+    } catch (e) {
+        toast('新建条目失败：' + (e && e.message), 'warning');
+        return null;
+    }
+}
+
+/** 改一个条目。patch 里给什么改什么（comment / content / key / constant / vectorized /
+    disable / order / depth / position / probability）。返回 true/false。 */
+async function orbEntrySave(book, uid, patch) {
+    const name = String(book || '').trim();
+    const ctx = getContext() || {};
+    const want = patch || {};
+    try {
+        const data = await ctx.loadWorldInfo?.(name);
+        if (!data || !data.entries || !data.entries[uid]) { toast('找不到这个条目', 'warning'); return false; }
+        const e = data.entries[uid];
+        if ('comment' in want) e.comment = String(want.comment || '');
+        if ('content' in want) e.content = String(want.content || '');
+        if ('key' in want) e.key = String(want.key || '').split(',').map(s => s.trim()).filter(Boolean);
+        if ('constant' in want) {
+            e.constant = Boolean(want.constant);
+            if (e.constant) e.vectorized = false;         // 和酒馆一样：常驻与向量化互斥
+        }
+        if ('vectorized' in want) {
+            e.vectorized = Boolean(want.vectorized);
+            if (e.vectorized) e.constant = false;
+        }
+        if ('disable' in want) e.disable = Boolean(want.disable);
+        ['order', 'depth', 'position', 'probability'].forEach(k => {
+            if (k in want) {
+                const n = Number(want[k]);
+                if (isFinite(n)) e[k] = n;
+            }
+        });
+        await ctx.saveWorldInfo?.(name, data);
+        return true;
+    } catch (err) {
+        toast('保存条目失败：' + (err && err.message), 'warning');
+        return false;
+    }
+}
+
+/** 开关一个条目（只翻 disable）。返回新状态（true=开着）。 */
+async function orbEntryToggle(book, uid) {
+    const name = String(book || '').trim();
+    const ctx = getContext() || {};
+    try {
+        const data = await ctx.loadWorldInfo?.(name);
+        if (!data || !data.entries || !data.entries[uid]) { toast('找不到这个条目', 'warning'); return null; }
+        const on = data.entries[uid].disable === true;   // 原来是关的 → 打开
+        data.entries[uid].disable = !on;
+        await ctx.saveWorldInfo?.(name, data);
+        return on;
+    } catch (e) {
+        toast('开关条目失败：' + (e && e.message), 'warning');
+        return null;
+    }
+}
+
+/** 删一个条目（面板里做二次确认才调它） */
+async function orbEntryDel(book, uid) {
+    const name = String(book || '').trim();
+    const ctx = getContext() || {};
+    try {
+        const data = await ctx.loadWorldInfo?.(name);
+        if (!data || !data.entries || !data.entries[uid]) { toast('找不到这个条目', 'warning'); return false; }
+        delete data.entries[uid];
+        await ctx.saveWorldInfo?.(name, data);
+        return true;
+    } catch (e) {
+        toast('删除条目失败：' + (e && e.message), 'warning');
+        return false;
+    }
+}
+
+/* ============================ DLC 首次预置的示例条目 ============================
+   用户问"导入扩展能不能自动生成" —— 结论：**装完那一刻不会**（酒馆的扩展安装只 clone + 校验
+   manifest，manifest 里也没有安装脚本字段），是**第一次打开 DLC 标签页时创建**。
+   这里让那份"第一次"更有用：书不存在时顺手写几条示例进去，让人一眼看懂
+   🔵 常驻 / 🟢 关键词触发 的区别，也是"补世界观"的模板。文案故意写成示例口吻。 */
+const DLC_SEED = [
+    {
+        comment: '示例·世界观基调（常驻）',
+        content: '【世界观基调】时代与地点由你自己改：这里写这个世界的底色 —— 社会形态、技术水平、有没有异能/魔法、以及最重要的「什么是不允许的」（比如没有复活、没有跨世界电话）。'
+            + '\n常驻条目的特点：不管聊到什么都会被塞进提示词。所以它适合放"始终成立"的设定，篇幅别太长。',
+        constant: true,
+    },
+    {
+        comment: '示例·地点（说到才触发）',
+        content: '【地点：旧城区】老城区的路面是磨光的青石，一下雨就泛着光。街角有家二十四小时不关门的便利店，店主从不多问。晚上十点以后，主街的灯会一盏一盏地灭，只有便利店那块招牌还亮着。',
+        constant: false,
+        key: ['旧城区', '老城区', '青石'],
+    },
+    {
+        comment: '示例·人物（说到才触发）',
+        content: '【人物：陈叔】便利店的店主，五十来岁，右手小指少半截。话少，只在结账时说一句"慢走"。他记得每个熟客买什么，但从不多问——这街区的人都信他这一点。',
+        constant: false,
+        key: ['陈叔', '店主', '便利店'],
+    },
+];
+/** 这本书现在有没有条目（用来判断"是不是全新的书"） */
+async function orbEntriesCount(book) {
+    try { return (await orbEntriesOf(book)).length; } catch (e) { return -1; }
+}
+/** 一次性写入多条条目（首次预置 / 「装一份示例」按钮都用它；只 load 一次、save 一次） */
+async function orbEntryAddMany(book, items) {
+    const name = String(book || '').trim();
+    const list = Array.isArray(items) ? items : [];
+    if (!name || !list.length) return 0;
+    const ctx = getContext() || {};
+    try {
+        const data = await ctx.loadWorldInfo?.(name);
+        if (!data) { toast('读不到世界书「' + name + '」', 'warning'); return 0; }
+        if (!data.entries || typeof data.entries !== 'object') data.entries = {};
+        let uid = 0;
+        let n = 0;
+        list.forEach(it => {
+            while (data.entries[uid] !== undefined) uid += 1;      // 往上找空位
+            data.entries[uid] = orbMakeEntry(uid, it);
+            uid += 1; n += 1;
+        });
+        await ctx.saveWorldInfo?.(name, data);
+        return n;
+    } catch (e) {
+        toast('写入示例条目失败：' + (e && e.message), 'warning');
+        return 0;
+    }
+}
+/** 首次打开 DLC：书**不存在**时才建 + 预置示例；书已存在（哪怕空的）一概不动。 */
+async function orbDlcFirstRun() {
+    const name = orbDlcBook();
+    if (orbWorldList().indexOf(name) >= 0) return false;          // 已经有了 → 尊重现状（包括被你清空）
+    const ok = await orbDlcEnsureBook();                          // 不存在 → 建一本空的
+    if (!ok) return false;
+    const n = await orbEntryAddMany(name, DLC_SEED);
+    if (n) toast('已为你建好「' + name + '」并放了 ' + n + ' 条示例，照着改就行', 'success');
+    return true;
+}
+/** 「装一份示例」按钮：不管书什么状态，都追加一份模板 */
+async function orbDlcAddSeed() {
+    await orbDlcEnsureBook();
+    const n = await orbEntryAddMany(orbDlcBook(), DLC_SEED);
+    if (n) toast('已追加 ' + n + ' 条示例条目', 'success');
+    return n;
+}
+
+/** DLC 那本书名（可配，默认「鼠鼠DLC」） */
+function orbDlcBook() {
+    const s = getSettings();
+    if (typeof s.dlcBook !== 'string' || !s.dlcBook.trim()) s.dlcBook = '鼠鼠DLC';
+    return s.dlcBook.trim();
+}
+/** 新建条目默认是不是常驻（用户可切；默认是） */
+function orbDlcConstantDefault() {
+    const s = getSettings();
+    if (typeof s.dlcConstant !== 'boolean') s.dlcConstant = true;
+    return s.dlcConstant;
+}
+/** DLC 那本书存在吗（不存在就建一本空的，走酒馆自己的接口，这样酒馆也认） */
+var orbDlcEnsuring = false;
+async function orbDlcEnsureBook() {
+    const name = orbDlcBook();
+    const all = orbWorldList();
+    if (all.indexOf(name) >= 0) return true;
+    if (orbDlcEnsuring) return false;
+    orbDlcEnsuring = true;
+    try {
+        /* 酒馆没有导出「新建世界书」的接口给扩展，所以直接写文件：
+           /api/worldinfo/edit 就是酒馆自己保存世界书用的那个端点。 */
+        const body = { name, data: { entries: {} } };
+        const r = await fetch('/api/worldinfo/edit', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, (getContext() || {}).getRequestHeaders?.() || {}),
+            body: JSON.stringify(body),
+        });
+        if (!r.ok) { toast('建不了「' + name + '」这本书（HTTP ' + r.status + '）', 'warning'); return false; }
+        try { await (getContext() || {}).updateWorldInfoList?.(); } catch (e) { }
+        orbWorldList();
+        return true;
+    } catch (e) {
+        toast('建不了「' + name + '」：' + (e && e.message), 'warning');
+        return false;
+    } finally {
+        orbDlcEnsuring = false;
+    }
+}
+
+/* ============================ DLC 栏（鼠鼠口袋内置的一本世界书）============================
+   用户要的：一本**专门放这类条目**的书，打开就能改、就能开关 —— 相当于鼠鼠口袋内置了一本
+   世界书。默认常驻（🔵），补一段世界观不用填触发词。
+
+   - 书是**真世界书文件**（默认叫「鼠鼠DLC」）→ 酒馆也能认、也能参与扫描，两边是同一份
+   - 书**不存在**时：建一本，并顺手写几条示例（首次预置，见 DLC_SEED）；
+     书已存在（哪怕被你清空）一概不动 —— 尊重你的现状
+   - 条目行的「点」和「行样式」跟世界书栏**共用同一套**（orbEntryRowHTML / orbEntryFormHTML）
+   ========================================================================== */
+var orbDlcEntries = [];      // 缓存：当前书的条目
+var orbDlcLoaded = false;    // 这次打开有没有拉到过
+var orbDlcOpen = null;       // uid 或 'new'（正在展开编辑的那条）
+var orbDlcDraft = null;      // 新建时的草稿（切页回来还在）
+var orbDlcErr = '';
+
+/** 拉一次条目（异步，回来重画） */
+async function orbDlcFetch() {
+    orbDlcErr = '';
+    try {
+        /* 首次：书不存在才建 + 预置示例；已存在就直接用 */
+        await orbDlcFirstRun();
+        const list = await orbEntriesOf(orbDlcBook());
+        orbDlcEntries = list;
+        orbDlcLoaded = true;
+    } catch (e) {
+        orbDlcErr = String((e && e.message) || e);
+        orbDlcLoaded = true;
+    }
+    if (orbOpenNow && orbTab === 'dlc') renderOrbPanel();
+}
+/** 打开这一页时按需拉（书换了也重拉） */
+var orbDlcLoadedBook = '';
+function orbDlcEnsure() {
+    const book = orbDlcBook();
+    if (orbDlcLoaded && orbDlcLoadedBook === book) return;
+    orbDlcLoadedBook = book;
+    orbDlcLoaded = false;
+    setTimeout(() => { orbDlcFetch(); }, 0);
+}
+
+function orbDlcRowsHTML() {
+    return orbEntryListHTML({
+        entries: orbDlcEntries, book: orbDlcBook(), editing: orbDlcOpen,
+        kind: 'dlc', search: orbDlcSearch, loaded: orbDlcLoaded, err: orbDlcErr,
+    });
+}
+
+function orbDlcHTML() {
+    const book = orbDlcBook();
+    const on = orbDlcEntries.filter(e => e.disable !== true).length;
+    const bar = '<div class="ssp-orb-pfilter">'
+        + '<i class="fa-solid fa-magnifying-glass"></i>'
+        + '<input class="ssp-inp" type="text" data-orb-dlcsearch="1" placeholder="搜条目（标题 / 正文 / 触发词）" value="' + esc(orbDlcSearch) + '">'
+        + (orbDlcSearch ? '<span class="ssp-pbtn" data-orb-dlcclear="1">清除</span>' : '')
+        + '</div>';
+    const tools = '<div class="ssp-orb-pcount">'
+        + '<span class="ssp-pbtn primary" data-orb-dlcnew="1"><i class="fa-solid fa-plus"></i>新建条目</span>'
+        + '<span class="ssp-pbtn" data-orb-dlcrefresh="1"><i class="fa-solid fa-rotate"></i>刷新</span>'
+        + '<span class="ssp-pbtn" data-orb-dlcseed="1" title="追加几条示例条目（常驻 / 关键词触发各一条，照着改）">'
+        + '<i class="fa-solid fa-wand-magic-sparkles"></i>装一份示例</span>'
+        + '</div>';
+    const info = '<div class="ssp-orb-empty" style="padding-top:2px">'
+        + '这本书：<b>' + esc(book) + '</b> · 共 <b>' + orbDlcEntries.length + '</b> 条，其中 <b>' + on + '</b> 条开着'
+        + '<br><span style="opacity:.7">🔵常驻 🟢关键词触发 🔗向量化 ❌已关闭 —— 点那个点就是开关。'
+        + '点标题展开就能改。这是一本**真世界书**，酒馆里也能看到、也会照常参与扫描。</span>'
+        + '</div>';
+    const draft = (orbDlcOpen === 'new')
+        ? orbEntryFormHTML(null, book, true, orbDlcDraft || { comment: '', content: '', key: '', constant: orbDlcConstantDefault() })
+        : '';
+    const keyNote = '<label class="ssp-orb-auto" style="padding-top:4px"><input type="checkbox" data-orb-dlcconst="1"'
+        + (orbDlcConstantDefault() ? ' checked' : '') + '><span>新建时默认用 🔵 常驻</span></label>';
+    return bar + tools + info + keyNote + draft
+        + '<div id="ssp_orb_dlc_list">' + orbDlcRowsHTML() + '</div>';
+}
+/* ---- 条目列表 / 编辑器（DLC 栏和世界书栏共用同一套）---- */
+
+/** 状态点 + 标题 + 元信息 的一行（kind='dlc' 或 'book'） */
+/** 条目行。
+    ⚠️ 交互是用户定的（改过一版）：
+       · **点整行 = 开关这一条**（最常用的动作，占整行的点击面积）
+       · **✏ 编辑** = 单独一个按钮（不再靠"点标题展开"，容易和开关抢）
+       · **🗑 删除** = 单独按钮，只有 DLC 栏给（世界书栏怕误删别人的书）
+    以前是"点那个点开关、点标题编辑" —— 那个小小的点很难点中（用户反馈点不动），已经废掉。 */
+function orbEntryRowHTML(e, book, kind) {
+    const uid = e.uid;
+    const icon = orbEntryIcon(e);
+    const off = e.disable === true;
+    const title = (e.comment || '').trim() || ('未命名条目 ' + uid);
+    const keys = orbEntryKeys(e);
+    const meta = orbEntryStateText(e) + ' · ' + orbEntryLen(e) + ' 字'
+        + (keys && !e.constant ? ' · 触发：' + keys : '');
+    return '<div class="ssp-orb-wrow ssp-en-row' + (off ? ' off' : '') + '"'
+        + ' data-ssp-enrow="' + uid + '" data-ssp-entoggle="' + uid + '" data-ssp-book="' + esc(book) + '"'
+        + ' title="点这一行＝' + (off ? '打开' : '关掉') + '「' + esc(title) + '」">'
+        + '<span class="ssp-orb-state ssp-en-state">' + icon + '</span>'
+        + '<span class="ssp-orb-wname ssp-en-main">'
+        + '<b>' + esc(title) + '</b><i class="ssp-en-meta">' + esc(meta) + '</i></span>'
+        + '<span class="ssp-pbtn ssp-en-edit" data-ssp-enedit="' + uid + '" data-ssp-book="' + esc(book) + '"'
+        + ' title="改标题 / 正文 / 常驻方式">✏</span>'
+        + (kind === 'dlc'
+            ? '<span class="ssp-pbtn ssp-en-del" data-ssp-endel="' + uid + '" data-ssp-book="' + esc(book) + '" title="删掉这一条（会问一次）">🗑</span>'
+            : '')
+        + '</div>';
+}
+
+/** 编辑表单（就地展开） */
+function orbEntryFormHTML(e, book, isNew, defaults) {
+    const uid = isNew ? '' : e.uid;
+    const d = defaults || {};
+    const comment = isNew ? String(d.comment || '') : String(e.comment || '');
+    const content = isNew ? String(d.content || '') : String(e.content || '');
+    const key = isNew ? String(d.key || '') : orbEntryKeys(e);
+    const constant = isNew ? (d.constant !== false) : (e.constant === true);
+    const adv = (e && e.__adv) === true;
+    return '<div class="ssp-en-form" data-ssp-enform="' + uid + '" data-ssp-book="' + esc(book) + '">'
+        + '<label class="ssp-en-f"><span>标题</span>'
+        + '<input class="ssp-inp" type="text" data-ssp-enf="comment" placeholder="这条叫什么（比如「温不咎的作息」）" value="' + esc(comment) + '"></label>'
+        + '<label class="ssp-en-f"><span>正文</span>'
+        + '<textarea class="ssp-inp ssp-orb-ta" data-ssp-enf="content" rows="7" placeholder="要补进提示词的那段内容">' + esc(content) + '</textarea></label>'
+        + '<div class="ssp-en-state">'
+        + '<label class="ssp-orb-auto"><input type="checkbox" data-ssp-enf="constant"' + (constant ? ' checked' : '') + '>'
+        + '<span>🔵 常驻（一直生效 · 不用填触发词）</span></label>'
+        + '<label class="ssp-orb-auto"><input type="checkbox" data-ssp-enf="adv"' + (adv ? ' checked' : '') + '>'
+        + '<span>更多设置</span></label>'
+        + '</div>'
+        + '<label class="ssp-en-f ssp-en-key"' + (constant ? ' style="display:none"' : '') + '><span>触发词（逗号分隔）</span>'
+        + '<input class="ssp-inp" type="text" data-ssp-enf="key" placeholder="说到这些词才插入" value="' + esc(key) + '"></label>'
+        + '<div class="ssp-en-adv"' + (adv ? '' : ' style="display:none"') + '>'
+        + '<div class="ssp-en-f2">'
+        + '<label class="ssp-en-f"><span>顺序 order</span><input class="ssp-inp" type="number" data-ssp-enf="order" value="' + esc(isNew ? 100 : e.order) + '"></label>'
+        + '<label class="ssp-en-f"><span>深度 depth</span><input class="ssp-inp" type="number" data-ssp-enf="depth" value="' + esc(isNew ? 4 : e.depth) + '"></label>'
+        + '<label class="ssp-en-f"><span>概率 %</span><input class="ssp-inp" type="number" data-ssp-enf="probability" value="' + esc(isNew ? 100 : e.probability) + '"></label>'
+        + '</div>'
+        + '<div class="ssp-orb-empty" style="padding:0 2px 6px">「插入位置」这类更细的项，等面板不够用了再说 —— 需要的话去酒馆世界书编辑器改，两边是同一份文件。</div>'
+        + '</div>'
+        + '<div class="ssp-en-acts">'
+        + '<span class="ssp-pbtn primary" data-ssp-ensave="' + uid + '" data-ssp-book="' + esc(book) + '">'
+        + '<i class="fa-solid fa-check"></i>' + (isNew ? '创建' : '保存') + '</span>'
+        + '<span class="ssp-pbtn" data-ssp-encancel="1">取消</span>'
+        + '</div></div>';
+}
+
+/** 打开某本书的条目页（异步拉条目，回来重画） */
+function orbWbOpenEntries(book) {
+    orbWbEntriesBook = String(book || '');
+    orbWbEntryOpen = null;
+    orbWbEntrySearch = '';
+    orbWbEntries = [];
+    orbWbEntriesLoaded = false;
+    orbWbEntriesErr = '';
+    renderOrbPanel();
+    orbWbEntriesFetch(orbWbEntriesBook);
+}
+function orbWbCloseEntries(silent) {
+    orbWbEntriesBook = '';
+    orbWbEntries = [];
+    orbWbEntriesLoaded = false;
+    orbWbEntriesErr = '';
+    orbWbEntryOpen = null;
+    orbWbEntrySearch = '';
+    if (!silent) return true;
+    return true;
+}
+async function orbWbEntriesFetch(book) {
+    const name = String(book || '').trim();
+    if (!name) return;
+    if (name !== orbWbEntriesBook) return;      // 已经切走了
+    orbWbEntriesErr = '';
+    try {
+        orbWbEntries = await orbEntriesOf(name);
+        orbWbEntriesLoaded = true;
+    } catch (e) {
+        orbWbEntriesErr = String((e && e.message) || e);
+        orbWbEntriesLoaded = true;
+    }
+    if (orbOpenNow && orbTab === 'world' && orbWbEntriesBook === name) renderOrbPanel();
+}
+
+/** 编辑器里的小联动：常驻 → 藏触发词；「更多设置」→ 展开高级项 */
+function orbEntryFormCascade(host) {
+    if (!host) return;
+    const c = host.querySelector('[data-ssp-enf="constant"]');
+    const key = host.querySelector('.ssp-en-key');
+    if (c && key) key.style.display = c.checked ? 'none' : '';
+    const adv = host.querySelector('[data-ssp-enf="adv"]');
+    const box = host.querySelector('.ssp-en-adv');
+    if (adv && box) box.style.display = adv.checked ? '' : 'none';
 }
 
 /* 手动「还原这个聊天」：撤销我们启用过的书（用户手动勾的不动） */
@@ -5179,12 +5694,72 @@ function orbWorldRowsHTML() {
             + '</div>'
             + '<div class="ssp-orb-pbind' + (others.length ? ' has' : '') + '"><i class="fa-solid fa-link"></i>'
             + (others.length ? esc(others.join('、') + ' 也绑了') : '没有别的角色卡绑它') + '</div>'
-            + '</div></div>';
+            + '</div>'
+            /* 这一本书里的条目：点进去看 / 开关 / 改（用户要的"连里面条目也可以开"） */
+            + '<span class="ssp-pbtn ssp-wb-open" data-orb-wentries="' + esc(n) + '"'
+            + ' title="展开这本书里的条目，逐条开关 / 编辑">📖</span>'
+            + '</div>';
     }).join('');
     return head + '<div class="ssp-orb-plist">' + rows + '</div>';
 }
 
+/** 条目列表 HTML（世界书栏的"展开"页和 DLC 栏共用一套长相与行为）
+    ctx = { entries, book, editing, kind, search, loaded, err } */
+function orbEntryListHTML(ctx) {
+    const c = ctx || {};
+    const book = String(c.book || '');
+    const q = String(c.search || '').toLowerCase();
+    if (!c.loaded) return '<div class="ssp-orb-empty">正在读「' + esc(book) + '」…</div>';
+    if (c.err) return '<div class="ssp-orb-empty">读不出来：' + esc(c.err) + '</div>';
+    const all = c.entries || [];
+    if (!all.length) return '<div class="ssp-orb-empty">这本书还是空的' + (c.kind === 'dlc' ? ' —— 点「＋新建条目」写第一条。' : '。') + '</div>';
+    const hit = all.filter(e => !q
+        || String(e.comment || '').toLowerCase().indexOf(q) >= 0
+        || String(e.content || '').toLowerCase().indexOf(q) >= 0
+        || orbEntryKeys(e).toLowerCase().indexOf(q) >= 0);
+    if (!hit.length) return '<div class="ssp-orb-empty">没有匹配「' + esc(c.search) + '」的条目。</div>';
+    const head = q ? '<div class="ssp-orb-pcount">筛选出 ' + hit.length + ' / ' + all.length + ' 条</div>' : '';
+    const rows = hit.map(e => {
+        let html = orbEntryRowHTML(e, book, c.kind);
+        if (c.editing != null && String(c.editing) === String(e.uid)) html += orbEntryFormHTML(e, book, false);
+        return html;
+    }).join('');
+    return head + '<div class="ssp-orb-wlist">' + rows + '</div>';
+}
+
+/** 世界书栏「展开某本书的条目」那一页 */
+function orbWbEntriesHTML() {
+    const book = orbWbEntriesBook;
+    const rows = orbEntryListHTML({
+        entries: orbWbEntries, book, editing: orbWbEntryOpen, kind: 'book',
+        search: orbWbEntrySearch, loaded: orbWbEntriesLoaded, err: orbWbEntriesErr,
+    });
+    const q = orbWbEntrySearch || '';
+    const bar = '<div class="ssp-orb-pfilter">'
+        + '<i class="fa-solid fa-magnifying-glass"></i>'
+        + '<input class="ssp-inp" type="text" data-orb-enesearch="1" placeholder="搜条目（标题 / 正文 / 触发词）" value="' + esc(q) + '">'
+        + (q ? '<span class="ssp-pbtn" data-orb-eneclear="1">清除</span>' : '')
+        + '</div>';
+    const head = '<div class="ssp-orb-bindhead">'
+        + '<span class="ssp-pbtn" data-orb-wback2="1"><i class="fa-solid fa-arrow-left"></i>回世界书</span>'
+        + '<b>' + esc(book) + ' · 条目</b>'
+        + '<span class="ssp-orb-charmark" style="margin-left:auto">' + orbWbEntries.length + ' 条</span>'
+        + '</div>';
+    const tools = '<div class="ssp-orb-pcount">'
+        + '<span class="ssp-pbtn primary" data-orb-enenew="1"><i class="fa-solid fa-plus"></i>新建条目</span>'
+        + '<span class="ssp-pbtn" data-orb-enerefresh="1"><i class="fa-solid fa-rotate"></i>刷新</span>'
+        + '</div>';
+    const draft = (orbWbEntryOpen === 'new')
+        ? orbEntryFormHTML(null, book, true, orbWbEntryDraft || { comment: '', content: '', key: '', constant: orbDlcConstantDefault() })
+        : '';
+    const note = '<div class="ssp-orb-empty" style="padding-top:4px">'
+        + '🔵常驻 🟢关键词触发 🔗向量化 ❌已关闭 —— 点那个点就是开关，点标题展开就能改。'
+        + '<br><span style="opacity:.7">改动直接写回这本书（酒馆里那份同步生效；两边是同一份文件）。</span></div>';
+    return head + bar + tools + draft + '<div id="ssp_orb_wbent_list">' + rows + '</div>' + note;
+}
+
 function orbWorldHTML() {
+    if (orbWbEntriesBook) return orbWbEntriesHTML();
     const all = orbWorldList();
     const ch = orbWbTargetChar();
     const cur = orbWbCurChar();
@@ -5465,6 +6040,7 @@ const ORB_MODULES = [
     { id: 'preset', name: '预设', icon: 'fa-sliders', render: () => orbPresetHTML() },
     { id: 'theme', name: '美化', icon: 'fa-palette', render: () => orbThemeHTML() },
     { id: 'world', name: '世界书', icon: 'fa-book-atlas', render: () => orbWorldHTML() },
+    { id: 'dlc', name: 'DLC', icon: 'fa-cubes', render: () => orbDlcHTML() },
     { id: 'chat', name: '存档', icon: 'fa-box-archive', render: () => orbChatHTML() },
 ];
 function orbModule(id) { return ORB_MODULES.find(m => m.id === id) || null; }
@@ -5872,6 +6448,7 @@ function openOrb() {
     if (root && root.classList) root.classList.add('on');
     orbOpenNow = true; orbEditing = null;
     renderOrbPanel();
+    if (orbTab === 'dlc') orbDlcEnsure();     // 停在 DLC 页时按需拉那本书的条目
     return true;
 }
 
@@ -6289,6 +6866,48 @@ function bindOrb() {
         }
     });
 
+    /* 世界书栏「条目页」搜索 */
+    document.addEventListener('input', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbEnesearch === undefined) return;
+        orbWbEntrySearch = el.value || '';
+        const box = document.getElementById('ssp_orb_wbent_list');
+        if (box) box.innerHTML = orbEntryListHTML({
+            entries: orbWbEntries, book: orbWbEntriesBook, editing: orbWbEntryOpen, kind: 'book',
+            search: orbWbEntrySearch, loaded: orbWbEntriesLoaded, err: orbWbEntriesErr,
+        });
+        const bar = document.querySelector('.ssp-orb-pfilter');
+        if (bar) {
+            let c = bar.querySelector('[data-orb-eneclear]');
+            if (orbWbEntrySearch && !c) { c = document.createElement('span'); c.className = 'ssp-pbtn'; c.setAttribute('data-orb-eneclear', '1'); c.textContent = '清除'; bar.append(c); }
+            else if (!orbWbEntrySearch && c) c.remove();
+        }
+    });
+
+    /* DLC 页搜索 */
+    document.addEventListener('input', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbDlcsearch === undefined) return;
+        orbDlcSearch = el.value || '';
+        const box = document.getElementById('ssp_orb_dlc_list');
+        if (box) box.innerHTML = orbDlcRowsHTML();
+        const bar = document.querySelector('.ssp-orb-pfilter');
+        if (bar) {
+            let c = bar.querySelector('[data-orb-dlcclear]');
+            if (orbDlcSearch && !c) { c = document.createElement('span'); c.className = 'ssp-pbtn'; c.setAttribute('data-orb-dlcclear', '1'); c.textContent = '清除'; bar.append(c); }
+            else if (!orbDlcSearch && c) c.remove();
+        }
+    });
+
+    /* 条目编辑器里的联动（常驻 ↔ 触发词 / 更多设置） */
+    document.addEventListener('change', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset) return;
+        if (el.dataset.sspEnf === 'constant' || el.dataset.sspEnf === 'adv') {
+            orbEntryFormCascade(el.closest('[data-ssp-enform]'));
+        }
+    });
+
     document.addEventListener('click', ev => {
         const t = ev.target;
         if (!t || !t.closest) return;
@@ -6349,6 +6968,105 @@ function bindOrb() {
            自动开关 / 还原这个聊天 / 清空这张卡的绑定 / 换一张角色卡配 */
         if (t.closest('[data-orb-wclear]')) { orbWbSearch = ''; renderOrbPanel(); return; }
         if (t.closest('[data-orb-wback]')) { orbWbBinding = null; renderOrbPanel(); return; }
+        /* 世界书栏：展开某本书里的条目 / 从条目页返回 / 条目增删改 */
+        const wOpen = t.closest('[data-orb-wentries]');
+        if (wOpen) { orbWbOpenEntries(wOpen.dataset.orbWentries); return; }
+        if (t.closest('[data-orb-wback2]')) { orbWbCloseEntries(); renderOrbPanel(); return; }
+        if (t.closest('[data-orb-enerefresh]')) { orbWbEntriesFetch(orbWbEntriesBook); return; }
+        if (t.closest('[data-orb-eneclear]')) { orbWbEntrySearch = ''; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-enenew]')) { orbWbEntryOpen = 'new'; orbWbEntryDraft = null; renderOrbPanel(); return; }
+        /* ⚠️ 顺序要紧：行本身也是可点的（＝开关），而「✏ 编辑」按钮长在行**里面**，
+           所以编辑必须**先判**，否则点 ✏ 会被当成开关。 */
+        const enEdit = t.closest('[data-ssp-enedit]');
+        if (enEdit) {
+            const uid = enEdit.dataset.sspEnedit;
+            orbWbEntryOpen = (String(orbWbEntryOpen) === String(uid)) ? null : uid;
+            if (String(orbWbEntryOpen) === 'new') orbWbEntryOpen = null;
+            orbDlcOpen = (String(orbDlcOpen) === String(uid)) ? null : uid;
+            if (String(orbDlcOpen) === 'new') orbDlcOpen = null;
+            renderOrbPanel();
+            return;
+        }
+        const enToggle = t.closest('[data-ssp-entoggle]');
+        if (enToggle) {
+            const uid = parseInt(enToggle.dataset.sspEntoggle, 10);
+            const book = enToggle.dataset.sspBook || (orbTab === 'dlc' ? orbDlcBook() : orbWbEntriesBook);
+            const dlc = (orbTab === 'dlc');
+            orbEntryToggle(book, uid).then(on => {
+                if (on === null) return;
+                const list = dlc ? orbDlcEntries : orbWbEntries;
+                const hit = list.find(x => String(x.uid) === String(uid));
+                if (hit) hit.disable = !on;
+                toast((on ? '已打开' : '已关闭') + '：' + ((hit && hit.comment) || ('条目 ' + uid)), 'info');
+                if (orbOpenNow) renderOrbPanel();
+            });
+            return;
+        }
+        const enSave = t.closest('[data-ssp-ensave]');
+        if (enSave) {
+            const book = enSave.dataset.sspBook || '';
+            const raw = enSave.dataset.sspEnsave;
+            const isNew = (raw === '' || raw === 'undefined' || raw === 'null');
+            const uid = isNew ? null : parseInt(raw, 10);
+            const host = document.querySelector('[data-ssp-enform]');
+            const val = (f) => {
+                const el = host && host.querySelector('[data-ssp-enf="' + f + '"]');
+                if (!el) return undefined;
+                return (el.type === 'checkbox') ? Boolean(el.checked) : el.value;
+            };
+            const constant = val('constant');
+            const patch = {
+                comment: String(val('comment') || '').trim(),
+                content: String(val('content') || ''),
+                constant: constant !== false,
+                key: constant === false ? String(val('key') || '') : '',
+                order: val('order'), depth: val('depth'), probability: val('probability'),
+            };
+            if (!patch.comment) { toast('给这条起个标题吧', 'warning'); return; }
+            const done = (isNew)
+                ? orbEntryAdd(book, patch).then(e => { orbWbEntryOpen = null; orbDlcOpen = null; return e; })
+                : orbEntrySave(book, uid, patch).then(ok => { if (ok) { orbWbEntryOpen = null; orbDlcOpen = null; } return ok; });
+            done.then(() => {
+                toast(isNew ? '条目已创建' : '条目已保存', 'success');
+                if (orbTab === 'dlc') orbDlcFetch(); else orbWbEntriesFetch(book);
+            });
+            return;
+        }
+        const enDel = t.closest('[data-ssp-endel]');
+        if (enDel) {
+            const uid = parseInt(enDel.dataset.sspEndel, 10);
+            const book = enDel.dataset.sspBook || '';
+            const list = (orbTab === 'dlc') ? orbDlcEntries : orbWbEntries;
+            const hit = list.find(x => String(x.uid) === String(uid));
+            const nm = (hit && hit.comment) || ('条目 ' + uid);
+            getContext().callGenericPopup('删掉「' + esc(nm) + '」这一条？<br><i style="opacity:.6">删了就找不回来了（去酒馆世界书编辑器也看不到它了）。</i>',
+                getContext().POPUP_TYPE.CONFIRM, '', { okButton: '删掉', cancelButton: '算了' })
+                .then(r => {
+                    if (r !== getContext().POPUP_RESULT.AFFIRMATIVE) return;
+                    orbEntryDel(book, uid).then(ok => {
+                        if (!ok) return;
+                        toast('已删掉：' + nm, 'info');
+                        if (orbTab === 'dlc') orbDlcFetch(); else orbWbEntriesFetch(book);
+                    });
+                });
+            return;
+        }
+        if (t.closest('[data-ssp-encancel]')) {
+            orbWbEntryOpen = null; orbDlcOpen = null; orbWbEntryDraft = null; orbDlcDraft = null;
+            renderOrbPanel();
+            return;
+        }
+        /* DLC 栏：新建 / 刷新 / 清除搜索 / 默认状态开关 */
+        if (t.closest('[data-orb-dlcnew]')) { orbDlcOpen = 'new'; orbDlcDraft = null; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-dlcrefresh]')) { orbDlcFetch(); return; }
+        if (t.closest('[data-orb-dlcseed]')) { orbDlcAddSeed().then(() => orbDlcFetch()); return; }
+        if (t.closest('[data-orb-dlcclear]')) { orbDlcSearch = ''; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-dlcconst]')) {
+            getSettings().dlcConstant = Boolean(t.checked);
+            save();
+            toast(t.checked ? '新建条目默认：🔵 常驻' : '新建条目默认：🟢 关键词触发', 'info');
+            return;
+        }
         if (t.closest('[data-orb-wrestore]')) { orbWbRestoreCur(); renderOrbPanel(); return; }
         if (t.closest('[data-orb-wauto]')) {
             getSettings().worldAuto = Boolean(t.checked);
@@ -6377,6 +7095,10 @@ function bindOrb() {
         }
         const wToggle = t.closest('[data-orb-wtoggle]');
         if (wToggle) {
+            /* ⚠️ 行里那个「📖 展开条目」按钮长在这一行**里面**，而这一行本身也可点（绑定）。
+               处理器里 📖 的判断（wOpen）在更前面，所以点 📖 时根本走不到这里；
+               这里再兜一层：万一命中，也只处理 📖、不当成点行。 */
+            if (t.closest('[data-orb-wentries]')) { renderOrbPanel(); return; }
             /* 点书名＝改这张角色卡的绑定。干净版：改完让本聊天的生效列表**对齐这张卡**
                （绑上就启用、解绑就撤掉），一一对应，不留跟这张卡无关的书。 */
             const name = wToggle.dataset.orbWtoggle;
@@ -6400,9 +7122,11 @@ function bindOrb() {
         if (tabEl) {
             orbTab = tabEl.dataset.orbTab || 'notes'; orbEditing = null;
             orbWbBinding = null;
+            orbWbCloseEntries(true);
             renderOrbPanel();
             if (orbTab === 'chat') orbChatsFetch();            // 存档页：打开就拉一次列表
             if (orbTab === 'world') orbWorldRefresh();         // 世界书页：顺手刷一次清单
+            if (orbTab === 'dlc') orbDlcEnsure();              // DLC 页：按需拉那本书的条目
             return;
         }
         /* 番外页：清除搜索 */
@@ -6594,6 +7318,18 @@ if (globalThis.__SSP_TEST__) {
         orbWbCharKey, orbWbCurChar, orbWbChatId, orbWbChatKey, orbWbBinds, orbWbApplied, orbWbRecord,
         orbWbBound, orbWbSetBound, orbWbToggleBound, orbWbCharNames, orbWbIsBound, orbWbAuto, orbWbState, orbWbTargetChar,
         orbWorldList, orbWbActive, orbWbEnabled, orbWbEnabledSet, orbWbSelApply, orbWbSyncChar,
+        orbEntryIcon, orbEntryStateText, orbEntryKeys, orbEntryLen, orbEntriesOf, orbEntryAdd, orbEntrySave,
+        orbEntryToggle, orbEntryDel, orbEntryRowHTML, orbEntryFormHTML, orbEntryListHTML, orbEntryFormCascade,
+        orbDlcBook, orbDlcConstantDefault, orbDlcEnsureBook, orbDlcFirstRun, orbDlcAddSeed, orbDlcFetch, orbDlcEnsure, orbDlcHTML, orbDlcRowsHTML,
+        DLC_SEED, orbMakeEntry, orbEntryAddMany, orbEntriesCount,
+        orbWbOpenEntries, orbWbCloseEntries, orbWbEntriesFetch, orbWbEntriesHTML,
+        get orbWbEntriesBook() { return orbWbEntriesBook; }, set orbWbEntriesBook(v) { orbWbEntriesBook = v; },
+        get orbWbEntries() { return orbWbEntries; }, set orbWbEntries(v) { orbWbEntries = v; },
+        get orbWbEntryOpen() { return orbWbEntryOpen; }, set orbWbEntryOpen(v) { orbWbEntryOpen = v; },
+        get orbWbEntriesLoaded() { return orbWbEntriesLoaded; }, set orbWbEntriesLoaded(v) { orbWbEntriesLoaded = v; },
+        get orbDlcEntries() { return orbDlcEntries; }, set orbDlcEntries(v) { orbDlcEntries = v; },
+        get orbDlcOpen() { return orbDlcOpen; }, set orbDlcOpen(v) { orbDlcOpen = v; },
+        get orbDlcLoaded() { return orbDlcLoaded; }, set orbDlcLoaded(v) { orbDlcLoaded = v; },
         orbWbApplyForChar, orbWbCleanup, orbWbRestoreCur, orbWbOnChatChanged,
         orbWorldRefresh, orbWorldHTML, orbWorldRowsHTML, orbWorldPickerHTML,
         orbOnCharChanged, protectSkinAfterThemeChange, cardImportantify,
