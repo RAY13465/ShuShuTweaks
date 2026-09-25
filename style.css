@@ -742,8 +742,13 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 /* ---------- 世界书条目 / DLC 条目（两处共用一套长相）----------
    状态点照抄酒馆自己那套语义：🔵常驻 🟢关键词触发 🔗向量化 ❌已关闭。
    交互（用户定的）：**点整行＝开关这一条**；✏＝编辑；🗑＝删（只 DLC 栏有）。 */
-.ssp-en-row { align-items: center; }
+.ssp-en-row { align-items: center; touch-action: manipulation; }
 .ssp-en-row.off { opacity: .5; }
+/* 点了会立刻有反应的行/可点块，统一声明 touch-action: manipulation：
+   ① 干掉浏览器"等一等看是不是双击"的那 ~300ms 延迟；
+   ② 防某些内置浏览器（微信 WKWebView 对 user-scalable=no 打折扣）的双击缩放。
+   ⚠️ 这里**故意用 manipulation 而不是 none** —— none 会把这一行的纵向滚动也一起关掉。 */
+.ssp-orb-wrow, .ssp-en-row, .ssp-wb-cat, .ssp-pbtn { touch-action: manipulation; }
 .ssp-orb-state { flex: 0 0 auto; font-size: 13px; line-height: 1.5; user-select: none; }
 .ssp-en-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ssp-en-main b { font-size: 12.5px; font-weight: 700; word-break: break-word; }

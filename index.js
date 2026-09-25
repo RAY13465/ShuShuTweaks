@@ -4169,7 +4169,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.5';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.6';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5597,6 +5597,7 @@ async function orbDlcFetch() {
 var orbDlcLoadedBook = '';
 function orbDlcEnsure() {
     const book = orbDlcBook();
+    bindWbWatch();                            // 进 DLC 页也重试一次
     if (orbDlcLoaded && orbDlcLoadedBook === book) return;
     orbDlcLoadedBook = book;
     orbDlcLoaded = false;
@@ -5802,6 +5803,7 @@ function orbWbAuto() {
 /** 切到这一页时刷一次世界书清单（新建/导入的世界书要能看见） */
 function orbWorldRefresh() {
     orbWorldList();
+    bindWbWatch();                            // 进世界书页也重试一次（首次拿到上下文后就能挂上）
     /* 下拉选项是酒馆自己填的；酒馆那边还没填过就让它去拿一次（异步，回来再重画） */
     const sel = document.getElementById('world_info');
     const isEmpty = !sel || (sel.options || []).length <= 1;
@@ -6802,6 +6804,7 @@ function orbScrollIntoView(el) {
 
 function openOrb() {
     mountOrb();
+    bindWbWatch();                            // 顺便重试挂「世界书被改了」的监听（首次常拿不到上下文）
     /* 球被收回（orbOn=false）时，从「扩展程序」栏开面板不该把球带出来 */
     try { const bb = document.getElementById('ssp_orb'); if (bb && getSettings().orbOn === false) bb.style.display = 'none'; } catch (e) { }
     const root = document.getElementById('ssp_orb_root');
@@ -7046,6 +7049,59 @@ function orbOnCharChanged() {
     if (now) [400, 1200].forEach(ms => setTimeout(() => { try { orbWbOnChatChanged(); } catch (e) { } }, ms));
 }
 
+/** 挂「世界书被改了」的监听 + 回到页面时的兜底重读。
+    修的是这个毛病：在**酒馆自己的世界书编辑器**里改完，面板如果正停在那本书的条目页，
+    原先要"切到别的书再切回来"（＝重新 fetch）才看到新内容。
+
+    两条路一起上：
+    ① 事件：酒馆保存时会 emit WORLDINFO_UPDATED（约 1 秒防抖）。
+       ⚠️ 实测这套无头环境里**收不到**（同一个 eventSource、探针监听能收到、扩展的收不到），
+       所以不能只靠它 —— 留着它没坏处，真机上多半是好的。
+    ② 兜底：窗口/页面重新获得焦点时重读。用户在酒馆原生编辑器里改完再回到面板，
+       一定会经过这一步，比事件更可靠。
+
+    ⚠️ 挂载必须能**重试**：扩展初始化比酒馆上下文早得多，第一次调用时 getContext() 常是 null，
+    所以除了绑定时试，打开面板 / 进世界书页 / 进 DLC 页时都会再试一次。 */
+function bindWbWatch() {
+    bindWbFocusWatch();
+    if (bindWbWatch.done) return true;
+    try {
+        const c = getContext() || {};
+        const es = c.eventSource, et = c.eventTypes;
+        const evUpd = et && (et.WORLDINFO_UPDATED || 'worldinfo_updated');
+        if (!es || typeof es.on !== 'function' || !evUpd) return false;   // 还没到位 → 下次再试
+        bindWbWatch.done = true;
+        es.on(evUpd, () => { orbWbReread('event'); });
+        return true;
+    } catch (e) { return false; }
+}
+
+/** 面板正停在「某本书的条目页」或「DLC 页」时，重新读一遍当前这本。
+    why 参数只用于调试，方便日后查是哪条路生效的。 */
+function orbWbReread(why) {
+    try {
+        if (!orbOpenNow) return false;
+        if (orbTab === 'dlc') { orbDlcFetch(); return true; }
+        if (orbTab !== 'world') return false;
+        if (orbWbEntriesBook) { orbWbEntriesFetch(orbWbEntriesBook); return true; }
+        renderOrbPanel();            // 书单页：也许刚新建/删了书
+        return true;
+    } catch (e) { return false; }
+}
+
+/** 兜底：窗口/标签页重新获得焦点时重读（用户去酒馆原生编辑器改完，回来就该看到新的） */
+function bindWbFocusWatch() {
+    if (bindWbFocusWatch.done) return true;
+    bindWbFocusWatch.done = true;
+    try {
+        globalThis.addEventListener?.('focus', () => { orbWbReread('focus'); });
+        document.addEventListener?.('visibilitychange', () => {
+            if (document.visibilityState === 'visible') orbWbReread('visible');
+        });
+    } catch (e) { }
+    return true;
+}
+
 function bindOrb() {
     if (bindOrb.done) return false;
     bindOrb.done = true;
@@ -7108,6 +7164,10 @@ function bindOrb() {
             bindOrb.eventsBound = true;
         }
     } catch (e) { /* 事件拿不到就退回「点击后重画」 */ }
+
+    /* 世界书被改了（谁改的都算）→ 面板开着就跟着更新。真正的挂载在 ensureWbWatch() 里，
+       这里只是尽早试一次（那时酒馆上下文常常还没到位，所以它自己会重试）。 */
+    bindWbWatch();
 
     /* 兜底：酒馆把自己列表的选中状态改了（.selected 变动），面板开着就跟着刷 */
     try {
@@ -7828,6 +7888,7 @@ if (globalThis.__SSP_TEST__) {
         orbNoteCatNames, orbNoteCatOf, orbNoteCatCount, orbNoteCatAdd, orbNoteCatDel, orbNoteCatRename, orbNoteCatSet,
         orbNotes, orbNotesHTML, orbNoteRowsHTML, orbSaveNote, orbDelNote, orbNoteMatch,
         orbCatBarHTML, orbCatPickHTML, orbCatNewHTML, orbCatClearPickers, orbAskCatName,
+        bindWbWatch, orbWbReread,
         get orbNCat() { return orbNCat; }, set orbNCat(v) { orbNCat = v; },
         get orbNCatEdit() { return orbNCatEdit; }, set orbNCatEdit(v) { orbNCatEdit = v; },
         get orbNCatPick() { return orbNCatPick; }, set orbNCatPick(v) { orbNCatPick = v; },
