@@ -578,6 +578,19 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-orb-note-t { font-size: 10.5px; opacity: .45; }
 .ssp-orb-note-b { font-size: 11.5px; line-height: 1.6; opacity: .72; margin: 4px 0 8px; white-space: pre-wrap; word-break: break-word; }
 .ssp-orb-note-a { display: flex; gap: 6px; flex-wrap: wrap; }
+/* 番外的分类：标题旁的小标签 + 操作排里的「分类」按钮 + 新建时归入提示 */
+.ssp-orb-note-cat {
+    flex: 0 0 auto; font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+    background: rgba(255, 255, 255, .18); white-space: nowrap; opacity: .9;
+}
+.ssp-note-catbtn.has { opacity: 1; }
+.ssp-orb-nhint { font-size: 10.5px; opacity: .6; margin-right: auto; }
+.ssp-orb-nnew .ssp-pbtn { margin-left: auto; }
+.ssp-orb-nnew { display: flex; align-items: center; gap: 8px; padding: 0 0 8px; }
+/* 挑分类时，番外卡片和它下面的抽屉连成一块 */
+.ssp-orb-notewrap.picking .ssp-orb-note { border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; }
+.ssp-orb-notewrap.picking { margin-bottom: 8px; }
+.ssp-orb-catpick .ssp-catnewin { flex: 1 1 140px; min-width: 0; }
 .ssp-orb-foot { display: flex; justify-content: center; padding: 6px 0 2px; }
 .ssp-orb-edit-a { display: flex; gap: 7px; margin-top: 9px; flex-wrap: wrap; }
 
