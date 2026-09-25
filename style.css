@@ -756,6 +756,16 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-en-edit { flex: 0 0 auto; padding: 3px 7px; }
 .ssp-wb-open { flex: 0 0 auto; padding: 3px 6px; font-size: 11px; }
 .ssp-en-del { flex: 0 0 auto; padding: 3px 6px; }
+/* 就地确认删除（不用酒馆弹窗 —— 那个构建里 callGenericPopup 的容器不显示） */
+.ssp-en-row.confirming { border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; }
+.ssp-en-del.armed { background: rgba(255, 90, 90, .28); }
+.ssp-en-confirm {
+    display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+    padding: 7px 10px; margin-bottom: 8px;
+    border: 1px solid rgba(236, 65, 65, .55); border-top: none;
+    border-radius: 0 0 9px 9px; background: rgba(236, 65, 65, .1);
+}
+.ssp-en-confirm-t { font-size: 11.5px; flex: 1 1 auto; min-width: 0; }
 /* 编辑表单：整行铺开 */
 .ssp-en-form {
     display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px;

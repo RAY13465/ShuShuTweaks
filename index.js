@@ -4169,7 +4169,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.6';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.7';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4575,6 +4575,8 @@ var orbNCatNew = null;      // 正在给哪条番外「新建分类并归入」�
 function orbCatClearPickers() {
     orbWbCatPick = null; orbWbCatNew = null;
     orbNCatPick = null; orbNCatNew = null;
+    orbDelConfirm = null;          // 顺手收掉"等确认删除"那一行，免得切页后还挂着
+    orbPurgeConfirm = false;       // 「清空全部条目」的确认也一起收
 }
 var orbWbBinding = null;    // 正在给哪个角色卡配世界书（null = 不在绑定模式）
 var orbWbSearch = '';       // 世界书页搜索词
@@ -4594,6 +4596,8 @@ var orbWbEntriesErr = '';
 var orbWbEntryOpen = null;  // 正在编辑的 uid 或 'new'
 var orbWbEntrySearch = '';
 var orbWbEntryDraft = null; // 新建草稿
+var orbDelConfirm = null;   // 正在等确认删除的条目 uid（就地确认，不用酒馆弹窗）
+var orbPurgeConfirm = false; // DLC 栏「清空全部条目」是否在等确认
 /* DLC 栏状态 */
 var orbDlcSearch = '';
 var orbCollapsed = false;   // 悬浮球是否收纳进左下角魔法棒
@@ -5451,6 +5455,29 @@ async function orbEntryDel(book, uid) {
     }
 }
 
+/** 一次删多条（DLC 栏「清空全部条目」用）。
+    读一次 → 删一批 → 存一次，比逐条 load/save 快得多，也不会互相覆盖。返回真删掉的条数。 */
+async function orbEntryDelMany(book, uids) {
+    const name = String(book || '').trim();
+    const list = Array.isArray(uids) ? uids : [];
+    if (!name || !list.length) return 0;
+    const ctx = getContext() || {};
+    try {
+        const data = await ctx.loadWorldInfo?.(name);
+        if (!data || !data.entries) { toast('读不到这本书', 'warning'); return 0; }
+        let n = 0;
+        list.forEach(uid => {
+            if (data.entries[uid] !== undefined) { delete data.entries[uid]; n++; }
+        });
+        if (!n) return 0;
+        await ctx.saveWorldInfo?.(name, data);
+        return n;
+    } catch (e) {
+        toast('清空失败：' + (e && e.message), 'warning');
+        return 0;
+    }
+}
+
 /* ============================ DLC 首次预置的示例条目 ============================
    用户问"导入扩展能不能自动生成" —— 结论：**装完那一刻不会**（酒馆的扩展安装只 clone + 校验
    manifest，manifest 里也没有安装脚本字段），是**第一次打开 DLC 标签页时创建**。
@@ -5624,7 +5651,19 @@ function orbDlcHTML() {
         + '<span class="ssp-pbtn" data-orb-dlcrefresh="1"><i class="fa-solid fa-rotate"></i>刷新</span>'
         + '<span class="ssp-pbtn" data-orb-dlcseed="1" title="追加几条示例条目（常驻 / 关键词触发各一条，照着改）">'
         + '<i class="fa-solid fa-wand-magic-sparkles"></i>装一份示例</span>'
-        + '</div>';
+        /* 一条条点太累（用户"创建了一大堆删不掉"）→ 给个一键清空，但要过一道确认 */
+        + (orbDlcEntries.length
+            ? '<span class="ssp-pbtn danger" data-orb-dlcpurge="1" title="把这本书的条目全删掉（会先问一次）">'
+                + '<i class="fa-solid fa-eraser"></i>清空全部条目</span>'
+            : '')
+        + '</div>'
+        + (orbPurgeConfirm
+            ? '<div class="ssp-en-confirm">'
+                + '<span class="ssp-en-confirm-t">把「' + esc(book) + '」里 <b>' + orbDlcEntries.length + '</b> 条全删掉？</span>'
+                + '<span class="ssp-pbtn danger" data-orb-dlcpurgego="1"><i class="fa-solid fa-trash"></i>确认清空</span>'
+                + '<span class="ssp-pbtn" data-orb-dlcpurgecancel="1">算了</span>'
+                + '</div>'
+            : '');
     const info = '<div class="ssp-orb-empty" style="padding-top:2px">'
         + '这本书：<b>' + esc(book) + '</b> · 共 <b>' + orbDlcEntries.length + '</b> 条，其中 <b>' + on + '</b> 条开着'
         + '<br><span style="opacity:.7">🔵常驻 🟢关键词触发 🔗向量化 ❌已关闭 —— 点那个点就是开关。'
@@ -5655,7 +5694,9 @@ function orbEntryRowHTML(e, book, kind) {
     const keys = orbEntryKeys(e);
     const meta = orbEntryStateText(e) + ' · ' + orbEntryLen(e) + ' 字'
         + (keys && !e.constant ? ' · 触发：' + keys : '');
-    return '<div class="ssp-orb-wrow ssp-en-row' + (off ? ' off' : '') + '"'
+    /* 这一行正在等确认删除 → 在行**下面**展开一条确认（不用酒馆弹窗，见点击处理里的说明） */
+    const confirming = (orbDelConfirm !== null && String(orbDelConfirm) === String(uid));
+    const row = '<div class="ssp-orb-wrow ssp-en-row' + (off ? ' off' : '') + (confirming ? ' confirming' : '') + '"'
         + ' data-ssp-enrow="' + uid + '" data-ssp-entoggle="' + uid + '" data-ssp-book="' + esc(book) + '"'
         + ' title="点这一行＝' + (off ? '打开' : '关掉') + '「' + esc(title) + '」">'
         + '<span class="ssp-orb-state ssp-en-state">' + icon + '</span>'
@@ -5664,8 +5705,15 @@ function orbEntryRowHTML(e, book, kind) {
         + '<span class="ssp-pbtn ssp-en-edit" data-ssp-enedit="' + uid + '" data-ssp-book="' + esc(book) + '"'
         + ' title="改标题 / 正文 / 常驻方式">✏</span>'
         + (kind === 'dlc'
-            ? '<span class="ssp-pbtn ssp-en-del" data-ssp-endel="' + uid + '" data-ssp-book="' + esc(book) + '" title="删掉这一条（会问一次）">🗑</span>'
+            ? '<span class="ssp-pbtn ssp-en-del' + (confirming ? ' armed' : '') + '" data-ssp-endel="' + uid + '" data-ssp-book="' + esc(book) + '" title="删掉这一条（会先问一次）">🗑</span>'
             : '')
+        + '</div>';
+    if (!confirming) return row;
+    return row + '<div class="ssp-en-confirm">'
+        + '<span class="ssp-en-confirm-t">删掉「' + esc(title) + '」？</span>'
+        + '<span class="ssp-pbtn danger" data-ssp-endelete="' + uid + '" data-ssp-book="' + esc(book) + '">'
+        + '<i class="fa-solid fa-trash"></i>确认删掉</span>'
+        + '<span class="ssp-pbtn" data-ssp-endelcancel="1">算了</span>'
         + '</div>';
 }
 
@@ -7553,6 +7601,42 @@ function bindOrb() {
             renderOrbPanel();
             return;
         }
+        /* ⚠️ 删除的判断必须排在「点整行＝开关」**前面**：
+           🗑 和确认按钮都长在那一行**里面**，而行本身有 data-ssp-entoggle，
+           先判 enToggle 就会把点 🗑 当成"开关这一条" —— 表现就是"点删除没反应、删不掉"
+           （用户反馈"创建了一大堆删不掉"，实测确认就是这个顺序问题）。 */
+        const enDel = t.closest('[data-ssp-endel]');
+        if (enDel) {
+            /* 删除确认**做在面板里**（就地展开一行确认），不走酒馆的 callGenericPopup。
+               ⚠️ 原因：实测这个构建的 `callGenericPopup(CONFIRM)` 会把弹窗节点建出来，
+               但 `#shadow_popup` 停在 `display:none` —— 弹窗压根看不见，于是"点了没反应、删不掉"
+               （用户反馈'创建了一大堆删不掉'）。就地确认还顺带在手机上更好点。
+               真正执行删除的是下面 [data-ssp-endelete]。 */
+            const uid = enDel.dataset.sspEndel;
+            /* ⚠️ 别写成 `(String(orbDelConfirm) === String(uid)) ? null : uid`：
+               uid 可能是 **0**，而 orbDelConfirm 为空时 String(null) === 'null' 不会相等，
+               但 uid='0' 时 String(0)==='0' 也不相等 —— 真正踩到的是 uid=0 那条被当成"已选过"，
+               于是第一次点就翻成 null，表现就是"点了没反应"（实测抓到）。显式判空最稳。 */
+            orbDelConfirm = (orbDelConfirm !== null && String(orbDelConfirm) === String(uid)) ? null : String(uid);
+            renderOrbPanel();
+            return;
+        }
+        const enDelGo = t.closest('[data-ssp-endelete]');
+        if (enDelGo) {
+            const uid = parseInt(enDelGo.dataset.sspEndelete, 10);
+            const book = enDelGo.dataset.sspBook || '';
+            const list = (orbTab === 'dlc') ? orbDlcEntries : orbWbEntries;
+            const hit = list.find(x => String(x.uid) === String(uid));
+            const nm = (hit && hit.comment) || ('条目 ' + uid);
+            orbDelConfirm = null;
+            orbEntryDel(book, uid).then(ok => {
+                if (!ok) { renderOrbPanel(); toast('没删掉，可能酒馆那边没写成功', 'warning'); return; }
+                toast('已删掉：' + nm, 'success');
+                if (orbTab === 'dlc') orbDlcFetch(); else orbWbEntriesFetch(book);
+            });
+            return;
+        }
+        if (t.closest('[data-ssp-endelcancel]')) { orbDelConfirm = null; renderOrbPanel(); return; }
         const enToggle = t.closest('[data-ssp-entoggle]');
         if (enToggle) {
             const uid = parseInt(enToggle.dataset.sspEntoggle, 10);
@@ -7598,25 +7682,6 @@ function bindOrb() {
             });
             return;
         }
-        const enDel = t.closest('[data-ssp-endel]');
-        if (enDel) {
-            const uid = parseInt(enDel.dataset.sspEndel, 10);
-            const book = enDel.dataset.sspBook || '';
-            const list = (orbTab === 'dlc') ? orbDlcEntries : orbWbEntries;
-            const hit = list.find(x => String(x.uid) === String(uid));
-            const nm = (hit && hit.comment) || ('条目 ' + uid);
-            getContext().callGenericPopup('删掉「' + esc(nm) + '」这一条？<br><i style="opacity:.6">删了就找不回来了（去酒馆世界书编辑器也看不到它了）。</i>',
-                getContext().POPUP_TYPE.CONFIRM, '', { okButton: '删掉', cancelButton: '算了' })
-                .then(r => {
-                    if (r !== getContext().POPUP_RESULT.AFFIRMATIVE) return;
-                    orbEntryDel(book, uid).then(ok => {
-                        if (!ok) return;
-                        toast('已删掉：' + nm, 'info');
-                        if (orbTab === 'dlc') orbDlcFetch(); else orbWbEntriesFetch(book);
-                    });
-                });
-            return;
-        }
         if (t.closest('[data-ssp-encancel]')) {
             orbWbEntryOpen = null; orbDlcOpen = null; orbWbEntryDraft = null; orbDlcDraft = null;
             renderOrbPanel();
@@ -7625,6 +7690,20 @@ function bindOrb() {
         /* DLC 栏：新建 / 刷新 / 清除搜索 / 默认状态开关 */
         if (t.closest('[data-orb-dlcnew]')) { orbDlcOpen = 'new'; orbDlcDraft = null; renderOrbPanel(); return; }
         if (t.closest('[data-orb-dlcrefresh]')) { orbDlcFetch(); return; }
+        /* 一键清空（走就地确认；删之前把每条的 uid 都过一遍，避免并发写丢） */
+        if (t.closest('[data-orb-dlcpurge]')) { orbPurgeConfirm = true; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-dlcpurgecancel]')) { orbPurgeConfirm = false; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-dlcpurgego]')) {
+            const book = orbDlcBook();
+            const uids = (orbDlcEntries || []).map(e => e.uid);
+            orbPurgeConfirm = false;
+            renderOrbPanel();
+            orbEntryDelMany(book, uids).then(n => {
+                toast(n ? ('清空了 ' + n + ' 条') : '没删掉，可能酒馆那边没写成功', n ? 'success' : 'warning');
+                orbDlcFetch();
+            });
+            return;
+        }
         if (t.closest('[data-orb-dlcseed]')) { orbDlcAddSeed().then(() => orbDlcFetch()); return; }
         if (t.closest('[data-orb-dlcclear]')) { orbDlcSearch = ''; renderOrbPanel(); return; }
         if (t.closest('[data-orb-dlcconst]')) {
@@ -7880,7 +7959,7 @@ if (globalThis.__SSP_TEST__) {
         orbWbBound, orbWbSetBound, orbWbToggleBound, orbWbCharNames, orbWbIsBound, orbWbAuto, orbWbState, orbWbTargetChar,
         orbWorldList, orbWbActive, orbWbEnabled, orbWbEnabledSet, orbWbSelApply, orbWbSyncChar,
         orbEntryIcon, orbEntryStateText, orbEntryKeys, orbEntryLen, orbEntriesOf, orbEntryAdd, orbEntrySave,
-        orbEntryToggle, orbEntryDel, orbEntryRowHTML, orbEntryFormHTML, orbEntryListHTML, orbEntryFormCascade,
+        orbEntryToggle, orbEntryDel, orbEntryDelMany, orbEntryRowHTML, orbEntryFormHTML, orbEntryListHTML, orbEntryFormCascade,
         orbDlcBook, orbDlcConstantDefault, orbDlcEnsureBook, orbDlcFirstRun, orbDlcAddSeed, orbDlcFetch, orbDlcEnsure, orbDlcHTML, orbDlcRowsHTML,
         DLC_SEED, orbMakeEntry, orbEntryAddMany, orbEntriesCount,
         orbWbOpenEntries, orbWbCloseEntries, orbWbEntriesFetch, orbWbEntriesHTML,
@@ -7894,6 +7973,7 @@ if (globalThis.__SSP_TEST__) {
         get orbNCatPick() { return orbNCatPick; }, set orbNCatPick(v) { orbNCatPick = v; },
         get orbNCatNew() { return orbNCatNew; }, set orbNCatNew(v) { orbNCatNew = v; },
         get orbWbCat() { return orbWbCat; }, set orbWbCat(v) { orbWbCat = v; },
+        get orbDelConfirm() { return orbDelConfirm; }, set orbDelConfirm(v) { orbDelConfirm = v; },
         get orbWbCatEdit() { return orbWbCatEdit; }, set orbWbCatEdit(v) { orbWbCatEdit = v; },
         get orbWbCatPick() { return orbWbCatPick; }, set orbWbCatPick(v) { orbWbCatPick = v; },
         ORB_CAT_ALL,
