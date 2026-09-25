@@ -766,6 +766,12 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     border-radius: 0 0 9px 9px; background: rgba(236, 65, 65, .1);
 }
 .ssp-en-confirm-t { font-size: 11.5px; flex: 1 1 auto; min-width: 0; }
+/* 美化「编辑口」：CSS 输入框（等宽、能拉高、手机上也别被尺寸压扁） */
+.ssp-theme-css {
+    width: 100%; box-sizing: border-box; min-height: 190px; resize: vertical;
+    font-family: Consolas, Monaco, monospace; font-size: 11.5px; line-height: 1.55;
+    white-space: pre; overflow-wrap: normal; overflow-x: auto;
+}
 /* 编辑表单：整行铺开 */
 .ssp-en-form {
     display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px;
