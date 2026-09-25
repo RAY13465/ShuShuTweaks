@@ -4169,7 +4169,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.1';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.2';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6431,13 +6431,32 @@ function orbPanelHTML() {
         + '</div>';
 }
 
-/** 只换面板**内部**（绝不重画容器，否则球会被一起换掉） */
+/** 只换面板**内部**（绝不重画容器，否则球会被一起换掉）
+    ⚠️ 会还原滚动位置：整块 innerHTML 一换，滚动就回顶了 ——
+    开关一条世界书 / 条目、切个绑定，列表一长每次都被弹回顶部，很烦（用户反馈）。
+    滚动容器是 .ssp-orb-body；这里记它、重画后写回。 */
 function renderOrbPanel() {
     const panel = document.getElementById('ssp_orb_panel');
     if (!panel) return false;
+    const oldBody = panel.querySelector('.ssp-orb-body');
+    const keepTop = oldBody ? oldBody.scrollTop : 0;
     panel.innerHTML = orbPanelHTML();
+    const newBody = panel.querySelector('.ssp-orb-body');
+    if (newBody) {
+        const max = Math.max(0, (newBody.scrollHeight || 0) - (newBody.clientHeight || 0));
+        newBody.scrollTop = Math.min(keepTop, max);
+    }
     refreshOrbBadge();
     return true;
+}
+
+/** 把元素滚进视野（展开编辑表单时用，别让输入框躲在屏幕外） */
+function orbScrollIntoView(el) {
+    try {
+        if (!el || !el.scrollIntoView) return false;
+        el.scrollIntoView({ block: 'nearest' });
+        return true;
+    } catch (e) { return false; }
 }
 
 function openOrb() {
@@ -7362,6 +7381,7 @@ if (globalThis.__SSP_TEST__) {
         get orbDlcLoaded() { return orbDlcLoaded; }, set orbDlcLoaded(v) { orbDlcLoaded = v; },
         orbWbApplyForChar, orbWbCleanup, orbWbRestoreCur, orbWbOnChatChanged,
         orbWorldRefresh, orbWorldHTML, orbWorldRowsHTML, orbWorldPickerHTML,
+        renderOrbPanel, orbPanelHTML, orbScrollIntoView,
         orbOnCharChanged, protectSkinAfterThemeChange, cardImportantify,
         get orbLastCharId() { return orbLastCharId; }, set orbLastCharId(v) { orbLastCharId = v; },
         get orbWbBinding() { return orbWbBinding; }, set orbWbBinding(v) { orbWbBinding = v; },
