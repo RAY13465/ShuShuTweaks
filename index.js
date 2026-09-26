@@ -377,7 +377,12 @@ const CARD_STYLES = {
   clip-path:inset(0 0 calc(100% - var(--pv-vis)) 0);
   margin-top:calc(var(--pv-gap,6px) - 6px - var(--pv-h,78px) * var(--pv-overlay,20) / 100); border-radius:var(--pv-radius,14px);
   transition:transform .25s ease, margin .25s ease, clip-path .2s ease; }
-#rm_print_characters_block .character_select:first-child{ margin-top:0; }
+/* 第一张卡不许吃这个负边距 —— 否则它会被顶到列表可视区外面，叠压程度越大越看不见
+   （用户反馈的"叠层相册第一张卡被压得差不多没了"就是这个）。
+   ⚠️ 不能用 :first-child：列表里第一张卡前面还可能有分组 / 文件夹这类同辈元素
+   （.group_select / .bogus_folder_select 跟 .character_select 是并列的），
+   :first-child 根本不命中它。这里用「类内第一张」＝前面没有任何 .character_select 同辈。 */
+#rm_print_characters_block .character_select:not(.character_select ~ .character_select){ margin-top:0; }
 #rm_print_characters_block .character_select:hover{ background:transparent; transform:translateX(8px); z-index:9; clip-path:none; }
 /* 图片：上实下虚，淡出正好收在裁剪线上 */
 #rm_print_characters_block .character_select .avatar{ position:absolute; inset:0; width:100%; height:100%; border-radius:inherit;
@@ -4174,7 +4179,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.11';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.12';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
