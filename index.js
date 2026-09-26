@@ -2741,7 +2741,7 @@ function switchCardStyle(next) {
        而它们把 --Radius 设成 0px —— `*` 会把角色卡也扫进去，于是**卡片圆角被抹平**
        （表现为"切到某些美化后我的角色卡美化就不对了"）。
        生成后统一加 !important 比逐条去改模板稳（模板以后加新块也不会漏）。 */
-function cardImportantify(css) {
+function cardImportantify(css, isStudent) {
     let out = String(css || '')
         .replace(/(border-radius\s*:\s*var\(--pv-radius[^;)]*\))(?!\s*!important)/g, '$1 !important')
         .replace(/(margin(?:-bottom|-top)?\s*:\s*[^;{}]*var\(--pv-gap[^;)]*\)(?:[^;{}]*)?)(?!\s*!important)/g, '$1 !important')
@@ -2756,8 +2756,13 @@ function cardImportantify(css) {
          所以要 color + image 一起锁：纸白就是纸白，不跟美化走（用户明确要的"写死"）。
          确认过：8 种卡片样式没有任何一种靠 .character_select 的 background-image
          （歌单行的渐变画在列表容器上），所以 image:none 不会连累别的样式。
-         hover 一起写，免得鼠标划过又变回主题色。 */
-    if (/--id-paper/.test(out)) {
+         hover 一起写，免得鼠标划过又变回主题色。
+       ⚠️ 开关必须看「当前样式是不是学生证」，不能拿 CSS 里有没有 --id-paper 来判断：
+          --id-* 那一串是 cardVarsCSS() 对**所有样式**都会输出的，
+          按它判断等于给 8 种样式全套上白纸底 ——
+          遮罩渐隐透出来的底色就成了白的（用户反馈的「所有图的渐隐都变成白色渐隐」就是这个）。
+          2026-09-26 修正：改成显式传样式标记，纸底只跟学生证走。 */
+    if (isStudent) {
         out += '\n/* 纸底兜底（见 cardImportantify 注释）：color + image 一起锁死 */\n'
             + '#rm_print_characters_block .character_select, #rm_print_characters_block .character_select:hover{'
             + 'background-color:var(--id-paper,#f6f6f8) !important; background-image:none !important;}\n'
@@ -2808,7 +2813,7 @@ function applyCardStyle() {
         hdCardAvatars(false);
         return { style: 'none', hd: 0, css: 0 };
     }
-    const css = '/* 鼠鼠小助手 · 角色卡样式：' + def.name + ' */\n' + cardImportantify(cardAssembleCSS(c));
+    const css = '/* 鼠鼠小助手 · 角色卡样式：' + def.name + ' */\n' + cardImportantify(cardAssembleCSS(c), c.style === 'student');
     let node = el;
     if (!node) {
         node = document.createElement('style');
@@ -4169,7 +4174,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.10';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.11';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
