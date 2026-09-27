@@ -4255,7 +4255,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.21';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.22';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -7384,6 +7384,7 @@ async function orbImpRestore(skipPrep) {
 
     /* ④ 聊天记录：chats/<角色名>/<文件>.jsonl → /api/chats/import（要先找到对应的角色文件名） */
     if (want.indexOf('chats') >= 0) {
+        let chatRestored = 0;
         const list = names.filter(n => new RegExp('^' + orbImpRe(root) + 'chats/[^/]+/[^/]+$').test(n) && !Z.files[n].dir);
         for (const n of list) {
             const parts = n.split('/'); const f = parts.pop(); const dir = parts.pop();
@@ -7411,12 +7412,20 @@ async function orbImpRestore(skipPrep) {
                     throw new Error('HTTP ' + r.status + ' ' + String(t).slice(0, 70));
                 }
                 res.ok += 1;
+                chatRestored += 1;
             } catch (e) { fail('聊天 ' + f + '：' + ((e && e.message) || e)); }
         }
     }
 
-    /* ⑤ 世界书 */
-    if (want.indexOf('worlds') >= 0) {
+    /* ⚠️ 聊天恢复是**带 force 覆盖写文件**的 —— 酒馆保存时会拿"客户端内存里的完整性哈希"
+       跟磁盘比（chats.js 的 trySaveChat），文件被外部重写过就会**拒绝保存**
+       （表现：一直弹"聊天无法保存"）。所以这里明确提醒刷新一次，让酒馆重新读盘对齐。
+       （我自己测导入时踩过：那份开着的老会话之后每次保存都被拒。） */
+    if (chatRestored > 0) {
+        res.detail.push('聊天记录已恢复：**请刷新一次页面**（酒馆的完整性校验要对齐，否则会一直提示存不上）');
+    }
+
+    /* ⑤ 世界书 */    if (want.indexOf('worlds') >= 0) {
         for (const n of filesIn('worlds/')) {
             const nm = n.split('/').pop().replace(/\.json$/i, '');
             say('世界书：' + nm);
@@ -7601,8 +7610,7 @@ async function orbImpRestore(skipPrep) {
             });
             if (!r.ok) throw new Error('HTTP ' + r.status);
             res.ok += 1;
-            res.detail.unshift('已合并：' + merged.join('、') + '（刷新页面生效）');
-        } catch (e) { fail('扩展数据：' + ((e && e.message) || e)); }
+            res.detail.unshift('已合并：' + merged.join('、') + '（刷新页面生效）');        } catch (e) { fail('扩展数据：' + ((e && e.message) || e)); }
     }
 
     orbImpResult = res;
