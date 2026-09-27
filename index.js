@@ -4255,7 +4255,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.18';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.19';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -7151,6 +7151,7 @@ var orbImpLine = '';
 var orbImpResult = null;     // { ok, fail, skip, detail:[] }
 var orbImpErr = '';
 var orbImpFile = '';
+var orbPersonaDel = null;    // 正在等确认删除哪个面具（就地确认，不用酒馆弹窗）
 
 const ORB_IMP_CATS = [
     { id: 'chars', name: '角色卡', hint: '同名卡会被覆盖' },
@@ -7788,7 +7789,17 @@ function orbPersonaRowsHTML() {
             + '<span class="ssp-pbtn' + (on ? ' primary' : '') + '" data-orb-persona="' + esc(p.id) + '">' + (on ? '当前' : '换成这个') + '</span>'
             + '<span class="ssp-pbtn" data-orb-bind="' + esc(p.id) + '"><i class="fa-solid fa-link"></i>绑定</span>'
             + '<span class="ssp-pbtn" data-orb-pedit="' + esc(p.id) + '"><i class="fa-solid fa-pen"></i>编辑</span>'
-            + '</div></div>';
+            + '<span class="ssp-pbtn danger" data-orb-pdel="' + esc(p.id) + '" title="删掉这个面具（会先问一次）">'
+            + '<i class="fa-solid fa-trash-can"></i>删</span>'
+            + '</div></div>'
+            /* 就地确认（这个 build 的 callGenericPopup(CONFIRM) 是隐形的，不能用它） */
+            + (String(orbPersonaDel) === String(p.id)
+                ? '<div class="ssp-en-confirm">'
+                + '<span class="ssp-en-confirm-t">删掉面具「' + esc(p.name) + '」？<b>头像文件一起删</b>，删了找不回来。</span>'
+                + '<span class="ssp-pbtn danger" data-orb-pdelgo="' + esc(p.id) + '"><i class="fa-solid fa-trash"></i>确认删掉</span>'
+                + '<span class="ssp-pbtn" data-orb-pdelcancel="1">算了</span>'
+                + '</div>'
+                : '');
     }).join('');
     return head + '<div class="ssp-orb-plist">' + rows + '</div>';
 }
@@ -7803,6 +7814,61 @@ function orbPersonaDesc(id) {
         const d = (getContext().powerUserSettings || {}).persona_descriptions || {};
         return (d[id] && d[id].description) || '';
     } catch (e) { return ''; }
+}
+
+/** 删面具：从酒馆的面具数据里摘掉 + 删掉头像文件 + 把 ST 自己的列表里那一条也拔掉。
+    ⚠️ 三个地方都要动，少一个就会留残渣：
+      · power_user.personas / persona_descriptions（列表靠它）
+      · User Avatars/<id>（文件不删永远占着，下次同名还会撞）
+      · 当前聊天/默认面具如果正指着它 → 清掉引用，不然酒馆会指着一个不存在的人
+    删文件走酒馆自己的 /api/avatars/delete（它顺带清缩略图）。 */
+async function orbPersonaDelete(id) {
+    const pid = String(id || '');
+    if (!pid) return false;
+    const ctx = getContext();
+    const pu = ctx.powerUserSettings || {};
+    const nm = (pu.personas && pu.personas[pid]) || pid;
+    try {
+        /* 1) 先摘引用，别让酒馆指着一个马上要没的人 */
+        const wasActive = (String(orbActivePersona()) === pid);
+        if (pu.default_persona === pid) {
+            const rest = Object.keys(pu.personas || {}).filter(k => k !== pid);
+            pu.default_persona = rest.length ? rest[0] : null;
+        }
+        try {
+            if (ctx.chatMetadata && String(ctx.chatMetadata.persona || '') === pid) ctx.chatMetadata.persona = '';
+        } catch (e) { }
+        /* 2) 摘掉两处数据 */
+        if (pu.personas) delete pu.personas[pid];
+        if (pu.persona_descriptions) delete pu.persona_descriptions[pid];
+        save();
+        /* 3) 删头像文件（失败不中断，数据已经摘干净了） */
+        let fileOk = true;
+        try {
+            const r = await fetch('/api/avatars/delete', {
+                method: 'POST',
+                headers: Object.assign({ 'Content-Type': 'application/json' }, (ctx.getRequestHeaders ? ctx.getRequestHeaders() : {})),
+                body: JSON.stringify({ avatar: pid }),
+                cache: 'no-cache',
+            });
+            /* 404 = 文件本来就不在（比如设置里留了个指向已删文件的空键）→ 这不算失败 */
+            fileOk = !!(r && (r.ok || r.status === 404));
+        } catch (e) { fileOk = false; }
+        /* 4) 拔掉酒馆自己列表里的那一条（省得还要刷新才消失） */
+        try {
+            document.querySelectorAll('#user_avatar_block .avatar-container').forEach(c => {
+                const img = c.querySelector('img');
+                if (orbElFile(img) === pid) c.remove();
+            });
+        } catch (e) { }
+        try { if (ctx.eventSource && ctx.eventTypes && ctx.eventTypes.PERSONA_DELETED) await ctx.eventSource.emit(ctx.eventTypes.PERSONA_DELETED, { avatarId: pid }); } catch (e) { }
+        toast('已删掉面具：' + nm + (fileOk ? '' : '（头像文件没删掉，可以手动去 User Avatars 里删）')
+            + (wasActive ? '；它原来是当前面具，记得换一个' : ''), fileOk ? 'success' : 'warning');
+        return true;
+    } catch (e) {
+        toast('删除失败：' + ((e && e.message) || e), 'error');
+        return false;
+    }
 }
 
 function orbPersonaSave(id, name, desc) {
@@ -9095,7 +9161,24 @@ function bindOrb() {
             }).then(r => { if (r === getContext().POPUP_RESULT.AFFIRMATIVE) orbChatDelete(file); });
             return;
         }
-        /* 面具栏：编辑 / 选一个 / 新建 / 绑定角色 */
+        /* 面具栏：编辑 / 选一个 / 新建 / 绑定 / 删 */
+        if (t.closest('[data-orb-pdelcancel]')) { orbPersonaDel = null; renderOrbPanel(); return; }
+        const pdelgo = t.closest('[data-orb-pdelgo]');
+        if (pdelgo) {
+            const pid = pdelgo.dataset.orbPdelgo;
+            orbPersonaDel = null;
+            orbPersonaDelete(pid).then(() => { if (orbOpenNow) renderOrbPanel(); });
+            return;
+        }
+        const pdel = t.closest('[data-orb-pdel]');
+        if (pdel) {
+            const pid = pdel.dataset.orbPdel;
+            /* ⚠️ 别写成 (String(orbPersonaDel) === pid) ? null : pid —— 空的时候 String(null)==='null' 不等，
+               但 id 有可能就是 'null' 这种怪值；这里只用显式 null 判断。 */
+            orbPersonaDel = (orbPersonaDel !== null && String(orbPersonaDel) === String(pid)) ? null : String(pid);
+            renderOrbPanel();
+            return;
+        }
         if (t.closest('[data-orb-pcancel]')) { orbPersonaEdit = null; renderOrbPanel(); return; }
         const pedit = t.closest('[data-orb-pedit]');
         if (pedit) { orbPersonaEdit = pedit.dataset.orbPedit; orbBinding = null; renderOrbPanel(); return; }
@@ -9248,6 +9331,8 @@ if (globalThis.__SSP_TEST__) {
         orbDataSafe, orbDataFmtSize, orbDataReadme, orbDataArr, orbDataNameOf, orbDataZipCtor, orbDataPick,
         orbDataPost, orbDataBlob, getSettings,
         orbPersonaCreate, orbPersonaNew, orbPersonas, orbPlaceholderBlob, orbPersonaDesc,
+        orbPersonaDelete, orbActivePersona,
+        get orbPersonaDel() { return orbPersonaDel; }, set orbPersonaDel(v) { orbPersonaDel = v; },
         ORB_IMP_CATS, orbImpHTML, orbImpRead, orbImpRestore, orbImpAvatarOf, orbImpPick,
         extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
         migrateTweaksSettings, TWEAKS_MODULE_NAME,
