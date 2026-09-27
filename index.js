@@ -4255,7 +4255,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.22';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.23';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -8392,9 +8392,15 @@ function orbOnCharChanged() {
     if (now === orbLastCharId) return;
     orbLastCharId = now;
     orbWbAutoArmed = new Set();     // 换角色了，允许新角色重新套用一次
+    /* 换角色了：存档页缓存的还是上一个角色的存档列表 —— 清掉并重拉
+       （用户反馈：从角色卡列表直接切到另一张卡，存档列表不变）。
+       顺带把预设/美化那两页也重画，它们同样是"当前角色"派生的。 */
+    orbChatList = [];
     [0, 150, 500].forEach(ms => setTimeout(() => {
         orbLastCharId = (orbWbCurChar() || {}).id || '';
-        if (orbOpenNow) renderOrbPanel();
+        if (!orbOpenNow) return;
+        if (orbTab === 'chat') { try { orbChatsFetch(); } catch (e) { } return; }   // 它会自己重画
+        renderOrbPanel();
     }, ms));
     if (now) [400, 1200].forEach(ms => setTimeout(() => { try { orbWbOnChatChanged(); } catch (e) { } }, ms));
 }
