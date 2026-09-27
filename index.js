@@ -4255,7 +4255,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.20';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.21';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4849,10 +4849,25 @@ var orbThemeEdit = false;    // 是否在编辑模式
 var orbThemeDraft = null;    // 编辑中的 CSS 草稿（null = 还没读进来）
 
 function orbThemeSel() { return document.getElementById('themes'); }
+/** 美化列表：读酒馆 #themes 下拉。
+    ⚠️ 酒馆自己的 saveTheme 在同名时会往 themes 数组里再 push 一个 → 下拉里出现两个同名 option，
+       面板就渲染成两行、两行都标「当前」（用户截图反馈过："点应用没问题，是显示问题"）。
+       这里按名字去重，并顺手把**多余的、且没被选中的**那些 option 拔掉（当前选中的一律不动）。 */
 function orbThemeList() {
     const sel = orbThemeSel();
     if (!sel) return [];
-    return Array.from(sel.options).map(o => (o.textContent || '').trim()).filter(Boolean);
+    const seen = new Set();
+    const out = [];
+    const drop = [];
+    Array.from(sel.options).forEach(o => {
+        const n = (o.textContent || '').trim();
+        if (!n) return;
+        if (seen.has(n)) { if (!o.selected) drop.push(o); return; }
+        seen.add(n);
+        out.push(n);
+    });
+    if (drop.length) { try { drop.forEach(o => o.remove()); } catch (e) { } }
+    return out;
 }
 function orbThemeCur() {
     const sel = orbThemeSel();
