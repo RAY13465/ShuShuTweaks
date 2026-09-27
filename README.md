@@ -669,7 +669,9 @@ row.remove();
 | v1.31.11 | `98ffa2f` | 修角色卡渐隐「全变白」：纸底兜底/文字免疫层的开关从「CSS 里有没有 `--id-paper`」改成显式传「是否学生证」（前者恒为真，把 8 种样式全罩上了白底） |
 | v1.31.12 | `a3d391b` | 修叠层相册「第一张卡被压得差不多没了」：清负边距的选择器从 `:first-child` 换成「类内第一张」（前面站着分组/文件夹时 `:first-child` 不命中） |
 | v1.31.13 | `775bf09` | 更新确认弹窗里加一张「这次更新会改什么」清单：逐项比新旧卡（文字字段给字数变化、世界书/本地正则/收藏给保留规则），读不出来的卡不乱报 |
-| v1.31.14 | 本次 | 鼠鼠口袋加「数据」页：一键全量导出（角色卡/聊天/表情/世界书/设置/预设/美化/面具头像/群组/背景图）打成 zip，带 manifest + 说明.txt；顺带修启动日志里写死的 `v0.3.0` |
+| v1.31.14 | `c7fbf07` | 鼠鼠口袋加「数据」页：一键全量导出（角色卡/聊天/表情/世界书/设置/预设/美化/面具头像/群组/背景图）打成 zip，带 manifest + 说明.txt；顺带修启动日志里写死的 `v0.3.0` |
+| v1.31.15 | `81bc209` | 修导出时背景图整类变 0（`backgrounds/all` 回的是 `{images:[]}`，容器兼容函数漏了这个形状） |
+| v1.31.16 | 本次 | 「数据」页加导入：选 zip → 校验 → 逐类勾选 → **自动备份当前数据**再写；修三个真机坑（聊天该走 `chats/save`、`presets/save` 的 apiId 是 `novel`/`kobold`、预设导出名字走 `*_names`） |
 
 > 「版本号对齐」这种补提交（`fb87efb` / `24df59a`）只是把 `manifest.json` 与
 > `index.js` 里的 `PANEL_VERSION` 对齐，没有功能改动。
@@ -1764,7 +1766,52 @@ mask 渐隐本身没问题（`transparent 0% → #000 var(--pv-fade)` 就是标�
 **实测**：修前背景图 0 张、存底包 25.1 MB；修后 **49 张、包 46.1 MB**（差值正好是 backgrounds 目录 21 MB），
 用 PowerShell 的 `ZipFile` 独立列条目核对：**313 条**，分布 `presets 147 / backgrounds 50 / chats 44 / themes 33 / worlds 15 / characters 14 / User Avatars 6` + manifest + 说明 + settings.json。
 
-## 📌 截止目前的实测情况（v1.31.15）
+## 📥 「数据」页：从备份包恢复 · v1.31.16
+
+导出有了，配套的导入也有了（同一个「数据」页的下半部分）。原则就是点头的那四条：
+**只认这个包 / 逐项可选 / 写前先自动备份 / 同名覆盖 + 逐条记账**。
+
+流程：选 `.zip` → 读 `manifest.json` 校验（`tool` 对不上就拒收）→ 列出包里每类的数量 → 勾要恢复哪几类
+→ 点「开始恢复」**先自动导出一份当前数据**（`导入前_自动备份_xxx.zip`）+ 让你确认收到 → 才往下写
+→ 结束后给「成功 / 失败 / 跳过」明细，刷新页面生效。
+
+**能写回去的**（写接口都对着酒馆源码验过形状）：
+
+| 数据 | 接口 |
+|---|---|
+| 角色卡 | `POST /api/characters/import`（带 `preserved_name` → 覆盖同名卡，没有就用这个名字新建） |
+| 聊天记录 | `POST /api/chats/save`（jsonl 拆成数组喂它，`file_name` 由包里的文件名给，`force:true` 覆盖） |
+| 表情差分 | `POST /api/sprites/upload` |
+| 世界书 | `POST /api/worldinfo/edit` |
+| 美化 | `POST /api/themes/save` |
+| 预设 / 指令 / 上下文 / 系统提示 / 推理 | `POST /api/presets/save { apiId, name, preset }` |
+| 快捷回复 / 布局预设 | `POST /api/quick-replies/save`、`POST /api/moving-ui/save` |
+| 面具头像 / 背景图 | `POST /api/avatars/upload`、`POST /api/backgrounds/upload` |
+| 群组 | `POST /api/groups/create` |
+| 扩展数据 · 面具文本 · 标签 | `settings.json` 读改写（`settings/save` 是**整份覆盖写**，所以先 get 回来只改 `extension_settings.shushu_panel` / `personas` / `persona_descriptions` / `tags` / `tag_map` 这几个键，不碰你的接口和密钥） |
+
+**真机测试抓出来的三个坑（都是这次修的）**：
+
+1. **聊天别用 `/api/chats/import`** —— 那个是给**外来格式**（Chub / CAI 等）用的：它会自己改名成
+   「`xxx imported.jsonl`」，还原不了原始文件名，实测 30 份聊天**全 500**。正路是 `/api/chats/save`：
+   把 jsonl 拆成数组喂它、`file_name` 自己给、带 `force:true` 绕过 integrity 校验。
+2. **`/api/presets/save` 的 `apiId` 不是目录名** —— NovelAI 是 `novel`、KoboldAI 是 `kobold`
+   （我一开始写 `novelai`/`koboldai`，全部 400）。**顺带纠正一个之前的错判**：
+   `instruct` / `context` / `sysprompt` / `reasoning` **也走这个接口**（文件夹和扩展名都在 `getPresetSettingsByAPI` 里配好了），
+   所以那四类模板**是能写回去的** —— 上一版 README 里说"酒馆没有写接口"是错的，已改。
+3. **导出时四个 API 家族的预设是"原始 JSON 字符串"**，不是对象 —— 名字得从配套的 `*_setting_names`
+   数组拿、内容按原文写（一开始按对象处理，整段 JSON 被当成文件名了，本次一并修）。
+
+**实测**（真酒馆 + 独立无头 Chrome，造包 → 读包 → 真写回）：
+
+| 检查 | 结果 |
+|---|---|
+| 拒收非备份包 | ✓ 随便造个只有 `hello.txt` 的 zip，读包直接失败、不写任何东西 |
+| 读包 + 校验 | ✓ `present` 类别认全、root 前缀正确 |
+| 真写回 | ✓ **成功 262 · 失败 0 · 跳过 4**（13 卡 + 30 聊天 + 14 世界书 + 32 美化 + 预设/模板 + 5 头像） |
+| 写完抽查 | ✓ 世界书仍 14 本、第一本 14 条目、美化 32 个 —— 没丢没串 |
+
+## 📌 截止目前的实测情况（v1.31.16）
 
 | 项 | 状态 |
 |---|---|

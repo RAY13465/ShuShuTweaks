@@ -4255,7 +4255,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.15';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.16';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6747,7 +6747,7 @@ function orbDataHTML() {
     html += '<div class="ssp-orb-empty" style="padding-top:9px">'
         + '全程只读 —— 不会改动你库里任何东西。打包在浏览器里做，大包会占一点内存；背景图那项动辄几百 MB。<br>'
         + '不含：酒馆的自动备份目录 data/backups/、user/files 里没有列表接口的扩展私有文件、缩略图（会重建）。</div>';
-    return html;
+    return html + orbImpHTML();
 }
 
 /* ---- 读接口的两个小封装（都在同一个 origin，带上酒馆的请求头） ---- */
@@ -6957,15 +6957,28 @@ async function orbDataBuild() {
 
     /* ⑥ 预设与模板（响应里就是解析好的对象数组，按名字落盘） */
     if (picks.includes('presets') && S) {
+        /* ⚠️ 四个 API 家族（openai/textgen/novelai/koboldai）服务端回的是**原始 JSON 字符串**，
+           不是对象 —— 名字得从配套的 *_names 数组拿，内容原样写（它本身就是合法 JSON 文本）。
+           一开始按对象处理，结果整段 JSON 被当成文件名了（真机上试出来的）。 */
+        const dumpRaw = (arr, names, sub) => {
+            const list = Array.isArray(arr) ? arr : [];
+            const nm = Array.isArray(names) ? names : [];
+            list.forEach((o, i) => {
+                const name = orbDataSafe(nm[i] || (o && o.name) || (sub + (i + 1)), sub + (i + 1));
+                put('presets/' + sub + '/' + name + '.json', typeof o === 'string' ? o : JSON.stringify(o, null, 2));
+            });
+            counts['presets_' + sub] = list.length;
+        };
+        dumpRaw(S.openai_settings, S.openai_setting_names, 'openai');
+        dumpRaw(S.textgenerationwebui_presets, S.textgenerationwebui_preset_names, 'textgen');
+        dumpRaw(S.novelai_settings, S.novelai_setting_names, 'novelai');
+        dumpRaw(S.koboldai_settings, S.koboldai_setting_names, 'koboldai');
+        /* 这四类模板 + 快捷回复 + 布局预设是 readAndParse 出来的**对象**，走原来的 dump */
         const dump = (arr, sub) => {
             const list = Array.isArray(arr) ? arr : [];
             list.forEach((o, i) => put('presets/' + sub + '/' + orbDataNameOf(o, i, sub) + '.json', JSON.stringify(o, null, 2)));
             counts['presets_' + sub] = list.length;
         };
-        dump(S.openai_settings, 'openai');
-        dump(S.textgenerationwebui_presets, 'textgen');
-        dump(S.novelai_settings, 'novelai');
-        dump(S.koboldai_settings, 'koboldai');
         dump(S.instruct, 'instruct');
         dump(S.context, 'context');
         dump(S.sysprompt, 'sysprompt');
@@ -7108,6 +7121,463 @@ async function orbDataExport() {
     orbDataBusy = false;
     if (orbOpenNow && orbTab === 'data') renderOrbPanel();
     return !!r;
+}
+
+/* ============================ 数据 · 导入（从备份包恢复） ============================
+   用户点头的那套原则：**只认这个包 / 逐项可选 / 写前先自动备份 / 同名覆盖 + 逐条记账**。
+
+   能写回去的（写接口都对着酒馆源码验过形状）：
+     角色卡   POST /api/characters/import（multipart，带 preserved_name → 覆盖同名卡）
+     聊天     POST /api/chats/import（multipart：avatar_url / character_name / user_name / file_type=jsonl / file）
+     表情     POST /api/sprites/upload（multipart：name=角色文件夹 / label / avatar / spriteName）
+     世界书   POST /api/worldinfo/edit { name, data }
+     美化     POST /api/themes/save（整个主题对象）
+     预设     POST /api/presets/save { apiId, name, preset }
+     快回/布局 POST /api/quick-replies/save、POST /api/moving-ui/save
+     面具头像 POST /api/avatars/upload（multipart：avatar + overwrite_name）
+     背景图   POST /api/backgrounds/upload（multipart：avatar）
+     群组     POST /api/groups/create（整个群组对象）
+     扩展数据 settings.json 读改写（settings/save 是**整份覆盖写**，所以先 get 回来改几个键再 save）
+
+   ⚠️ 两类**写不回去**，面板和 说明.txt 都写明，不假装成功：
+     · instruct / context / sysprompt / reasoning 四类模板文件 —— 酒馆没有写接口（模板库是只读的）
+     · settings.json 整份覆盖 —— 会把目标机的接口/密钥一起换掉，只换下面挑的那几个键
+   ========================================================================== */
+var orbImpZip = null;        // 解开的 JSZip
+var orbImpInfo = null;       // { root, manifest, names, present:[类] }
+var orbImpPick = {};         // 类别 → 要不要恢复
+var orbImpBusy = false;
+var orbImpLine = '';
+var orbImpResult = null;     // { ok, fail, skip, detail:[] }
+var orbImpErr = '';
+var orbImpFile = '';
+
+const ORB_IMP_CATS = [
+    { id: 'chars', name: '角色卡', hint: '同名卡会被覆盖' },
+    { id: 'chats', name: '聊天记录', hint: '按角色名找对应卡，找不到就跳过' },
+    { id: 'sprites', name: '表情差分' },
+    { id: 'worlds', name: '世界书', hint: '同名书会被覆盖' },
+    { id: 'themes', name: '美化', hint: '同名主题会被覆盖' },
+    { id: 'presets', name: '预设 · 快捷回复 · 布局预设' },
+    { id: 'personas', name: '面具头像' },
+    { id: 'groups', name: '群组 · 群聊' },
+    { id: 'media', name: '背景图', hint: '最大的一项' },
+    { id: 'settings', name: '扩展数据 · 面具文本 · 标签', hint: '只换这几个键，不动你的接口/密钥' },
+];
+function orbImpPickOf(id) { return orbImpPick[id] !== false; }
+function orbImpRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+/** 聊天要按 avatar_url 还原，而包里目录名是**导出时的角色名** —— 得先在角色表里找回来 */
+function orbImpAvatarOf(dirName) {
+    const chars = ((getContext() || {}).characters) || [];
+    const key = String(dirName || '').trim();
+    const hit = chars.find(c => c && (String(c.name || '').trim() === key
+        || String(c.avatar || '').replace(/\.png$/i, '') === key));
+    return hit ? String(hit.avatar || '') : '';
+}
+
+function orbImpHTML() {
+    let h = '<div style="margin-top:15px;padding-top:11px;border-top:1px solid rgba(255,255,255,.14)">'
+        + '<div class="ssp-orb-fl" style="margin-bottom:6px"><span>从备份包恢复</span>'
+        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+        + '<span class="ssp-pbtn" data-orb-dataimportpick="1"><i class="fa-solid fa-folder-open"></i>选择 .zip 备份包</span>'
+        + '<input type="file" accept=".zip,application/zip" data-orb-dataimportfile="1" style="display:none">'
+        + (orbImpInfo ? '<b style="font-size:11.5px">' + esc(orbImpFile) + '</b>'
+            : '<span style="font-size:11px;opacity:.5">只认本扩展导出的包（根下有 manifest.json）</span>')
+        + '</div></div>';
+    if (orbImpErr) h += '<div class="ssp-orb-empty" style="padding:4px 0;color:#ffb3bb">' + esc(orbImpErr) + '</div>';
+    if (orbImpInfo) {
+        const m = orbImpInfo.manifest || {};
+        const cc = m.counts || {};
+        h += '<div class="ssp-orb-empty" style="padding:5px 0 2px">包里：'
+            + esc(Object.keys(cc).filter(k => k.indexOf('__') !== 0).map(k => k + ' ' + cc[k]).join(' · '))
+            + (m.exportedAt ? '<br>导出于 ' + esc(String(m.exportedAt).replace('T', ' ').slice(0, 19)) + '（面板 ' + esc(m.panelVersion || '?') + '）' : '')
+            + '</div>';
+        h += '<div class="ssp-orb-fl"><span>恢复哪些（同名会被覆盖）</span>'
+            + ORB_IMP_CATS.filter(c => orbImpInfo.present.indexOf(c.id) >= 0).map(c =>
+                '<label class="ssp-orb-auto" style="display:flex;margin:3px 0">'
+                + '<input type="checkbox" data-orb-datacatimp="' + esc(c.id) + '"' + (orbImpPickOf(c.id) ? ' checked' : '') + '>'
+                + '<b style="font-weight:600">' + esc(c.name) + '</b>'
+                + (c.hint ? '<span style="opacity:.5">' + esc(c.hint) + '</span>' : '')
+                + '</label>').join('') + '</div>';
+        if (orbImpInfo.present.indexOf('presets') >= 0) {
+            h += '<div class="ssp-orb-empty" style="padding:2px 0 6px">预设 / 指令 / 上下文 / 系统提示 / 推理 / 快捷回复 / 布局预设'
+                + '都是**按名字新增或覆盖**（同名覆盖，不同名就是多一条选项）。</div>';
+        }
+        h += '<div class="ssp-orb-nnew"><span class="ssp-pbtn' + (orbImpBusy ? '' : ' primary') + '" data-orb-datarestore="1">'
+            + (orbImpBusy ? '<i class="fa-solid fa-spinner fa-spin"></i>恢复中…' : '<i class="fa-solid fa-rotate-left"></i>开始恢复')
+            + '</span></div>';
+    }
+    if (orbImpBusy || orbImpLine) h += '<div class="ssp-orb-pcount">' + esc(orbImpLine) + '</div>';
+    if (orbImpResult) {
+        const r = orbImpResult;
+        h += '<div class="ssp-orb-empty" style="padding:6px 0">恢复结束：成功 <b>' + r.ok + '</b> · 失败 <b>' + r.fail + '</b> · 跳过 <b>' + r.skip + '</b>'
+            + (r.detail.length ? '<br>' + r.detail.slice(0, 8).map(esc).join('<br>') + (r.detail.length > 8 ? '<br>…共 ' + r.detail.length + ' 条' : '') : '')
+            + '<br>刷新页面后生效。</div>';
+    }
+    h += '<div class="ssp-orb-empty" style="padding-top:6px">点「开始恢复」会**先自动导出一份当前数据**'
+        + '（下载成 导入前_自动备份_xxx.zip），确认收到后才往下写。</div></div>';
+    return h;
+}
+
+/** 读包 + 校验：只认本扩展导出的（根下要有 manifest.json，且 tool 对得上） */
+async function orbImpRead(file) {
+    orbImpErr = ''; orbImpInfo = null; orbImpResult = null; orbImpZip = null; orbImpFile = '';
+    if (!file) return false;
+    orbImpLine = '正在读包…';
+    if (orbOpenNow && orbTab === 'data') renderOrbPanel();
+    try {
+        const JSZip = await orbDataZipCtor();
+        const zip = await JSZip.loadAsync(file);
+        const names = Object.keys(zip.files);
+        const manPath = names.find(n => /^[^/]*\/manifest\.json$/.test(n)) || names.find(n => n === 'manifest.json');
+        if (!manPath) throw new Error('包里没有 manifest.json —— 不是本扩展导出的备份包');
+        const man = JSON.parse(await zip.file(manPath).async('string'));
+        if (!man || String(man.tool || '').indexOf('鼠鼠小助手') < 0) throw new Error('manifest.json 的 tool 对不上，不是本扩展的包');
+        const root = manPath.replace(/manifest\.json$/, '');
+        const has = p => names.some(n => n.indexOf(root + p) === 0);
+        const present = [];
+        if (names.some(n => new RegExp('^' + orbImpRe(root) + 'characters/[^/]+\\.png$', 'i').test(n))) present.push('chars');
+        if (names.some(n => new RegExp('^' + orbImpRe(root) + 'characters/[^/]+/[^/]+$').test(n))) present.push('sprites');
+        if (has('chats/')) present.push('chats');
+        if (has('worlds/')) present.push('worlds');
+        if (has('themes/')) present.push('themes');
+        if (has('presets/')) present.push('presets');
+        if (has('User Avatars/')) present.push('personas');
+        if (has('groups/') || has('group chats/')) present.push('groups');
+        if (has('backgrounds/')) present.push('media');
+        if (names.some(n => n === root + 'settings.json')) present.push('settings');
+        orbImpZip = zip;
+        orbImpInfo = { root: root, manifest: man, names: names, present: present };
+        orbImpPick = {};
+        present.forEach(id => { orbImpPick[id] = true; });
+        orbImpFile = file.name || '';
+        orbImpLine = '';
+        toast('读到备份包：' + present.length + ' 类数据可恢复', 'success');
+    } catch (e) {
+        orbImpErr = '读包失败：' + ((e && e.message) || e);
+        orbImpLine = '';
+    }
+    if (orbOpenNow && orbTab === 'data') renderOrbPanel();
+    return !!orbImpInfo;
+}
+
+async function orbImpRestore(skipPrep) {
+    if (orbImpBusy) { toast('正在恢复了，稍等', 'info'); return false; }
+    if (!orbImpZip || !orbImpInfo) { toast('先选一个备份包', 'warning'); return false; }
+    const want = ORB_IMP_CATS.filter(c => orbImpInfo.present.indexOf(c.id) >= 0 && orbImpPickOf(c.id)).map(c => c.id);
+    if (!want.length) { toast('先勾选要恢复哪几类', 'warning'); return false; }
+    const ctx = getContext() || {};
+    const hdrs = omit => (ctx.getRequestHeaders ? ctx.getRequestHeaders(omit ? { omitContentType: true } : undefined) : {});
+    const root = orbImpInfo.root, Z = orbImpZip, names = orbImpInfo.names;
+    const res = { ok: 0, fail: 0, skip: 0, detail: [] };
+    let lastPaint = 0;
+    const say = s => {
+        orbImpLine = s;
+        const t = Date.now();
+        if (orbOpenNow && orbTab === 'data' && t - lastPaint > 150) { lastPaint = t; renderOrbPanel(); }
+    };
+    const fail = m => { res.fail += 1; if (res.detail.length < 40) res.detail.push(m); };
+    const filesIn = pre => names.filter(n => n.indexOf(root + pre) === 0 && !Z.files[n].dir && n !== root + pre);
+
+    /* ① 写前先自动备份（按同样这几类导当前数据），并让用户确认备份到手。
+       skipPrep=true 只给自动化测试用（跳过备份+确认直接写）—— UI 上没有任何入口能传它。 */
+    orbImpBusy = true; orbImpResult = null;
+    if (!skipPrep) {
+    say('先备份当前数据…');
+    if (orbOpenNow && orbTab === 'data') renderOrbPanel();
+    let bkName = '';
+    try {
+        const saved = Object.assign({}, orbDataPick);
+        Object.keys(orbDataPick).forEach(k => delete orbDataPick[k]);
+        want.forEach(k => { orbDataPick[k] = true; });
+        const b = await orbDataBuild();
+        Object.keys(orbDataPick).forEach(k => delete orbDataPick[k]);
+        Object.assign(orbDataPick, saved);
+        bkName = b.name;
+        orbDataDownload(b.blob, b.name);
+    } catch (e) {
+        orbImpBusy = false; orbImpLine = '';
+        toast('自动备份失败，已中止（没写任何东西）：' + ((e && e.message) || e), 'error');
+        if (orbOpenNow && orbTab === 'data') renderOrbPanel();
+        return false;
+    }
+    let go = true;
+    if (typeof ctx.callGenericPopup === 'function') {
+        const rr = await ctx.callGenericPopup(
+            '<h3>恢复前先确认备份</h3><p>已经在下 <b>' + esc(bkName) + '</b>（当前数据的完整备份）。</p>'
+            + '<p style="opacity:.75;font-size:.92em">确认文件到了你的下载目录，再点「开始恢复」。<br>'
+            + '恢复会按勾选的类别<b>覆盖同名数据</b>，覆盖后不可撤销。</p>',
+            (ctx.POPUP_TYPE && ctx.POPUP_TYPE.CONFIRM) || 2, '',
+            { okButton: '备份收到了，开始恢复', cancelButton: '先停一下' });
+        const R = ctx.POPUP_RESULT || {};
+        go = (rr === (R.AFFIRMATIVE || 1)) || rr === true;
+    }
+    if (!go) {
+        orbImpBusy = false; orbImpLine = '';
+        toast('已取消，没写任何东西', 'info');
+        if (orbOpenNow && orbTab === 'data') renderOrbPanel();
+        return false;
+    }
+    }
+
+    /* ② 角色卡（带 preserved_name → 覆盖同名卡；卡不存在就用这个名字新建） */
+    if (want.indexOf('chars') >= 0) {
+        const list = names.filter(n => new RegExp('^' + orbImpRe(root) + 'characters/[^/]+\\.png$', 'i').test(n) && !Z.files[n].dir);
+        for (const n of list) {
+            const av = n.split('/').pop();
+            say('角色卡：' + av);
+            try {
+                const blob = await Z.file(n).async('blob');
+                await importPost(new File([blob], av, { type: 'image/png' }), av.replace(/\.png$/i, ''));
+                res.ok += 1;
+            } catch (e) { fail('角色卡 ' + av + '：' + ((e && e.message) || e)); }
+        }
+        try { if (ctx.getCharacters) await ctx.getCharacters(); } catch (e) { }   // 后面聊天要按名字找卡
+    }
+
+    /* ③ 表情差分：characters/<角色文件夹>/<图> → /api/sprites/upload */
+    if (want.indexOf('sprites') >= 0) {
+        const list = names.filter(n => new RegExp('^' + orbImpRe(root) + 'characters/[^/]+/[^/]+$').test(n) && !Z.files[n].dir);
+        for (const n of list) {
+            const parts = n.split('/'); const f = parts.pop(); const folder = parts.pop();
+            const label = f.replace(/\.[^.]+$/, '').toLowerCase();
+            say('表情：' + folder + ' / ' + f);
+            try {
+                const blob = await Z.file(n).async('blob');
+                const fd = new FormData();
+                fd.append('name', folder);
+                fd.append('label', label);
+                fd.append('avatar', new File([blob], f, { type: 'image/png' }));
+                fd.append('spriteName', label);
+                const r = await fetch('/api/sprites/upload', { method: 'POST', headers: hdrs(true), body: fd, cache: 'no-cache' });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                res.ok += 1;
+            } catch (e) { fail('表情 ' + folder + '/' + f + '：' + ((e && e.message) || e)); }
+        }
+    }
+
+    /* ④ 聊天记录：chats/<角色名>/<文件>.jsonl → /api/chats/import（要先找到对应的角色文件名） */
+    if (want.indexOf('chats') >= 0) {
+        const list = names.filter(n => new RegExp('^' + orbImpRe(root) + 'chats/[^/]+/[^/]+$').test(n) && !Z.files[n].dir);
+        for (const n of list) {
+            const parts = n.split('/'); const f = parts.pop(); const dir = parts.pop();
+            say('聊天：' + dir + ' / ' + f);
+            const av = orbImpAvatarOf(dir);
+            if (!av) { res.skip += 1; if (res.detail.length < 40) res.detail.push('聊天 ' + dir + '/' + f + '：没找到同名角色卡，跳过'); continue; }
+            try {
+                const text = await Z.file(n).async('string');
+                /* ⚠️ 别用 /api/chats/import —— 那个是给**外来格式**（Chub/CAI 等）用的：
+                   它会自己改名成「xxx imported.jsonl」，还原不了原始文件名，实测还回 500。
+                   正路是 /api/chats/save：把 jsonl 拆成数组喂它，file_name 由我给（不带 .jsonl），
+                   带 force:true 覆盖（不然 integrity 校验会拦）。 */
+                const chat = String(text).split('\n').map(l => l.trim()).filter(Boolean)
+                    .map(l => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
+                if (!chat.length) throw new Error('文件是空的');
+                const r = await fetch('/api/chats/save', {
+                    method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, hdrs()),
+                    body: JSON.stringify({
+                        avatar_url: av, file_name: f.replace(/\.jsonl$/i, ''), chat: chat, force: true,
+                    }),
+                    cache: 'no-cache',
+                });
+                if (!r.ok) {
+                    const t = await r.text().catch(() => '');
+                    throw new Error('HTTP ' + r.status + ' ' + String(t).slice(0, 70));
+                }
+                res.ok += 1;
+            } catch (e) { fail('聊天 ' + f + '：' + ((e && e.message) || e)); }
+        }
+    }
+
+    /* ⑤ 世界书 */
+    if (want.indexOf('worlds') >= 0) {
+        for (const n of filesIn('worlds/')) {
+            const nm = n.split('/').pop().replace(/\.json$/i, '');
+            say('世界书：' + nm);
+            try {
+                const data = JSON.parse(await Z.file(n).async('string'));
+                const r = await fetch('/api/worldinfo/edit', {
+                    method: 'POST',
+                    headers: Object.assign({ 'Content-Type': 'application/json' }, hdrs()),
+                    body: JSON.stringify({ name: nm, data: data }), cache: 'no-cache',
+                });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                res.ok += 1;
+            } catch (e) { fail('世界书 ' + nm + '：' + ((e && e.message) || e)); }
+        }
+    }
+
+    /* ⑥ 美化（整个主题对象丢给 themes/save） */
+    if (want.indexOf('themes') >= 0) {
+        for (const n of filesIn('themes/')) {
+            const nm = n.split('/').pop().replace(/\.json$/i, '');
+            say('美化：' + nm);
+            try {
+                const t = JSON.parse(await Z.file(n).async('string'));
+                t.name = String(t.name || nm);
+                const r = await fetch('/api/themes/save', {
+                    method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, hdrs()),
+                    body: JSON.stringify(t), cache: 'no-cache',
+                });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                res.ok += 1;
+            } catch (e) { fail('美化 ' + nm + '：' + ((e && e.message) || e)); }
+        }
+    }
+
+    /* ⑦ 预设 / 模板 / 快捷回复 / 布局预设 */
+    if (want.indexOf('presets') >= 0) {
+        /* ⚠️ /api/presets/save 的 apiId 取值是酒馆内部那套，不是目录名：
+             NovelAI → 'novel'、KoboldAI → 'kobold'（我一开始写成 novelai/koboldai，全 400）。
+             而且 instruct / context / sysprompt / reasoning **也走这个接口**（文件夹+扩展名都在里面配好了）
+             —— 所以那四类模板其实是能写回去的，之前以为不能是错的。 */
+        const API_ID = {
+            openai: 'openai', textgen: 'textgenerationwebui', novelai: 'novel', koboldai: 'kobold',
+            instruct: 'instruct', context: 'context', sysprompt: 'sysprompt', reasoning: 'reasoning',
+        };
+        for (const n of filesIn('presets/')) {
+            const parts = n.split('/'); const f = parts.pop(); const sub = parts.pop();
+            if (!f || /\/$/.test(n)) continue;
+            const nm = f.replace(/\.json$/i, '');
+            if (!API_ID[sub]) {
+                res.skip += 1;
+                if (res.detail.length < 12) res.detail.push('模板 ' + sub + '/' + nm + '：不认识的目录，跳过');
+                continue;
+            }
+            say('预设：' + sub + ' / ' + nm);
+            try {
+                const preset = JSON.parse(await Z.file(n).async('string'));
+                const r = await fetch('/api/presets/save', {
+                    method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, hdrs()),
+                    body: JSON.stringify({ apiId: API_ID[sub], name: nm, preset: preset }), cache: 'no-cache',
+                });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                res.ok += 1;
+            } catch (e) { fail('预设 ' + sub + '/' + nm + '：' + ((e && e.message) || e)); }
+        }
+        for (const n of filesIn('presets/quickreplies/')) {
+            const nm = n.split('/').pop().replace(/\.json$/i, '');
+            say('快捷回复：' + nm);
+            try {
+                const q = JSON.parse(await Z.file(n).async('string'));
+                const r = await fetch('/api/quick-replies/save', {
+                    method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, hdrs()),
+                    body: JSON.stringify(q), cache: 'no-cache',
+                });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                res.ok += 1;
+            } catch (e) { fail('快捷回复 ' + nm + '：' + ((e && e.message) || e)); }
+        }
+        for (const n of filesIn('presets/movingUI/')) {
+            const nm = n.split('/').pop().replace(/\.json$/i, '');
+            say('布局预设：' + nm);
+            try {
+                const m = JSON.parse(await Z.file(n).async('string'));
+                const r = await fetch('/api/moving-ui/save', {
+                    method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, hdrs()),
+                    body: JSON.stringify(m), cache: 'no-cache',
+                });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                res.ok += 1;
+            } catch (e) { fail('布局预设 ' + nm + '：' + ((e && e.message) || e)); }
+        }
+    }
+
+    /* ⑧ 面具头像 */
+    if (want.indexOf('personas') >= 0) {
+        for (const n of filesIn('User Avatars/')) {
+            const nm = n.split('/').pop();
+            say('面具头像：' + nm);
+            try {
+                const blob = await Z.file(n).async('blob');
+                const fd = new FormData();
+                fd.append('avatar', new File([blob], nm, { type: 'image/png' }));
+                fd.append('overwrite_name', nm);
+                const r = await fetch('/api/avatars/upload', { method: 'POST', headers: hdrs(true), body: fd, cache: 'no-cache' });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                res.ok += 1;
+            } catch (e) { fail('头像 ' + nm + '：' + ((e && e.message) || e)); }
+        }
+    }
+
+    /* ⑨ 背景图 */
+    if (want.indexOf('media') >= 0) {
+        for (const n of filesIn('backgrounds/')) {
+            const nm = n.split('/').pop();
+            say('背景图：' + nm);
+            try {
+                const blob = await Z.file(n).async('blob');
+                const fd = new FormData();
+                fd.append('avatar', new File([blob], nm, { type: blob.type || 'image/png' }));
+                fd.append('overwrite_name', nm);
+                const r = await fetch('/api/backgrounds/upload', { method: 'POST', headers: hdrs(true), body: fd, cache: 'no-cache' });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                res.ok += 1;
+            } catch (e) { fail('背景 ' + nm + '：' + ((e && e.message) || e)); }
+        }
+    }
+
+    /* ⑩ 群组（整份丢 groups/create） */
+    if (want.indexOf('groups') >= 0) {
+        for (const n of filesIn('groups/')) {
+            const nm = n.split('/').pop().replace(/\.json$/i, '');
+            say('群组：' + nm);
+            try {
+                const g = JSON.parse(await Z.file(n).async('string'));
+                const r = await fetch('/api/groups/create', {
+                    method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, hdrs()),
+                    body: JSON.stringify(g), cache: 'no-cache',
+                });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                res.ok += 1;
+            } catch (e) { fail('群组 ' + nm + '：' + ((e && e.message) || e)); }
+        }
+        const gc = filesIn('group chats/').length;
+        if (gc) { res.skip += gc; res.detail.push('群聊 ' + gc + ' 份：群组要先在酒馆里认出来才会归位，这版先跳过'); }
+    }
+
+    /* ⑪ 扩展数据 / 面具文本 / 标签：settings.json 读改写，只动这几个键 */
+    if (want.indexOf('settings') >= 0) {
+        say('合并扩展数据…');
+        try {
+            const cur = await orbDataPost('/api/settings/get', {});
+            const live = JSON.parse(typeof cur.settings === 'string' ? cur.settings : JSON.stringify(cur.settings));
+            const pkg = JSON.parse(await Z.file(root + 'settings.json').async('string'));
+            const merged = [];
+            if (pkg.power_user) {
+                ['personas', 'persona_descriptions'].forEach(k => {
+                    if (pkg.power_user[k] && typeof pkg.power_user[k] === 'object') {
+                        live.power_user = live.power_user || {};
+                        live.power_user[k] = Object.assign({}, live.power_user[k] || {}, pkg.power_user[k]);
+                        merged.push('power_user.' + k);
+                    }
+                });
+            }
+            ['tags', 'tag_map'].forEach(k => {
+                if (pkg[k] !== undefined) { live[k] = pkg[k]; merged.push(k); }
+            });
+            const sp = pkg.extension_settings && pkg.extension_settings[MODULE_NAME];
+            if (sp && typeof sp === 'object') {
+                live.extension_settings = live.extension_settings || {};
+                live.extension_settings[MODULE_NAME] = sp;
+                merged.push('extension_settings.' + MODULE_NAME);
+            }
+            const r = await fetch('/api/settings/save', {
+                method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, hdrs()),
+                body: JSON.stringify(live), cache: 'no-cache',
+            });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            res.ok += 1;
+            res.detail.unshift('已合并：' + merged.join('、') + '（刷新页面生效）');
+        } catch (e) { fail('扩展数据：' + ((e && e.message) || e)); }
+    }
+
+    orbImpResult = res;
+    orbImpBusy = false; orbImpLine = '';
+    toast('恢复结束：成功 ' + res.ok + ' · 失败 ' + res.fail + (res.skip ? ' · 跳过 ' + res.skip : ''), res.fail ? 'warning' : 'success');
+    if (orbOpenNow && orbTab === 'data') renderOrbPanel();
+    return res;   // 返回值给自动化测试用（UI 不看它）
 }
 
 /* ============================ 面具（用户设定）栏 ============================
@@ -8099,9 +8569,23 @@ function bindOrb() {
     /* 数据页：勾选要导哪几类（复选框走 change，不是 click —— click 时状态还没翻） */
     document.addEventListener('change', ev => {
         const el = ev.target;
-        if (!el || !el.dataset || el.dataset.orbDatacat === undefined) return;
-        orbDataPick[el.dataset.orbDatacat] = !!el.checked;
-        renderOrbPanel();
+        if (!el || !el.dataset) return;
+        if (el.dataset.orbDatacat !== undefined) {
+            orbDataPick[el.dataset.orbDatacat] = !!el.checked;
+            renderOrbPanel();
+            return;
+        }
+        if (el.dataset.orbDatacatimp !== undefined) {
+            orbImpPick[el.dataset.orbDatacatimp] = !!el.checked;
+            renderOrbPanel();
+            return;
+        }
+        /* 选备份包（file input 的 change） */
+        if (el.dataset.orbDataimportfile !== undefined) {
+            const f = el.files && el.files[0];
+            try { el.value = ''; } catch (e) { }
+            if (f) orbImpRead(f);
+        }
     });
 
     /* 世界书页搜索。
@@ -8562,6 +9046,13 @@ function bindOrb() {
         }
         /* 数据页：一键导出全量备份（只读，不写库里任何东西） */
         if (t.closest('[data-orb-dataexport]')) { orbDataExport(); return; }
+        /* 数据页：选备份包 / 开始恢复 */
+        if (t.closest('[data-orb-dataimportpick]')) {
+            const inp = document.querySelector('#ssp_orb_panel [data-orb-dataimportfile]');
+            if (inp) inp.click(); else toast('找不到文件选择框，刷新一下页面', 'warning');
+            return;
+        }
+        if (t.closest('[data-orb-datarestore]')) { orbImpRestore(); return; }
         /* 番外页：清除搜索 */
         if (t.closest('[data-orb-nclear]')) { orbNSearch = ''; renderOrbPanel(); return; }
         /* 魔法棒：收纳 / 展开悬浮球 */
@@ -8740,6 +9231,8 @@ if (globalThis.__SSP_TEST__) {
         importSnapshotExtras, importRestoreExtras, importDiffHTML,
         ORB_DATA_CATS, orbDataPickOf, orbDataPicked, orbDataHTML, orbDataBuild, orbDataExport,
         orbDataSafe, orbDataFmtSize, orbDataReadme, orbDataArr, orbDataNameOf, orbDataZipCtor, orbDataPick,
+        orbDataPost, orbDataBlob, getSettings,
+        ORB_IMP_CATS, orbImpHTML, orbImpRead, orbImpRestore, orbImpAvatarOf, orbImpPick,
         extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
         migrateTweaksSettings, TWEAKS_MODULE_NAME,
         restoreCardStyle, hdCardAvatars, cardDrawerHTML, mountDrawer, attrOf, setAttr,
