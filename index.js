@@ -4255,7 +4255,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.19';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.20';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5467,23 +5467,32 @@ function orbWbSyncChar() {
     const want = bound.filter(n => all.indexOf(n) >= 0);
 
     let cur = orbWbActive();
-    const enabled = orbWbEnabled(key);                                  // 我们上次启用过的
-    const enabledNow = enabled.filter(n => cur.indexOf(n) >= 0);        // 其中现在还开着的
-    /* 该撤的：我们启用过、但现在不在这张卡的绑定里了；顺带把它从"用户原状"里修掉 */
-    const del = enabledNow.filter(n => want.indexOf(n) < 0);
+    const enabled = orbWbEnabled(key);                                  // 本聊天键记过账的
+    /* ⚠️ 撤的范围不能只看「本聊天键」：上一张卡的书可能记在**别的键**下 ——
+       切角色那次 cleanup 一旦没跑到（事件时序、或从别处切过来的），
+       那本书就永远撤不掉，表现得像"全局启用"（用户反馈过）。
+       所以把我们**在任何聊天里启用过**的书都算进来：是"我们加的" + 这张卡没绑 → 撤。
+       用户自己手动勾的从不进这本账，依旧一概不动。 */
+    const ours = new Set(enabled);
+    try { Object.keys(orbWbApplied()).forEach(k => orbWbEnabled(k).forEach(n => ours.add(n))); } catch (e) { }
+    const del = cur.filter(n => ours.has(n) && want.indexOf(n) < 0);
     /* 该补的：这张卡绑了、但当前没生效的 */
     const add = want.filter(n => cur.indexOf(n) < 0);
-    /* 还要把"我们启用过但已不在原状里的"从账上抹掉，免得以后重复撤 */
-    const keepEnabled = enabledNow.filter(n => want.indexOf(n) >= 0);
-    orbWbEnabledSet(key, keepEnabled);
+    /* 记账：留下本键"我们启用过哪几本"（「还原这个聊天」要用），没变就不写 */
+    const keepEnabled = enabled.filter(n => want.indexOf(n) >= 0);
+    if (del.length || add.length) {
+        const rec = orbWbRecord(key) || {};
+        const prev = Array.isArray(rec.prev) ? rec.prev.slice() : cur.slice();
+        const next = Array.from(new Set(keepEnabled.concat(add)));
+        if (!next.length) { delete orbWbApplied()[key]; save(); }
+        else { orbWbApplied()[key] = { ext: next, prev: prev, at: Date.now() }; save(); }
+    }
 
     if (!del.length && !add.length) return { added: [], removed: [] };
     const r = orbWbSelApply(add, del);
     if (!r) return null;
-    orbWbEnabledSet(key, keepEnabled.concat(add));
     return { added: add, removed: del };
 }
-
 /** 旧名保留（面板/事件里都还在调）：等于 orbWbSyncChar */
 function orbWbApplyForChar() {
     const r = orbWbSyncChar();
@@ -9374,6 +9383,7 @@ if (globalThis.__SSP_TEST__) {
         get orbDlcOpen() { return orbDlcOpen; }, set orbDlcOpen(v) { orbDlcOpen = v; },
         get orbDlcLoaded() { return orbDlcLoaded; }, set orbDlcLoaded(v) { orbDlcLoaded = v; },
         orbWbApplyForChar, orbWbCleanup, orbWbRestoreCur, orbWbOnChatChanged,
+        orbWbApplied, orbWbEnabled, orbWbCurChar, orbWbBound, orbWbActive, orbWbSyncChar,
         orbWorldRefresh, orbWorldHTML, orbWorldRowsHTML, orbWorldPickerHTML,
         renderOrbPanel, orbPanelHTML, orbScrollIntoView,
         orbOnCharChanged, protectSkinAfterThemeChange, cardImportantify,
