@@ -4255,7 +4255,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.13';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.14';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6651,8 +6651,461 @@ const ORB_MODULES = [
     { id: 'world', name: '世界书', icon: 'fa-book-atlas', render: () => orbWorldHTML() },
     { id: 'dlc', name: 'DLC', icon: 'fa-cubes', render: () => orbDlcHTML() },
     { id: 'chat', name: '存档', icon: 'fa-box-archive', render: () => orbChatHTML() },
+    { id: 'data', name: '数据', icon: 'fa-database', render: () => orbDataHTML() },
 ];
 function orbModule(id) { return ORB_MODULES.find(m => m.id === id) || null; }
+
+/* ============================ 数据（全量备份导出）栏 ============================
+   用户要的：点一下就把散在酒馆十几个地方的数据打成一个 zip，换机器/重装时有个整包。
+
+   数据来源（一个个对过酒馆源码，不是猜的）：
+     · POST /api/settings/get —— 服务端**把目录直接读出来塞进响应**，一次就能拿到：
+         settings        settings.json 原文（面具 personas / 本扩展的 shushu_panel / 标签 / 世界书设置全在里面）
+         themes          全部美化文件内容
+         openai_settings / textgenerationwebui_presets / novelai_settings / koboldai_settings（+ 名字）
+         instruct / context / sysprompt / reasoning 模板 · quickReplyPresets · movingUIPresets
+         world_names     世界书名字清单
+     · /api/characters/all 拿角色列表；/characters/<文件> 是**静态路径**，直接 GET 原图（卡数据在 PNG 里）
+     · /api/characters/chats {simple:true} 拿该角色的聊天文件清单
+       /api/chats/export {format:'jsonl'} 返回**原始 jsonl 文本**（不是转成 txt 的那种）
+     · /api/worldinfo/get · /api/groups/all · /api/avatars/get · /api/backgrounds/all
+     · /User%20Avatars/<文件>、/backgrounds/<文件> 同样是静态路径
+   打 zip 用酒馆自带的 JSZip（public/lib/jszip.min.js —— 酒馆自己的 utils.js 就是 import 它），不引外部 CDN。
+
+   ⚠️ 这里是**只读**的：全程只 GET/POST 读接口，不写你库里任何东西。
+   ========================================================================== */
+const ORB_DATA_CATS = [
+    { id: 'chars', name: '角色卡', hint: 'PNG 原图，卡数据在里面', def: true },
+    { id: 'chats', name: '聊天记录', hint: '原始 .jsonl，按角色分文件夹', def: true },
+    { id: 'sprites', name: '表情差分', hint: '角色文件夹里的表情图，要连文件夹一起放回去', def: true },
+    { id: 'worlds', name: '世界书', hint: '每本书的全部条目', def: true },
+    { id: 'settings', name: '酒馆设置', hint: 'settings.json 原文（面具文本/标签/扩展数据都在这）', def: true },
+    { id: 'presets', name: '预设 · 模板', hint: '4 个 API + 指令/上下文/系统提示/推理/快捷回复/布局', def: true },
+    { id: 'themes', name: '美化', hint: '全部主题文件', def: true },
+    { id: 'personas', name: '面具头像', hint: 'User Avatars 里的图', def: true },
+    { id: 'groups', name: '群组 · 群聊', hint: '群组设定 + 群聊记录', def: true },
+    { id: 'media', name: '背景图', hint: '最大的一项，网慢就别勾', def: false },
+];
+var orbDataPick = {};        // id → 勾没勾（懒初始化成 def）
+var orbDataBusy = false;
+var orbDataLine = '';        // 当前进度
+var orbDataDone = null;      // 上次结果 { name, size, summary }
+var orbDataLog = [];         // 单项失败明细（不中断整包）
+
+function orbDataCat(id) { return ORB_DATA_CATS.find(c => c.id === id) || null; }
+function orbDataPickOf(id) {
+    if (!(id in orbDataPick)) { const c = orbDataCat(id); orbDataPick[id] = !!(c && c.def); }
+    return orbDataPick[id];
+}
+function orbDataPicked() { return ORB_DATA_CATS.filter(c => orbDataPickOf(c.id)).map(c => c.id); }
+
+function orbDataFmtSize(n) {
+    const b = Number(n) || 0;
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' KB';
+    if (b < 1024 * 1024 * 1024) return (b / 1048576).toFixed(1) + ' MB';
+    return (b / 1073741824).toFixed(2) + ' GB';
+}
+function orbDataStamp(d) {
+    const p = n => String(n).padStart(2, '0');
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes());
+}
+/** 名字里的非法字符换掉 —— 它们是**酒馆里的名字**，要变成 zip 里的路径，不能带 / \ : 这些 */
+function orbDataSafe(name, fallback) {
+    const s = String(name == null ? '' : name)
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .replace(/[\u0000-\u001f]/g, '')
+        .replace(/^\.+/, '')
+        .trim();
+    return s.slice(0, 120) || fallback || 'unnamed';
+}
+
+function orbDataHTML() {
+    const rows = ORB_DATA_CATS.map(c => '<label class="ssp-orb-auto" style="display:flex;margin:3px 0">'
+        + '<input type="checkbox" data-orb-datacat="' + esc(c.id) + '"' + (orbDataPickOf(c.id) ? ' checked' : '') + '>'
+        + '<b style="font-weight:600">' + esc(c.name) + '</b>'
+        + (c.hint ? '<span style="opacity:.5">' + esc(c.hint) + '</span>' : '')
+        + '</label>').join('');
+    let html = '<div class="ssp-orb-empty" style="padding:2px 0 9px">'
+        + '把酒馆里散着的数据打成一个 zip：角色卡 / 聊天记录 / 世界书 / 面具 / 预设 · 模板 / 美化 / 群组 / 背景图。'
+        + '包里带 <b>说明.txt</b> 和 <b>manifest.json</b>（清单 + 每项数量），换机器照着放回去就行。</div>'
+        + '<div class="ssp-orb-fl" style="margin-bottom:4px"><span>要导哪些</span>' + rows + '</div>'
+        + '<div class="ssp-orb-nnew">'
+        + '<span class="ssp-pbtn' + (orbDataBusy ? '' : ' primary') + '" data-orb-dataexport="1">'
+        + (orbDataBusy ? '<i class="fa-solid fa-spinner fa-spin"></i>打包中…' : '<i class="fa-solid fa-file-zipper"></i>一键导出全部')
+        + '</span></div>';
+    if (orbDataBusy || orbDataLine) html += '<div class="ssp-orb-pcount">' + esc(orbDataLine) + '</div>';
+    if (orbDataLog.length) {
+        html += '<div class="ssp-orb-empty" style="padding:4px 0;color:#ffb3bb">'
+            + orbDataLog.slice(-8).map(esc).join('<br>')
+            + (orbDataLog.length > 8 ? '<br>…共 ' + orbDataLog.length + ' 条' : '') + '</div>';
+    }
+    if (orbDataDone) {
+        html += '<div class="ssp-orb-empty" style="padding:8px 0 0">上次导出：<b>' + esc(orbDataDone.name) + '</b>'
+            + '（' + esc(orbDataDone.size) + '）<br>' + esc(orbDataDone.summary) + '</div>';
+    }
+    html += '<div class="ssp-orb-empty" style="padding-top:9px">'
+        + '全程只读 —— 不会改动你库里任何东西。打包在浏览器里做，大包会占一点内存；背景图那项动辄几百 MB。<br>'
+        + '不含：酒馆的自动备份目录 data/backups/、user/files 里没有列表接口的扩展私有文件、缩略图（会重建）。</div>';
+    return html;
+}
+
+/* ---- 读接口的两个小封装（都在同一个 origin，带上酒馆的请求头） ---- */
+async function orbDataPost(url, body) {
+    const ctx = getContext() || {};
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: ctx.getRequestHeaders ? ctx.getRequestHeaders() : {},
+        body: JSON.stringify(body || {}),
+        cache: 'no-cache',
+    });
+    if (!res || !res.ok) throw new Error(url + ' → HTTP ' + (res ? res.status : '网络错误'));
+    return await res.json();
+}
+async function orbDataBlob(url) {
+    const res = await fetch(url, { cache: 'no-cache' });
+    if (!res || !res.ok) throw new Error(url + ' → HTTP ' + (res ? res.status : '网络错误'));
+    return await res.blob();
+}
+/** 数组或对象都要吃得下（不同端点的返回形状不完全一样） */
+function orbDataArr(v) {
+    if (Array.isArray(v)) return v;
+    if (v && Array.isArray(v.chats)) return v.chats;
+    if (v && Array.isArray(v.items)) return v.items;
+    return [];
+}
+function orbDataNameOf(o, i, prefix) {
+    if (typeof o === 'string') return orbDataSafe(o, prefix + (i + 1));
+    return orbDataSafe((o && (o.name || o.filename || o.file_name)) || (prefix + (i + 1)), prefix + (i + 1));
+}
+
+/** 说明.txt —— 换机器的人（或半年后的自己）照着这个放回去 */
+function orbDataReadme(counts, picks) {
+    const L = [];
+    L.push('鼠鼠小助手 · 全量数据备份');
+    L.push('导出时间：' + new Date().toLocaleString());
+    L.push('');
+    L.push('一、包里有什么（数量见 manifest.json）');
+    L.push('  settings.json        酒馆设置原文 —— 面具(personas)/标签/世界书设置/各扩展数据都在里面');
+    L.push('  characters/          角色卡 PNG 原图（卡数据在 PNG 里，酒馆直接认）');
+    L.push('  characters/<角色>/   该角色的表情差分图（酒馆的约定就是放这儿）');
+    L.push('  chats/<角色>/        聊天记录，原始 .jsonl');
+    L.push('  worlds/              世界书（每本一个 json）');
+    L.push('  themes/              美化（主题文件）');
+    L.push('  presets/             预设与模板：openai / textgen / novelai / koboldai /');
+    L.push('                       instruct / context / sysprompt / reasoning / quickreplies / movingUI');
+    L.push('  groups/              群组设定');
+    L.push('  group chats/         群聊记录');
+    L.push('  User Avatars/        面具头像');
+    L.push('  backgrounds/         背景图');
+    L.push('');
+    L.push('二、怎么放回去（全部放进 data/<你的用户名>/ 下面）');
+    L.push('  settings.json   → 直接覆盖同名文件（放之前先备份现有的！）');
+    L.push('  characters/     → characters/');
+    L.push('  chats/          → chats/（里面已经是「角色名/聊天文件.jsonl」的层级）');
+    L.push('  worlds/         → worlds/');
+    L.push('  themes/         → themes/');
+    L.push('  presets/openai  → OpenAI Settings/        presets/textgen → TextGen Settings/');
+    L.push('  presets/novelai → NovelAI Settings/       presets/koboldai → KoboldAI Settings/');
+    L.push('  presets/instruct → instruct/              presets/context → context/');
+    L.push('  presets/sysprompt → sysprompt/            presets/reasoning → reasoning/');
+    L.push('  presets/quickreplies → QuickReplies/      presets/movingUI → movingUI/');
+    L.push('  groups/         → groups/                 group chats/ → group chats/');
+    L.push('  User Avatars/   → User Avatars/           backgrounds/ → backgrounds/');
+    L.push('  放完刷新酒馆页面。');
+    L.push('');
+    L.push('三、注意');
+    L.push('  · 这份包是**只读导出**出来的，没改动原库任何东西。');
+    L.push('  · 面具(persona)的文字在 settings.json 里；头像在 User Avatars/ 里，两边要一起放回去。');
+    L.push('  · 本扩展自己的数据（面具/预设/美化绑定、存档记录、世界书栏绑定、DLC、番外）');
+    L.push('    存在 settings.json 的 extension_settings.shushu_panel 里，跟着 settings.json 一起走。');
+    L.push('');
+    L.push('四、这份包**不含**什么（以及为什么）');
+    L.push('  · data/backups/（酒馆自己滚动的聊天/设置自动备份，通常几十上百 MB）—— 要就整个目录一起拷。');
+    L.push('  · user/files、user/images 里的扩展私有文件（手机相册、主题引擎变量等）—— 酒馆没有列表接口，读不到；');
+    L.push('    其中一部分数据本来就在 settings.json 的 extension_settings 里，已经在包里了。');
+    L.push('  · thumbnails/（缩略图，酒馆会自己重新生成）。');
+    if (counts && counts.__failed) L.push('  · 有 ' + counts.__failed + ' 项没拿到（见面板上的失败明细）。');
+    L.push('');
+    return L.join('\n');
+}
+
+/** 真正干活：把选中的类别收进一个 JSZip，返回 { blob, name, counts }。
+    单项失败不中断（记进 orbDataLog），最后照常出一个包 —— 有总比没有强。 */
+async function orbDataBuild() {
+    const picks = orbDataPicked();
+    const counts = {};
+    const hdrs = () => { const c = getContext() || {}; return c.getRequestHeaders ? c.getRequestHeaders() : {}; };
+    const now = new Date();
+    const root = '鼠鼠备份_' + orbDataStamp(now) + '/';
+    let lastPaint = 0;
+    const say = s => {
+        orbDataLine = s;
+        const t = Date.now();
+        if (orbOpenNow && orbTab === 'data' && t - lastPaint > 120) { lastPaint = t; renderOrbPanel(); }
+    };
+    orbDataBusy = true; orbDataLog = []; orbDataDone = null;
+    say('准备打包器…');
+    if (orbOpenNow && orbTab === 'data') renderOrbPanel();
+    const zip = new (await orbDataZipCtor())();
+    const put = (p, d) => zip.file(root + p, d);
+
+    /* ① 一次 settings/get：酒馆会把 themes / 预设 / 模板 / 世界书名 全塞在这个响应里 */
+    let S = null;
+    const needS = picks.some(p => p === 'settings' || p === 'presets' || p === 'themes' || p === 'worlds');
+    if (needS) {
+        say('读取酒馆设置 / 预设 / 主题…');
+        S = await orbDataPost('/api/settings/get', {});
+    }
+
+    /* ② 角色卡（静态路径直接拿原图） */
+    let chars = [];
+    if (picks.includes('chars') || picks.includes('chats')) {
+        try { chars = orbDataArr(await orbDataPost('/api/characters/all', {})); }
+        catch (e) { orbDataLog.push('角色列表：' + e.message); }
+    }
+    if (picks.includes('chars')) {
+        let i = 0;
+        for (const c of chars) {
+            const av = String((c && c.avatar) || '');
+            if (!av) continue;
+            i += 1;
+            say('角色卡 ' + i + '/' + chars.length + '：' + ((c && c.name) || av));
+            try { put('characters/' + orbDataSafe(av, 'card' + i + '.png'), await orbDataBlob('/characters/' + encodeURIComponent(av))); }
+            catch (e) { orbDataLog.push('角色卡 ' + av + '：' + e.message); }
+        }
+        counts.characters = i;
+    }
+
+    /* ③ 聊天记录（要原始 jsonl：export 带 format:'jsonl' 时它直接回原文） */
+    if (picks.includes('chats')) {
+        let n = 0, done = 0;
+        for (const c of chars) {
+            const av = String((c && c.avatar) || '');
+            if (!av) continue;
+            const dir = orbDataSafe(String((c && c.name) || av).replace(/\.png$/i, ''), '未命名');
+            let list = [];
+            try { list = orbDataArr(await orbDataPost('/api/characters/chats', { avatar_url: av, simple: true })); }
+            catch (e) { orbDataLog.push('聊天清单 ' + av + '：' + e.message); continue; }
+            for (const it of list) {
+                const f0 = String((it && (it.file_name || it.file)) || '');
+                if (!f0) continue;
+                const file = /\.jsonl$/i.test(f0) ? f0 : f0 + '.jsonl';
+                try {
+                    const ex = await orbDataPost('/api/chats/export', {
+                        file: file, avatar_url: av, format: 'jsonl', exportfilename: file,
+                    });
+                    put('chats/' + dir + '/' + orbDataSafe(file, 'chat.jsonl'), String((ex && ex.result) || ''));
+                    n += 1;
+                    if (n % 5 === 0) say('聊天记录 ' + n + ' 份…');
+                } catch (e) { orbDataLog.push('聊天 ' + file + '：' + e.message); }
+            }
+            done += 1;
+            if (done % 4 === 0) say('聊天记录：已扫 ' + done + '/' + chars.length + ' 张卡，拿到 ' + n + ' 份');
+        }
+        counts.chats = n;
+    }
+
+    /* ④-2 表情差分：/api/sprites/get?name=<角色文件夹> 返回 {label, path}，path 直接能 GET。
+       落盘位置照酒馆的约定：characters/<角色文件夹>/<表情文件> —— 恢复时把文件夹整个拷回去就认。 */
+    if (picks.includes('sprites') && chars.length) {
+        let n = 0;
+        for (const c of chars) {
+            const av = String((c && c.avatar) || '');
+            if (!av) continue;
+            const base = av.replace(/\.png$/i, '');
+            const folder = orbDataSafe(base, 'char');
+            let list = [];
+            try {
+                const res = await fetch('/api/sprites/get?name=' + encodeURIComponent(base), { cache: 'no-cache' });
+                if (res.ok) list = orbDataArr(await res.json());
+            } catch (e) { orbDataLog.push('表情清单 ' + folder + '：' + e.message); }
+            if (!list.length) continue;
+            say('表情差分：' + folder + '（' + list.length + ' 张）');
+            for (const it of list) {
+                const p = String((it && it.path) || '').split('?')[0];
+                const file = p.split('/').pop();
+                if (!p || !file) continue;
+                try { put('characters/' + folder + '/' + orbDataSafe(file, 'sprite.png'), await orbDataBlob(p)); n += 1; }
+                catch (e) { orbDataLog.push('表情 ' + p + '：' + e.message); }
+            }
+        }
+        counts.sprites = n;
+    }
+
+    /* ④ 世界书内容 */
+    if (picks.includes('worlds') && S) {
+        const names = Array.isArray(S.world_names) ? S.world_names : [];
+        let n = 0;
+        for (const nm of names) {
+            n += 1;
+            say('世界书 ' + n + '/' + names.length + '：' + nm);
+            try { put('worlds/' + orbDataSafe(nm, 'book' + n) + '.json', JSON.stringify(await orbDataPost('/api/worldinfo/get', { name: nm }), null, 2)); }
+            catch (e) { orbDataLog.push('世界书 ' + nm + '：' + e.message); }
+        }
+        counts.worlds = names.length;
+    }
+
+    /* ⑤ settings.json —— 存**原文**，一个字都不动 */
+    if (picks.includes('settings') && S && S.settings !== undefined) {
+        put('settings.json', typeof S.settings === 'string' ? S.settings : JSON.stringify(S.settings, null, 4));
+        counts.settingsJson = 1;
+    }
+
+    /* ⑥ 预设与模板（响应里就是解析好的对象数组，按名字落盘） */
+    if (picks.includes('presets') && S) {
+        const dump = (arr, sub) => {
+            const list = Array.isArray(arr) ? arr : [];
+            list.forEach((o, i) => put('presets/' + sub + '/' + orbDataNameOf(o, i, sub) + '.json', JSON.stringify(o, null, 2)));
+            counts['presets_' + sub] = list.length;
+        };
+        dump(S.openai_settings, 'openai');
+        dump(S.textgenerationwebui_presets, 'textgen');
+        dump(S.novelai_settings, 'novelai');
+        dump(S.koboldai_settings, 'koboldai');
+        dump(S.instruct, 'instruct');
+        dump(S.context, 'context');
+        dump(S.sysprompt, 'sysprompt');
+        dump(S.reasoning, 'reasoning');
+        dump(S.quickReplyPresets, 'quickreplies');
+        dump(S.movingUIPresets, 'movingUI');
+    }
+
+    /* ⑦ 美化（主题） */
+    if (picks.includes('themes') && S) {
+        const list = Array.isArray(S.themes) ? S.themes : [];
+        list.forEach((t, i) => put('themes/' + orbDataNameOf(t, i, 'theme') + '.json', JSON.stringify(t, null, 4)));
+        counts.themes = list.length;
+    }
+
+    /* ⑧ 面具头像 */
+    if (picks.includes('personas')) {
+        let list = [];
+        try { list = orbDataArr(await orbDataPost('/api/avatars/get', {})); }
+        catch (e) { orbDataLog.push('头像清单：' + e.message); }
+        let n = 0;
+        for (let i = 0; i < list.length; i++) {
+            const nm = orbDataNameOf(list[i], i, 'avatar');
+            n += 1;
+            say('面具头像 ' + n + '/' + list.length + '：' + nm);
+            try { put('User Avatars/' + nm, await orbDataBlob('/User%20Avatars/' + encodeURIComponent(nm))); }
+            catch (e) { orbDataLog.push('头像 ' + nm + '：' + e.message); }
+        }
+        counts.personaAvatars = n;
+    }
+
+    /* ⑨ 群组 + 群聊 */
+    if (picks.includes('groups')) {
+        let gs = [];
+        try { gs = orbDataArr(await orbDataPost('/api/groups/all', {})); }
+        catch (e) { orbDataLog.push('群组清单：' + e.message); }
+        let gc = 0;
+        for (const g of gs) {
+            const id = String((g && g.id) || '');
+            if (!id) continue;
+            say('群组：' + ((g && g.name) || id));
+            put('groups/' + orbDataSafe(id, 'group') + '.json', JSON.stringify(g, null, 2));
+            try {
+                const list = orbDataArr(await orbDataPost('/api/chats/search', { group_id: id }));
+                for (const it of list) {
+                    const f0 = String((it && it.file_name) || '');
+                    if (!f0) continue;
+                    const file = /\.jsonl$/i.test(f0) ? f0 : f0 + '.jsonl';
+                    const ex = await orbDataPost('/api/chats/export', {
+                        file: file, avatar_url: '', is_group: true, format: 'jsonl', exportfilename: file,
+                    });
+                    put('group chats/' + orbDataSafe(file, 'group.jsonl'), String((ex && ex.result) || ''));
+                    gc += 1;
+                }
+            } catch (e) { orbDataLog.push('群聊 ' + id + '：' + e.message); }
+        }
+        counts.groups = gs.length;
+        counts.groupChats = gc;
+    }
+
+    /* ⑩ 背景图 */
+    if (picks.includes('media')) {
+        let list = [];
+        try { list = orbDataArr(await orbDataPost('/api/backgrounds/all', {})); }
+        catch (e) { orbDataLog.push('背景清单：' + e.message); }
+        let n = 0;
+        for (let i = 0; i < list.length; i++) {
+            const nm = orbDataNameOf(list[i], i, 'bg');
+            n += 1;
+            say('背景图 ' + n + '/' + list.length + '：' + nm);
+            try { put('backgrounds/' + nm, await orbDataBlob('/backgrounds/' + encodeURIComponent(nm))); }
+            catch (e) { orbDataLog.push('背景 ' + nm + '：' + e.message); }
+        }
+        counts.backgrounds = n;
+    }
+
+    /* ⑪ 清单 + 说明 */
+    if (orbDataLog.length) counts.failed = orbDataLog.length;
+    put('说明.txt', orbDataReadme(counts, picks));
+    put('manifest.json', JSON.stringify({
+        tool: '鼠鼠小助手 · 数据导出',
+        panelVersion: PANEL_VERSION,
+        exportedAt: now.toISOString(),
+        stVersion: (getContext() || {}).version || '',
+        categories: picks,
+        counts: counts,
+        note: 'settings.json 是原文；其余按酒馆数据目录结构放好了，说明见 说明.txt。',
+    }, null, 2));
+
+    say('正在压缩（大包会慢一点）…');
+    const blob = await zip.generateAsync(
+        { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+        m => say('正在压缩 ' + Math.round(m.percent) + '%…'));
+    const name = '鼠鼠备份_' + orbDataStamp(now) + '.zip';
+    counts.__size = blob.size;
+    return { blob: blob, name: name, counts: counts };
+}
+
+/** 拿 JSZip：酒馆自带（public/lib/jszip.min.js），不引外部 CDN */
+async function orbDataZipCtor() {
+    if (window.JSZip) return window.JSZip;
+    const mod = await import('/lib/jszip.min.js');
+    const J = (mod && (mod.default || mod.JSZip)) || window.JSZip;
+    if (!J) throw new Error('拿不到酒馆自带的 JSZip');
+    return J;
+}
+
+function orbDataDownload(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        try { document.body.removeChild(a); } catch (e) { }
+        try { URL.revokeObjectURL(url); } catch (e) { }
+    }, 5000);
+}
+
+async function orbDataExport() {
+    if (orbDataBusy) { toast('正在打包了，稍等', 'info'); return false; }
+    if (!orbDataPicked().length) { toast('先勾选至少一类数据', 'warning'); return false; }
+    orbDataBusy = true;
+    let r = null;
+    try {
+        r = await orbDataBuild();
+        orbDataDownload(r.blob, r.name);
+        const bits = Object.keys(r.counts).filter(k => k.indexOf('__') !== 0 && k !== 'failed')
+            .map(k => k + ' ' + r.counts[k]).join(' · ');
+        orbDataDone = { name: r.name, size: orbDataFmtSize(r.blob.size), summary: bits || '（空包？看看是不是都没数据）' };
+        orbDataLine = '';
+        toast('导出完成：' + r.name + '（' + orbDataFmtSize(r.blob.size) + '）', 'success');
+    } catch (e) {
+        orbDataLine = '';
+        orbDataLog.push('打包失败：' + ((e && e.message) || e));
+        toast('导出失败：' + ((e && e.message) || e), 'error');
+    }
+    orbDataBusy = false;
+    if (orbOpenNow && orbTab === 'data') renderOrbPanel();
+    return !!r;
+}
 
 /* ============================ 面具（用户设定）栏 ============================
    读：酒馆把面具放在 power_user.personas（id → 名字），上下文里能用
@@ -7640,6 +8093,14 @@ function bindOrb() {
         renderOrbPanel();
     });
 
+    /* 数据页：勾选要导哪几类（复选框走 change，不是 click —— click 时状态还没翻） */
+    document.addEventListener('change', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbDatacat === undefined) return;
+        orbDataPick[el.dataset.orbDatacat] = !!el.checked;
+        renderOrbPanel();
+    });
+
     /* 世界书页搜索。
        ⚠️ 这里跟番外/面具页不一样，**整页重画**而不是只换列表：
        分类标签栏上的计数（共 N 本）和上面那行「筛出 X / Y」都得跟着搜索词变，
@@ -8096,13 +8557,14 @@ function bindOrb() {
             if (orbTab === 'dlc') orbDlcEnsure();              // DLC 页：按需拉那本书的条目
             return;
         }
+        /* 数据页：一键导出全量备份（只读，不写库里任何东西） */
+        if (t.closest('[data-orb-dataexport]')) { orbDataExport(); return; }
         /* 番外页：清除搜索 */
         if (t.closest('[data-orb-nclear]')) { orbNSearch = ''; renderOrbPanel(); return; }
         /* 魔法棒：收纳 / 展开悬浮球 */
         if (t.closest('[data-orb-wand]')) { orbSetCollapsed(!orbCollapsed); return; }
         /* 存档页：刷新 / 读档 / 删除 / 清除搜索 */
-        if (t.closest('[data-orb-chrefresh]')) { orbChatsFetch(); return; }
-        if (t.closest('[data-orb-chclear]')) { orbChSearch = ''; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-chrefresh]')) { orbChatsFetch(); return; }        if (t.closest('[data-orb-chclear]')) { orbChSearch = ''; renderOrbPanel(); return; }
         const cren = t.closest('[data-orb-chatren]');
         if (cren) {
             const file = cren.dataset.orbChatren, nm = cren.dataset.orbChatname || file;
@@ -8243,7 +8705,9 @@ function init() {
         ctx.eventSource?.on?.(ctx.eventTypes?.APP_READY, () => { ensureMount(); mountDrawer(); reclaim('app-ready'); try { orbOnCharChanged(); } catch (e) { } });
     } catch (e) { warn('事件挂载失败', e); }
 
-    log('v0.3.0 已加载（' + activeDevice() + '）');
+    /* ⚠️ 这里以前写死了 v0.3.0 —— 面板显示 1.31.x、控制台却喊 0.3.0，对不上。
+       版本号只有两处真源：PANEL_VERSION 和 manifest.json，日志跟着 PANEL_VERSION 走。 */
+    log('v' + PANEL_VERSION + ' 已加载（' + activeDevice() + '）');
     return true;
 }
 
@@ -8271,6 +8735,8 @@ if (globalThis.__SSP_TEST__) {
         importRefresh, importTagsOf, importAsk, importHandleFile, onImportFileChange, onUrlImportClick,
         bindImportMerge, restoreImportMerge, importMatchReason, importTextSim, importSimThreshold, IMPORT_SIM_DEFAULT,
         importSnapshotExtras, importRestoreExtras, importDiffHTML,
+        ORB_DATA_CATS, orbDataPickOf, orbDataPicked, orbDataHTML, orbDataBuild, orbDataExport,
+        orbDataSafe, orbDataFmtSize, orbDataReadme, orbDataArr, orbDataNameOf, orbDataZipCtor, orbDataPick,
         extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
         migrateTweaksSettings, TWEAKS_MODULE_NAME,
         restoreCardStyle, hdCardAvatars, cardDrawerHTML, mountDrawer, attrOf, setAttr,
