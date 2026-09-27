@@ -4255,7 +4255,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.16';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.17';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -7443,6 +7443,13 @@ async function orbImpRestore(skipPrep) {
             if (!API_ID[sub]) {
                 res.skip += 1;
                 if (res.detail.length < 12) res.detail.push('模板 ' + sub + '/' + nm + '：不认识的目录，跳过');
+                continue;
+            }
+            /* 防线：老版本导出 bug 留下的包里，预设文件名是**整段 JSON**（`{ ...` / `_n __temp__` 那种）。
+               这种条目绝不能写成文件 —— 一旦漏进去，预设目录里就多一堆垃圾选项（真踩过，删了 28 个）。 */
+            if (/^[_{]/.test(nm) || nm.indexOf('__') >= 0 || nm.length > 100) {
+                res.skip += 1;
+                if (res.detail.length < 12) res.detail.push('模板 ' + sub + '/' + nm.slice(0, 24) + '…：名字像 JSON 块（旧版导出的 bug），跳过');
                 continue;
             }
             say('预设：' + sub + ' / ' + nm);
