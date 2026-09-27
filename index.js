@@ -4255,7 +4255,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.14';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.15';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6767,10 +6767,13 @@ async function orbDataBlob(url) {
     if (!res || !res.ok) throw new Error(url + ' → HTTP ' + (res ? res.status : '网络错误'));
     return await res.blob();
 }
-/** 数组或对象都要吃得下（不同端点的返回形状不完全一样） */
+/** 数组或对象都要吃得下（不同端点的返回形状不完全一样）
+    ⚠️ backgrounds/all 回的是 {images:[…]}、characters/chats 可能是 {chats:[…]} ——
+       漏一个形状就是整类数据静默变 0（背景图就这么漏过一次）。 */
 function orbDataArr(v) {
     if (Array.isArray(v)) return v;
     if (v && Array.isArray(v.chats)) return v.chats;
+    if (v && Array.isArray(v.images)) return v.images;
     if (v && Array.isArray(v.items)) return v.items;
     return [];
 }

@@ -1751,7 +1751,20 @@ mask 渐隐本身没问题（`transparent 0% → #000 var(--pv-fade)` 就是标�
 | 面板 UI | ✓ 「数据」标签在、10 个勾选框、勾选 change 生效、按钮在 |
 | 表情接口 | ✓ `/api/sprites/get?name=Seraphina` 返回 28 项（该角色卡已删，属孤儿，故包里 0 张） |
 
-## 📌 截止目前的实测情况（v1.31.14）
+## 🐞 修：导出时「背景图」整类变 0 · v1.31.15
+
+自己给自己跑存底包时发现的：勾了背景图，包里却一张都没有。
+
+**根因**：`/api/backgrounds/all` 回的**不是数组**，是 `{ images: [...], config: {...} }`。
+而我的容器兼容函数 `orbDataArr()` 当时只认「数组 / `.chats` / `.items`」三种形状 ——
+`.images` 没认，于是这一整类**静默变成 0**（不报错、不提示，最阴的那种）。
+
+**改法**：`orbDataArr()` 补上 `.images`，并在注释里写明「漏一个形状就是整类数据静默变 0」。
+
+**实测**：修前背景图 0 张、存底包 25.1 MB；修后 **49 张、包 46.1 MB**（差值正好是 backgrounds 目录 21 MB），
+用 PowerShell 的 `ZipFile` 独立列条目核对：**313 条**，分布 `presets 147 / backgrounds 50 / chats 44 / themes 33 / worlds 15 / characters 14 / User Avatars 6` + manifest + 说明 + settings.json。
+
+## 📌 截止目前的实测情况（v1.31.15）
 
 | 项 | 状态 |
 |---|---|
