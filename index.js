@@ -4255,7 +4255,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.17';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.18';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -7692,9 +7692,14 @@ async function orbPersonaCreate(name, desc) {
         if (!blob) { toast('占位图生成失败，改用酒馆的上传', 'warning'); return null; }
         const ctx = getContext();
         const file = new File([blob], 'persona.png', { type: 'image/png' });
+        /* ⚠️ overwrite_name 就是**最终文件名**（服务端：sanitize(overwrite_name || Date.now()+'.png')），
+           传面具名进去会存成「若语君」这种**没有后缀**的文件 → mime 不是图片 →
+           酒馆的「用户设定」根本不渲染它（用户反馈的"创建了之后找不到"就是这个）。
+           所以这里自己拼一个带 .png 的安全文件名，面具 id 也用同一个（跟酒馆一致：id 都是 xxx.png）。 */
+        const id = (String(nm).replace(/[\\/:*?"<>|]/g, '').replace(/^\.+/, '').trim() || 'persona') + '.png';
         const fd = new FormData();
         fd.append('avatar', file);
-        fd.append('overwrite_name', nm);
+        fd.append('overwrite_name', id);
         const res = await fetch('/api/avatars/upload', {
             method: 'POST',
             headers: ctx.getRequestHeaders({ omitContentType: true }),
@@ -7702,20 +7707,23 @@ async function orbPersonaCreate(name, desc) {
         });
         if (!res.ok) { toast('创建失败：' + res.status, 'warning'); return null; }
         const data = await res.json().catch(() => ({}));
-        const path = data && data.path ? data.path : '';
-        const id = String(path).split('/').pop();
-        if (!id) { toast('创建失败：服务端没返回文件名', 'warning'); return null; }
+        /* 服务端回的是裸文件名（不是 URL）；拿不到就用我们拼的那个 */
+        const made = String((data && data.path) || '');
+        const finalId = made && /\.(png|jpg|jpeg|webp|gif)$/i.test(made) ? made : id;
         /* 写进酒馆的面具数据（等于 initPersona 做的事） */
         const pu = ctx.powerUserSettings;
         if (!pu.personas) pu.personas = {};
-        pu.personas[id] = nm;
+        pu.personas[finalId] = nm;
         if (!pu.persona_descriptions) pu.persona_descriptions = {};
-        pu.persona_descriptions[id] = { description: String(desc || ''), position: 0, connections: [] };
+        pu.persona_descriptions[finalId] = { description: String(desc || ''), position: 0, connections: [] };
         save();
-        /* 通知酒馆（它会刷新自己的面具列表） */
-        try { if (ctx.eventSource && ctx.eventTypes && ctx.eventTypes.PERSONA_CREATED) await ctx.eventSource.emit(ctx.eventTypes.PERSONA_CREATED, { avatarId: id, name: nm, description: String(desc || '') }); } catch (e) { }
-        toast('已新建面具：' + nm, 'success');
-        return id;
+        /* 通知酒馆（它会刷新自己的面具列表）——
+           ⚠️ 实测这个 build 里 **没有任何 PERSONA_CREATED 的监听者**（全 public 搜过），
+              酒馆是在打开「用户设定」时自己 getUserAvatars() 重画的，所以 emit 只是尽人事。
+              真正让列表出现的是"文件名带上了后缀"这件事本身。 */
+        try { if (ctx.eventSource && ctx.eventTypes && ctx.eventTypes.PERSONA_CREATED) await ctx.eventSource.emit(ctx.eventTypes.PERSONA_CREATED, { avatarId: finalId, name: nm, description: String(desc || '') }); } catch (e) { }
+        toast('已新建面具：' + nm + '（打开一次「用户设定」就能看到）', 'success');
+        return finalId;
     } catch (e) {
         toast('创建失败：' + e.message, 'warning');
         return null;
@@ -9239,6 +9247,7 @@ if (globalThis.__SSP_TEST__) {
         ORB_DATA_CATS, orbDataPickOf, orbDataPicked, orbDataHTML, orbDataBuild, orbDataExport,
         orbDataSafe, orbDataFmtSize, orbDataReadme, orbDataArr, orbDataNameOf, orbDataZipCtor, orbDataPick,
         orbDataPost, orbDataBlob, getSettings,
+        orbPersonaCreate, orbPersonaNew, orbPersonas, orbPlaceholderBlob, orbPersonaDesc,
         ORB_IMP_CATS, orbImpHTML, orbImpRead, orbImpRestore, orbImpAvatarOf, orbImpPick,
         extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
         migrateTweaksSettings, TWEAKS_MODULE_NAME,
