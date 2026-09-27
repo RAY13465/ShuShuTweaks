@@ -1302,7 +1302,11 @@ function importTextSim(a, b) {
 
 /** 卡里的关键信息：姓名 + 人设/描述（一次解析，都拿到） */
 async function importCardData(file) {
-    const out = { name: '', description: '', personality: '' };
+    /* 后 7 项只给「这次更新会改什么」那张清单用，不参与认卡（认卡只看 name/description/personality） */
+    const out = {
+        name: '', description: '', personality: '',
+        scenario: '', first_mes: '', mes_example: '', creator_notes: '', tags: '', world: '', regexCount: 0,
+    };
     try {
         const fname = String(file && file.name || '');
         const ext = (fname.match(/\.(\w+)$/) || [, ''])[1].toLowerCase();
@@ -1314,6 +1318,17 @@ async function importCardData(file) {
             out.name = String(d.name || json.name || '').trim();
             out.description = String(d.description || json.description || '').trim();
             out.personality = String(d.personality || json.personality || '').trim();
+            /* 清单用的那几项（读不到就是空串，清单会自己跳过） */
+            const g = k => String(d[k] != null ? d[k] : (json[k] != null ? json[k] : '')).trim();
+            out.scenario = g('scenario');
+            out.first_mes = g('first_mes');
+            out.mes_example = g('mes_example');
+            out.creator_notes = g('creator_notes') || g('creatorcomment');
+            const tg = Array.isArray(d.tags) ? d.tags : (Array.isArray(json.tags) ? json.tags : []);
+            out.tags = tg.map(x => String(x)).join('、');
+            const dx = (d.extensions && typeof d.extensions === 'object') ? d.extensions : {};
+            out.world = String(dx.world || '').trim();
+            out.regexCount = Array.isArray(dx.regex_scripts) ? dx.regex_scripts.length : 0;
         };
         if (ext === 'json') {
             pick(JSON.parse(await file.text()));
@@ -1501,10 +1516,70 @@ function importTagsOf(avatar) {
     }).filter(Boolean);
 }
 
+/** 「这次更新会改什么」—— 新旧卡逐项比一遍，做成一张清单塞进确认弹窗。
+    原则：只说人看得懂的事，不堆数据。
+      · 文字字段：没变 / 改了（字数前后）/ 新增 / 会被清空
+      · 世界书绑定：按「新卡没绑就用旧的兜住，新卡绑了听新卡的」直接写结果
+      · 本地正则：新卡带了几条、旧的会不会补回
+      · 收藏：你是收藏就保留
+    读不出内容的新卡（解析挂了）返回空串 —— 宁可不显示，也不能把"没读出来"说成"会被清空"。 */
+function importDiffHTML(newCard, oldChar) {
+    const n = newCard || {};
+    const o = oldChar || {};
+    const oe = (o.data && o.data.extensions) || {};
+    const readable = !!(n.description || n.personality || n.first_mes || n.scenario || n.mes_example);
+    if (!readable) return '<p style="opacity:.6;font-size:.88em;margin:8px 0 2px">这张卡的内容没读出来，列不出改动清单。</p>';
+    const len = v => String(v == null ? '' : v).replace(/\s+/g, '').length;
+    const rows = [];
+    const TEXT = [
+        ['姓名', o.name, n.name],
+        ['简介', o.description, n.description],
+        ['人设', o.personality, n.personality],
+        ['场景', o.scenario, n.scenario],
+        ['开场白', o.first_mes, n.first_mes],
+        ['示例对话', o.mes_example, n.mes_example],
+        ['作者备注', o.creatorcomment || o.creator_notes, n.creator_notes],
+    ];
+    TEXT.forEach(pair => {
+        const label = pair[0], a = pair[1], b = pair[2];
+        const la = len(a), lb = len(b);
+        if (String(a == null ? '' : a) === String(b == null ? '' : b)) { rows.push([label, '没变', '']); return; }
+        if (!lb && la) { rows.push([label, '会被清空', la + ' 字 → 空']); return; }
+        if (!la && lb) { rows.push([label, '新增', lb + ' 字']); return; }
+        const d = lb - la;
+        rows.push([label, '改了', la + ' → ' + lb + ' 字（' + (d > 0 ? '+' : '') + d + '）']);
+    });
+    /* 世界书绑定：第 2 列只放短结论，长的解释一律丢第 3 列 ——
+       不然这一列会被撑宽，上面几行的字数变化全被推到很右边，看着像两截。 */
+    const ow = String(oe.world || '').trim(), nw = String(n.world || '').trim();
+    if (ow !== nw) {
+        if (!nw) rows.push(['世界书绑定', '保留你的', '新卡没绑 → 仍用《' + ow + '》']);
+        else if (!ow) rows.push(['世界书绑定', '新卡绑了', '《' + nw + '》']);
+        else rows.push(['世界书绑定', '换成', '《' + nw + '》']);
+    } else {
+        rows.push(['世界书绑定', '没变', ow ? '《' + ow + '》' : '都没绑']);
+    }
+    /* 本地正则：新卡带的 + 旧的不丢 */
+    const orc = Array.isArray(oe.regex_scripts) ? oe.regex_scripts.length : 0;
+    const nrc = Number(n.regexCount || 0);
+    if (nrc === orc) rows.push(['本地正则', '没变', orc + ' 条']);
+    else if (!nrc) rows.push(['本地正则', '补回', '新卡 0 条 → 旧的 ' + orc + ' 条补回']);
+    else if (!orc) rows.push(['本地正则', '新增', '新卡带了 ' + nrc + ' 条']);
+    else rows.push(['本地正则', '合并', orc + ' → ' + nrc + ' 条，旧的缺的补回']);
+    if (o.fav === true || oe.fav === true || oe.fav === 'true') rows.push(['收藏 ★', '保留', '']);
+    const tr = rows.map(r => '<tr><td style="padding:2px 10px 2px 0;opacity:.7;white-space:nowrap">' + esc(r[0]) + '</td>'
+        + '<td style="padding:2px 10px 2px 0">' + esc(r[1]) + '</td>'
+        + '<td style="padding:2px 0;opacity:.55;font-size:.9em">' + esc(r[2]) + '</td></tr>').join('');
+    return '<div style="margin:10px 0 4px;text-align:left">'
+        + '<div style="font-size:.9em;opacity:.8;margin-bottom:3px">这次更新会改这些'
+        + '<span style="opacity:.7">（选「另存为新角色」则库里那张不动）</span>：</div>'
+        + '<table style="border-collapse:collapse;font-size:.92em">' + tr + '</table></div>';
+}
+
 /** 弹一次确认：更新 / 另存为新角色 / 取消
     ⚠️ callGenericPopup 是 (内容, 类型, 输入框默认值, 选项) 四个参数 —— 选项写到第 3 个会被无视，
        自定义按钮就不见了、退化成系统默认的「确定 / 否」。POPUP_RESULT.CUSTOM1/2 = 1001/1002。 */
-async function importAsk(cardName, existingName, reason, sameName) {
+async function importAsk(cardName, existingName, reason, sameName, newCard, oldChar) {
     const ctx = getContext();
     if (!ctx || typeof ctx.callGenericPopup !== 'function') return 'update';
     const R = ctx.POPUP_RESULT || {};
@@ -1516,6 +1591,7 @@ async function importAsk(cardName, existingName, reason, sameName) {
         ${reason ? `<p style="opacity:.6;font-size:.85em">（${esc(reason)}）</p>` : ''}
         ${sameName === false ? `<p style="color:#ff9a6a;font-size:.88em">注意：两边<b>姓名不一样</b>，只是文字重合度够 ——
             可能只是模板相似（比如多角色调度卡）。不确定就选「另存为新角色」。</p>` : ''}
+        ${newCard ? importDiffHTML(newCard, oldChar) : ''}
         <p style="opacity:.75;font-size:.9em">更新：保留聊天 / 素材 / 群组 / 标签（角色数据按文件里的覆盖）<br>
         另存为新角色：库里会多出一张，老的那张不动</p>`;
     const res = await ctx.callGenericPopup(html, TYPE_CONFIRM, '', {
@@ -1626,7 +1702,7 @@ async function importHandleFile(file) {
     if (match) {
         const sameName = importNorm(cardName) && importNorm(cardName) === importNorm(match.name);
         const choice = await importAsk(cardName || importNameFromFile(file), match.name || match.avatar,
-            importMatchReason(file, cardName, cardDesc, cardPers, match), !!sameName);
+            importMatchReason(file, cardName, cardDesc, cardPers, match), !!sameName, card, match);
         if (choice === 'cancel') return { skipped: true };
         if (choice === 'update') target = match.avatar;
     }
@@ -4179,7 +4255,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.12';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.13';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -8194,7 +8270,7 @@ if (globalThis.__SSP_TEST__) {
         importMergeOn, importNorm, importNameFromFile, importCardName, importCardData, importFindMatch, importPost,
         importRefresh, importTagsOf, importAsk, importHandleFile, onImportFileChange, onUrlImportClick,
         bindImportMerge, restoreImportMerge, importMatchReason, importTextSim, importSimThreshold, IMPORT_SIM_DEFAULT,
-        importSnapshotExtras, importRestoreExtras,
+        importSnapshotExtras, importRestoreExtras, importDiffHTML,
         extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
         migrateTweaksSettings, TWEAKS_MODULE_NAME,
         restoreCardStyle, hdCardAvatars, cardDrawerHTML, mountDrawer, attrOf, setAttr,
