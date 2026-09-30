@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 鼠鼠面板工坊 ShuShu Panel —— v0.3
  * ---------------------------------------------------------------------------
  * 把酒馆「角色管理面板」做成可装配的模块：
@@ -1302,10 +1302,11 @@ function importTextSim(a, b) {
 
 /** 卡里的关键信息：姓名 + 人设/描述（一次解析，都拿到） */
 async function importCardData(file) {
-    /* 后 7 项只给「这次更新会改什么」那张清单用，不参与认卡（认卡只看 name/description/personality） */
+    /* 后几项只给「这次更新会改什么」那张清单用，不参与认卡（认卡只看 name/description/personality） */
     const out = {
         name: '', description: '', personality: '',
         scenario: '', first_mes: '', mes_example: '', creator_notes: '', tags: '', world: '', regexCount: 0,
+        character_book: null, thScripts: 0, regex_scripts: [],
     };
     try {
         const fname = String(file && file.name || '');
@@ -1332,6 +1333,10 @@ async function importCardData(file) {
             /* 卡里内嵌的世界书（V2/V3 的 character_book）—— 导入时酒馆不会把它落成世界书，
                得我们自己补（见 importEmbeddedBook 的注释） */
             out.character_book = (d.character_book && typeof d.character_book === 'object') ? d.character_book : null;
+            /* 酒馆助手（TavernHelper）脚本：卡里内嵌的那种，条数给清单比对用 */
+            out.thScripts = (dx.tavern_helper && Array.isArray(dx.tavern_helper.scripts)) ? dx.tavern_helper.scripts.length : 0;
+            /* 局部正则原样带回（清单要对比"代码有没有改"，光比条数看不出来） */
+            out.regex_scripts = Array.isArray(dx.regex_scripts) ? dx.regex_scripts : [];
         };
         if (ext === 'json') {
             pick(JSON.parse(await file.text()));
@@ -1570,9 +1575,38 @@ function importDiffHTML(newCard, oldChar) {
     const oen = ob && Array.isArray(ob.entries) ? ob.entries.length : 0;
     const nen = nb && Array.isArray(nb.entries) ? nb.entries.length : 0;
     if (oen || nen) {
-        rows.push(['内嵌世界书', nen === oen ? '没变' : (nen > oen ? '加了条目' : '少了条目'),
+        /* 光看条数不够 —— 条目**内容/设置**改了也要说（用户要求：变了就得更新） */
+        const bsig = b => (b && Array.isArray(b.entries)
+            ? b.entries.map(e => [String((e && e.content) || '').length, !!e.constant, !!e.selective, Number(e.position) || 0, Number(e.insertion_order) || 0, !!e.enabled].join(':')).join('|')
+            : '');
+        const bodyChanged = bsig(ob) !== bsig(nb);
+        rows.push(['内嵌世界书',
+            (nen === oen ? '条数没变' : (nen > oen ? '加了条目' : '少了条目')) + (bodyChanged ? '，内容/设置有改动' : ''),
             oen + ' → ' + nen + ' 条']);
     }
+    /* 局部正则：**代码**变了也要说（只比条数是看不出来的）*/
+    const orx = Array.isArray(oe.regex_scripts) ? oe.regex_scripts : [];
+    const nrx = Array.isArray(n.regex_scripts) ? n.regex_scripts : [];
+    if (orx.length || nrx.length) {
+        const keyOf = s => String((s && (s.id || s.scriptName || s.name)) || '');
+        const codeOf = s => String((s && (s.replaceString || s.findRegex || s.scriptName || '')) || '');
+        const oldMap = new Map(orx.map(s => [keyOf(s), codeOf(s)]));
+        let rxAdd = 0, rxChg = 0;
+        nrx.forEach(s => {
+            if (!oldMap.has(keyOf(s))) { rxAdd += 1; return; }
+            if (oldMap.get(keyOf(s)) !== codeOf(s)) rxChg += 1;
+        });
+        const bits = [];
+        if (rxAdd) bits.push('新 ' + rxAdd + ' 条');
+        if (rxChg) bits.push('代码改了 ' + rxChg + ' 条');
+        rows.push(['局部正则', bits.length ? bits.join('，') : '没变', orx.length + ' → ' + nrx.length + ' 条']);
+    }
+    /* 酒馆助手脚本（卡里内嵌的 TavernHelper scripts）：条数变了要说。
+       旧卡那份从 live 角色对象里读（跟内嵌世界书一个路子），新卡那份由 importCardData 带回来。 */
+    const oTh = (o.data && o.data.extensions && o.data.extensions.tavern_helper
+        && Array.isArray(o.data.extensions.tavern_helper.scripts)) ? o.data.extensions.tavern_helper.scripts.length : 0;
+    const nTh = typeof n.thScripts === 'number' ? n.thScripts : 0;
+    if (oTh || nTh) rows.push(['酒馆助手脚本', oTh === nTh ? '没变' : (nTh > oTh ? '加了脚本' : '少了脚本'), oTh + ' → ' + nTh + ' 个']);
     /* 本地正则：新卡带的 + 旧的不丢 */
     const orc = Array.isArray(oe.regex_scripts) ? oe.regex_scripts.length : 0;
     const nrc = Number(n.regexCount || 0);
@@ -4373,7 +4407,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.27';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.28';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
