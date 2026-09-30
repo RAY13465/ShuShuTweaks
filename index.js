@@ -1723,6 +1723,34 @@ async function importHandleFile(file) {
             toast('注意：更新后这几颗标签不在了 —— ' + lostTags.join('、') + '（点一下就能加回来）', 'warning');
         }
     }
+    /* ⚠️ 更新完必须**把世界书重新套一遍**（用户反馈："更新了角色卡，世界书好像还是没看到更新"）。
+       原因：套用只在「切聊天 / 切角色」时跑，而更新**同一张卡**不触发切换，
+       还被"同一张卡只套一次"的锁挡着 → 绑定的书不会重新生效。
+       两件事一起做：
+         ① 解开那把锁，按本扩展的绑定重新对齐一遍（v1.31.20 之后顺带会撤掉不属于这张卡的书）
+         ② 卡自己带的 world（酒馆原生那本）如果没生效，也补上 —— 那是随卡更新的，
+            不补的话"新版本换了世界书"根本看不出来 */
+    if (target) {
+        try {
+            const ctx = getContext() || {};
+            const wkey = orbWbChatKey();
+            if (wkey) orbWbAutoArmed.delete(wkey);
+            await orbWbApplyForChar();
+            /* 卡自己的 world：从刚更新完的角色表里读（前面 restore 已经 getCharacters 过一次） */
+            try { if (typeof ctx.getCharacters === 'function') await ctx.getCharacters(); } catch (e) { }
+            const me = (ctx.characters || [])[ctx.characterId];
+            const nativeWorld = String((me && me.data && me.data.extensions && me.data.extensions.world) || '').trim();
+            if (nativeWorld) {
+                const sel = document.getElementById('world_info');
+                const opts = sel ? Array.from(sel.options || []) : [];
+                const hit = opts.some(o => (o.textContent || '').trim() === nativeWorld && o.selected);
+                if (!hit && opts.some(o => (o.textContent || '').trim() === nativeWorld)) {
+                    orbWbSelApply([nativeWorld], []);
+                    toast('这张卡自带的世界书已生效：' + nativeWorld, 'info');
+                }
+            }
+        } catch (e) { /* 世界书这步失败不影响导入本身 */ }
+    }
     return { file: made, updated: !!target, tags: oldTags, lostTags: lostTags, restored: restored };
 }
 
@@ -4255,7 +4283,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.24';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.25';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
