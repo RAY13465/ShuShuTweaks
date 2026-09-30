@@ -4255,7 +4255,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.23';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.24';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -8554,12 +8554,14 @@ function bindOrb() {
         const dx = ev.clientX - sx, dy = ev.clientY - sy;
         if (!moved && Math.abs(dx) + Math.abs(dy) < 6) return;      // 点一下别被当成拖动
         moved = true;
+        /* ⚠️ 这一句要加在写 left/top **之前**：.moving 会把 left/top 的过渡掐掉（见 style.css），
+           否则球会慢半拍追着指针跑（用户反馈的"拖动手感粘滞"）。 */
+        if (o.classList) o.classList.add('moving');
         const w = o.offsetWidth || 52, h = o.offsetHeight || 52;
         const x = Math.max(4, Math.min(window.innerWidth - w - 4, ox + dx));
         const y = Math.max(4, Math.min(window.innerHeight - h - 4, oy + dy));
         o.style.left = Math.round(x) + 'px'; o.style.top = Math.round(y) + 'px';
         o.style.right = 'auto'; o.style.bottom = 'auto';
-        if (o.classList) o.classList.add('moving');
     }, true);
 
     document.addEventListener('pointerup', () => {

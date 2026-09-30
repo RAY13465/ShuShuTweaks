@@ -532,7 +532,14 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     transition: transform .16s ease, box-shadow .16s ease, left .22s cubic-bezier(.4,0,.2,1), top .22s cubic-bezier(.4,0,.2,1);
 }
 #ssp_orb:hover { transform: scale(1.06); box-shadow: 0 8px 26px rgba(0, 0, 0, .62); }
-#ssp_orb.moving { cursor: grabbing; transform: scale(1.1); }
+/* 拖动中：**必须把 left/top 的过渡掐掉** ——
+   它俩本来是给"松手后吸边"做缓动的，但拖动过程中也会生效，
+   于是球慢半拍地追着指针跑，手感"粘滞"（用户在真机上反馈过）。
+   掐掉之后拖动是 1:1 跟手的；松手吸边时再让 JS 把 .moving 摘掉，缓动照旧。 */
+#ssp_orb.moving {
+    cursor: grabbing; transform: scale(1.1);
+    transition: transform .16s ease, box-shadow .16s ease;
+}
 #ssp_orb .ssp-orb-diamond {
     width: 20px; height: 20px; transform: rotate(45deg); border-radius: 3px;
     background: linear-gradient(135deg, #ffffff, #9a9aa2);
