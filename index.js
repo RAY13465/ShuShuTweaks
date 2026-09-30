@@ -1329,6 +1329,9 @@ async function importCardData(file) {
             const dx = (d.extensions && typeof d.extensions === 'object') ? d.extensions : {};
             out.world = String(dx.world || '').trim();
             out.regexCount = Array.isArray(dx.regex_scripts) ? dx.regex_scripts.length : 0;
+            /* 卡里内嵌的世界书（V2/V3 的 character_book）—— 导入时酒馆不会把它落成世界书，
+               得我们自己补（见 importEmbeddedBook 的注释） */
+            out.character_book = (d.character_book && typeof d.character_book === 'object') ? d.character_book : null;
         };
         if (ext === 'json') {
             pick(JSON.parse(await file.text()));
@@ -1691,6 +1694,76 @@ async function importRestoreExtras(avatar, snap) {
 }
 
 /** 单张卡走一遍：认卡 → （重复就问） → 导入 → 标签核对 */
+/** 卡里内嵌的世界书（V2/V3 的 `data.character_book`）→ 酒馆的世界书格式。
+    为什么必须自己补这一步（实测过源码，不是猜）：酒馆只在**导出**卡的时候把世界书转成
+    character_book（`src/endpoints/characters.js` 的 `convertWorldInfoToCharacterBook`），
+    **导入时不会反向落成世界书** —— 全 `src` 搜 `character_book` 只有导出/校验/默认卡三处。
+    所以"更新角色卡"永远带不上卡里那本内嵌世界书（用户反馈的正是这个）。
+    书名照酒馆导出时的对应关系取卡自带的 `extensions.world`，没有就退回内嵌书自己的名字、再退回角色名。 */
+function importEmbeddedBook(cardData, charName) {
+    const d = (cardData && cardData.data && typeof cardData.data === 'object') ? cardData.data : (cardData || {});
+    const cb = d && d.character_book;
+    if (!cb || !Array.isArray(cb.entries) || !cb.entries.length) return null;
+    const ext = (d.extensions && typeof d.extensions === 'object') ? d.extensions : {};
+    const name = String(ext.world || cb.name || charName || '').trim();
+    if (!name) return null;
+    const entries = {};
+    cb.entries.forEach((e, i) => {
+        if (!e) return;
+        const uid = Number.isFinite(Number(e.id)) ? Number(e.id) : i;
+        const pos = Number(e.position);
+        entries[String(uid)] = {
+            uid: uid,
+            key: Array.isArray(e.keys) ? e.keys.map(String) : [],
+            keysecondary: Array.isArray(e.secondary_keys) ? e.secondary_keys.map(String) : [],
+            comment: String(e.comment || e.name || ''),
+            content: String(e.content || ''),
+            constant: !!e.constant,
+            vectorized: false,
+            selective: !!e.selective && Array.isArray(e.secondary_keys) && e.secondary_keys.length > 0,
+            selectiveLogic: 0,
+            addMemo: true,
+            order: Number.isFinite(Number(e.insertion_order)) ? Number(e.insertion_order) : 100,
+            position: Number.isFinite(pos) && pos >= 0 && pos <= 4 ? pos : 0,
+            disable: e.enabled === false,
+            excludeRecursion: false, preventRecursion: false, delayUntilRecursion: 0,
+            probability: 100, useProbability: true, depth: 4,
+            group: '', groupOverride: false, groupWeight: 100, scanDepth: null,
+            caseSensitive: !!e.case_sensitive, matchWholeWords: null, useGroupScoring: null,
+            automationId: '', role: null, sticky: 0, cooldown: 0, delay: 0,
+            displayIndex: i,
+        };
+    });
+    return { name: name, entries: entries };
+}
+
+/** 更新卡时：把卡里内嵌的世界书写进 worlds/<书名>.json。
+    ⚠️ 已有的书**条目更多就不覆盖**（多半是你自己加过东西）——
+       宁可不动、并在提示里说清，也不静默清掉你的编辑。 */
+async function importWriteEmbeddedBook(card, charName) {
+    const emb = importEmbeddedBook(card, charName);
+    if (!emb) return null;
+    const hdrs = () => { const c = getContext() || {}; return Object.assign({ 'Content-Type': 'application/json' }, c.getRequestHeaders ? c.getRequestHeaders() : {}); };
+    let cur = null;
+    try { cur = await orbDataPost('/api/worldinfo/get', { name: emb.name }); } catch (e) { }
+    const curN = cur && cur.entries ? Object.keys(cur.entries).length : 0;
+    const newN = Object.keys(emb.entries).length;
+    if (curN > newN) {
+        toast('卡里内嵌的世界书《' + emb.name + '》已存在且条目更多（' + curN + ' > ' + newN + ' 条），没覆盖 —— 想用卡里那版就先在酒馆里删掉这本', 'warning');
+        return { name: emb.name, skipped: true, curN: curN, newN: newN };
+    }
+    try {
+        const r = await fetch('/api/worldinfo/edit', { method: 'POST', headers: hdrs(), body: JSON.stringify({ name: emb.name, data: { entries: emb.entries } }), cache: 'no-cache' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        toast('卡里内嵌的世界书已写入《' + emb.name + '》（' + newN + ' 条）', 'success');
+        try { if (typeof updateWorldInfoList === 'function') await updateWorldInfoList(); } catch (e) { }
+        return { name: emb.name, wrote: newN };
+    } catch (e) {
+        toast('内嵌世界书写入失败：' + ((e && e.message) || e), 'warning');
+        return { name: emb.name, error: String((e && e.message) || e) };
+    }
+}
+
 async function importHandleFile(file) {
     if (!file || !file.name) return { skipped: true };
     const card = await importCardData(file);
@@ -1748,6 +1821,12 @@ async function importHandleFile(file) {
                     orbWbSelApply([nativeWorld], []);
                     toast('这张卡自带的世界书已生效：' + nativeWorld, 'info');
                 }
+            }
+            /* ③ 卡里**内嵌**的世界书（character_book）：酒馆导入时不会落成世界书，
+                  这里替它写一份（新卡换了内嵌内容时，这一步才带得上） */
+            const embRes = await importWriteEmbeddedBook(card, cardName);
+            if (embRes && embRes.wrote) {
+                try { orbWorldList(); if (orbOpenNow && orbTab === 'world') renderOrbPanel(); } catch (e) { }
             }
         } catch (e) { /* 世界书这步失败不影响导入本身 */ }
     }
@@ -4283,7 +4362,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.25';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.26';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
