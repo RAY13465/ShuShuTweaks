@@ -1562,6 +1562,17 @@ function importDiffHTML(newCard, oldChar) {
     } else {
         rows.push(['世界书绑定', '没变', ow ? '《' + ow + '》' : '都没绑']);
     }
+    /* 卡里内嵌的世界书：**绑定名字没变 ≠ 书没变** —— 条目数一比就看出来了。
+       （用户反馈："我明明新加了世界书条目，更新时非要和我说没变" —— 上一版只比了绑定名字，
+        内嵌书的正文压根没看，所以显示'没变'是误导。） */
+    const ob = (o.data && o.data.character_book) || null;
+    const nb = (n.character_book) || null;
+    const oen = ob && Array.isArray(ob.entries) ? ob.entries.length : 0;
+    const nen = nb && Array.isArray(nb.entries) ? nb.entries.length : 0;
+    if (oen || nen) {
+        rows.push(['内嵌世界书', nen === oen ? '没变' : (nen > oen ? '加了条目' : '少了条目'),
+            oen + ' → ' + nen + ' 条']);
+    }
     /* 本地正则：新卡带的 + 旧的不丢 */
     const orc = Array.isArray(oe.regex_scripts) ? oe.regex_scripts.length : 0;
     const nrc = Number(n.regexCount || 0);
@@ -4362,7 +4373,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.26';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.27';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
