@@ -5212,9 +5212,12 @@ async function orbDbgRun(code) {
     let result, err = null;
     const t0 = Date.now();
     try {
-        /* 包成 async IIFE：脚本里能写 await、也能 return 交回结果 */
-        const fn = new Function('"use strict"; return (async () => {\n' + src + '\n})();');
-        result = await fn();
+        /* 包成 async IIFE：脚本里能写 await、也能 return 交回结果。
+           第一个参数是 `el` —— 抓元素抓到的那个（没抓过就是 null），
+           所以抓完可以直接写 el.xxx 继续查它。 */
+        const picked = (orbDbgEl() || {}).__sspPickedEl || null;
+        const fn = new Function('el', '"use strict"; return (async () => {\n' + src + '\n})();');
+        result = await fn(picked);
     } catch (e) {
         err = e;
     } finally {
@@ -5358,9 +5361,17 @@ function orbDbgPickHandler(ev) {
     orbDbgPickOff();
     orbDbgOpenWin();
     orbDbgTab = 'pick';
+    /* 把抓到的元素挂在窗口元素上 —— 之后在主脚本框里直接用 `el` 指它就能跑代码
+       （这样不用再加一套"元素专用脚本框"的 UI，手机上少一个要学的按钮） */
+    const winEl = orbDbgEl();
+    if (winEl) winEl.__sspPickedEl = t;
     orbDbgSay('');
     orbDbgSay('抓到了：' + sel);
     orbDbgSay(orbDbgInspect(t));
+    orbDbgSay('');
+    orbDbgSay('▶ 现在可以在上面的脚本框里直接用 `el` 指它了，例如：');
+    orbDbgSay('    return { 宽: el.getBoundingClientRect().width, 显示: getComputedStyle(el).display, 父: el.parentElement && el.parentElement.tagName };');
+    orbDbgSay('  然后点「运行」。（再抓一次，el 就换成新的那个）');
     getSettings().dbgLastPick = sel;
     save();
     orbDbgPaint();
