@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 鼠鼠面板工坊 ShuShu Panel —— v0.3
  * ---------------------------------------------------------------------------
  * 把酒馆「角色管理面板」做成可装配的模块：
@@ -4407,7 +4407,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.28';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.29';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4839,6 +4839,299 @@ var orbPurgeConfirm = false; // DLC 栏「清空全部条目」是否在等确�
 /* DLC 栏状态 */
 var orbDlcSearch = '';
 var orbCollapsed = false;   // 悬浮球是否收纳进左下角魔法棒
+
+/* ============================ 背景图（绑定 + 统一管理） ============================
+   分两半：
+     ① 数据层 —— s.bgBinds（角色文件 → 背景文件名）、s.bgUser（"你自己的背景"，没绑的卡统一用它）、
+        s.bgApplied（账本：我们在这个聊天里换过什么，用于恢复，绝不污染你手动选的）
+     ② 面板页 —— 鼠鼠口袋「背景」页：列出全部背景 + 预览 + 当前标记 + 按卡绑定 + 上传/改名/删除/搜索
+
+   酒馆那边换背景就两件事（对着 public/scripts/backgrounds.js 来的，不是猜的）：
+     · 把 #bg1 的 background-image 设成 url("backgrounds/<encodeURIComponent(文件名)>")
+     · 把 background_settings（上下文里的 ctx.background）里的 name/url 写回并保存
+   ---------------------------------------------------------------------------- */
+var orbBgList = [];          // [{ file }] 背景图列表
+var orbBgLoading = false;
+var orbBgSearch = '';
+var orbBgDel = null;         // 等确认删除哪张背景
+var orbBgUploading = false;
+
+/** 背景文件名 → 酒馆用的 CSS url（照 getBackgroundPath 的规则编码） */
+function orbBgUrl(file) {
+    if (!file) return '';
+    return 'url("backgrounds/' + encodeURIComponent(String(file)) + '")';
+}
+/** 当前真正生效的背景文件名（优先从 #bg1 上反解，最可靠） */
+function orbBgNow() {
+    try {
+        const el = document.getElementById('bg1');
+        const raw = el ? (el.style.backgroundImage || '') : '';
+        const m = /backgrounds\/([^"')]+)/.exec(raw);
+        if (m && m[1]) return decodeURIComponent(m[1]);
+        const bg = getContext().background || {};
+        return String(bg.name || '');
+    } catch (e) { return ''; }
+}
+/** 你自己的背景（没绑背景的卡统一用它） */
+function orbBgUser() {
+    const s = getSettings();
+    if (typeof s.bgUser !== 'string') s.bgUser = '';
+    return s.bgUser;
+}
+function orbBgUserSet(file, persist) {
+    getSettings().bgUser = String(file || '');
+    if (persist) save();
+}
+function orbBgApplied() {
+    const s = getSettings();
+    if (!s.bgApplied || typeof s.bgApplied !== 'object') s.bgApplied = {};
+    return s.bgApplied;
+}
+function orbBgChatKey() { return orbWbChatKey(); }   // 跟世界书栏同一套键：角色文件::聊天id
+
+/** 换背景。file='' 表示回到"你自己的背景" */
+function orbBgApply(file, quiet) {
+    const want = String(file || '');
+    try {
+        const el = document.getElementById('bg1');
+        if (el) el.style.backgroundImage = want ? orbBgUrl(want) : 'none';
+        const ctx = getContext();
+        if (ctx.background && typeof ctx.background === 'object') {
+            ctx.background.name = want;
+            ctx.background.url = want ? orbBgUrl(want) : '';
+        }
+        try { if (typeof ctx.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced(); } catch (e) { }
+        save();
+        if (!quiet) toast(want ? ('背景已换成：' + want) : '背景已切回你自己的那张', 'success');
+        return true;
+    } catch (e) {
+        if (!quiet) toast('换背景失败：' + ((e && e.message) || e), 'warning');
+        return false;
+    }
+}
+
+/** 按当前角色卡的绑定对齐背景：绑了用绑的；没绑统一回到"你自己的背景"（你定的规则） */
+function orbBgSyncChar(quiet) {
+    try {
+        const ch = orbWbCurChar();
+        if (!ch) return { skipped: 'no-char' };
+        const key = orbBgChatKey();
+        const bound = String(orbBgBound(ch.key) || '');
+        const now = orbBgNow();
+        const ledger = orbBgApplied();
+        const rec = key ? ledger[key] : null;
+        const remember = v => {
+            if (!key) return;
+            ledger[key] = { ext: v, prev: (rec && rec.prev !== undefined) ? rec.prev : now, at: Date.now() };
+            save();
+        };
+        if (bound) {
+            if (!rec && now && now !== bound) orbBgUserSet(now, false);   // 覆盖前先把"你的那张"记牢
+            if (now !== bound) orbBgApply(bound, !!quiet);
+            remember(bound);
+            return { now: bound, bound: bound, changed: now !== bound };
+        }
+        const mine = orbBgUser();
+        if (now === mine) return { now: now, bound: '', changed: false };
+        if (rec) { delete ledger[key]; save(); }                         // 之前是我们换的 → 收回记账
+        if (!rec && now) orbBgUserSet(now, false);                       // 你正看着的那张就是"你的背景"
+        orbBgApply(mine, !!quiet);
+        return { now: mine, bound: '', changed: now !== mine };
+    } catch (e) {
+        return { error: String((e && e.message) || e) };
+    }
+}
+
+/** 当前角色卡绑的背景文件名 */
+function orbBgBound(charKey) {
+    const s = getSettings();
+    if (!s.bgBinds || typeof s.bgBinds !== 'object') s.bgBinds = {};
+    const v = s.bgBinds[String(charKey || '')];
+    return typeof v === 'string' ? v : '';
+}
+/** 绑定 / 换一张（file='' 解绑） */
+function orbBgSetBind(file) {
+    const ch = orbWbCurChar();
+    if (!ch) { toast('先在酒馆里打开一张角色卡', 'warning'); return false; }
+    const s = getSettings();
+    if (!s.bgBinds || typeof s.bgBinds !== 'object') s.bgBinds = {};
+    const want = String(file || '');
+    if (want) s.bgBinds[ch.key] = want; else delete s.bgBinds[ch.key];
+    save();
+    const r = orbBgSyncChar(true);
+    toast(want ? ('已给《' + ch.name + '》绑定背景：' + want) : ('已解绑《' + ch.name + '》的背景'), 'success');
+    return r;
+}
+
+/** 拉全部背景图 */
+async function orbBgFetch() {
+    orbBgLoading = true;
+    if (orbOpenNow && orbTab === 'bg') renderOrbPanel();
+    try {
+        const d = await orbDataPost('/api/backgrounds/all', {});
+        orbBgList = orbDataArr(d).map(x => ({ file: orbDataNameOf(x, '') })).filter(x => x.file);
+        const now = orbBgNow();
+        if (now && !orbBgUser()) orbBgUserSet(now, true);   // 首次用这功能时，把你现在这张记成"你的背景"
+    } catch (e) {
+        orbBgList = [];
+        toast('读背景图列表失败：' + ((e && e.message) || e), 'warning');
+    }
+    orbBgLoading = false;
+    if (orbOpenNow && orbTab === 'bg') renderOrbPanel();
+    return orbBgList;
+}
+/** 上传一张背景图（走酒馆自己的接口） */
+async function orbBgUpload(file) {
+    if (!file) return null;
+    orbBgUploading = true;
+    if (orbOpenNow && orbTab === 'bg') renderOrbPanel();
+    try {
+        const ctx = getContext() || {};
+        const fd = new FormData();
+        fd.append('avatar', file, file.name || 'bg.png');
+        const r = await fetch('/api/backgrounds/upload', {
+            method: 'POST',
+            headers: ctx.getRequestHeaders ? ctx.getRequestHeaders({ omitContentType: true }) : {},
+            body: fd,
+        });
+        if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error('HTTP ' + r.status + ' ' + String(t).slice(0, 80)); }
+        const d = await r.json().catch(() => ({}));
+        const name = String((d && (d.name || d.path || d.filename)) || '').split('/').pop();
+        toast('背景图已上传：' + (name || file.name), 'success');
+        await orbBgFetch();
+        return name || null;
+    } catch (e) {
+        toast('上传失败：' + ((e && e.message) || e), 'warning');
+        return null;
+    } finally {
+        orbBgUploading = false;
+        if (orbOpenNow && orbTab === 'bg') renderOrbPanel();
+    }
+}
+/** 改名（走酒馆接口，它自己清洗非法字符）；绑定/账本/你的背景里同名的一起跟着改 */
+async function orbBgRenameTo(oldName, newName) {
+    const ctx = getContext() || {};
+    try {
+        const r = await fetch('/api/backgrounds/rename', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, ctx.getRequestHeaders ? ctx.getRequestHeaders() : {}),
+            body: JSON.stringify({ old_bg: oldName, new_bg: newName }),
+            cache: 'no-cache',
+        });
+        if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error('HTTP ' + r.status + ' ' + String(t).slice(0, 60)); }
+        const d = await r.json().catch(() => ({}));
+        const finalName = String((d && (d.bg || d.new_bg)) || newName);
+        const s = getSettings();
+        if (s.bgBinds) Object.keys(s.bgBinds).forEach(k => { if (s.bgBinds[k] === oldName) s.bgBinds[k] = finalName; });
+        if (s.bgUser === oldName) s.bgUser = finalName;
+        const ledger = orbBgApplied();
+        Object.keys(ledger).forEach(k => { if (ledger[k] && ledger[k].ext === oldName) ledger[k].ext = finalName; });
+        save();
+        if (orbBgNow() === oldName) orbBgApply(finalName, true);
+        toast('已改名：' + oldName + ' → ' + finalName, 'success');
+        await orbBgFetch();
+        return finalName;
+    } catch (e) {
+        toast('改名失败：' + ((e && e.message) || e), 'warning');
+        return null;
+    }
+}
+/** 删一张背景图（同时清掉所有指向它的绑定） */
+async function orbBgDelete(file) {
+    const ctx = getContext() || {};
+    const nm = String(file || '');
+    if (!nm) return false;
+    try {
+        const r = await fetch('/api/backgrounds/delete', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, ctx.getRequestHeaders ? ctx.getRequestHeaders() : {}),
+            body: JSON.stringify({ bg: nm }),
+            cache: 'no-cache',
+        });
+        if (!r.ok && r.status !== 404) { const t = await r.text().catch(() => ''); throw new Error('HTTP ' + r.status + ' ' + String(t).slice(0, 60)); }
+        const s = getSettings();
+        if (s.bgBinds) Object.keys(s.bgBinds).forEach(k => { if (s.bgBinds[k] === nm) delete s.bgBinds[k]; });
+        if (s.bgUser === nm) s.bgUser = '';
+        const ledger = orbBgApplied();
+        Object.keys(ledger).forEach(k => { if (ledger[k] && ledger[k].ext === nm) delete ledger[k]; });
+        save();
+        if (orbBgNow() === nm) orbBgApply(orbBgUser(), true);
+        toast('已删除背景图：' + nm + '（相关绑定一起清了）', 'success');
+        await orbBgFetch();
+        return true;
+    } catch (e) {
+        toast('删除失败：' + ((e && e.message) || e), 'warning');
+        return false;
+    }
+}
+
+/** 「背景」页的列表（搜的时候只换这一块，输入框不丢焦点） */
+function orbBgRowsHTML() {
+    const ch = orbWbCurChar();
+    const cur = orbBgNow();
+    const bound = ch ? orbBgBound(ch.key) : '';
+    const q = orbBgSearch.toLowerCase();
+    const hit = orbBgList.filter(b => !q || b.file.toLowerCase().indexOf(q) >= 0);
+    const head = orbBgSearch ? '<div class="ssp-orb-pcount">筛选出 ' + hit.length + ' / ' + orbBgList.length + ' 张</div>' : '';
+    if (!orbBgList.length) return head + '<div class="ssp-orb-empty">一张背景图都没有（酒馆里「背景」那页传一张就会出现在这）。</div>';
+    if (!hit.length) return head + '<div class="ssp-orb-empty">没有匹配「' + esc(orbBgSearch) + '」的背景图。</div>';
+    const rows = hit.map(b => {
+        const on = (b.file === cur), bind = (b.file === bound);
+        return '<div class="ssp-orb-prow' + (on ? ' on' : '') + '">'
+            + '<img class="ssp-orb-pav" src="/backgrounds/' + encodeURIComponent(b.file) + '" loading="lazy"'
+            + ' data-orb-bg="' + esc(b.file) + '" title="点一下换成这张（等于用酒馆自己切）" alt="">'
+            + '<div class="ssp-orb-pmain">'
+            + '<div class="ssp-orb-pname">' + esc(b.file)
+            + (on ? '<span class="ssp-orb-ptag">当前</span>' : '')
+            + (bind ? '<span class="ssp-orb-ptag">本卡绑定</span>' : '') + '</div>'
+            + '</div>'
+            + '<div class="ssp-orb-pacts">'
+            + '<span class="ssp-pbtn' + (on ? ' primary' : '') + '" data-orb-bg="' + esc(b.file) + '">' + (on ? '当前' : '换成这张') + '</span>'
+            + '<span class="ssp-pbtn' + (bind ? ' primary' : '') + '" data-orb-bgbind="' + esc(b.file) + '">' + (bind ? '已绑这张' : '绑给本卡') + '</span>'
+            + '<span class="ssp-pbtn" data-orb-bgren="' + esc(b.file) + '" title="改名">✏</span>'
+            + '<span class="ssp-pbtn danger" data-orb-bgdel="' + esc(b.file) + '" title="删除这张背景图（会先问一次）">🗑</span>'
+            + '</div></div>'
+            + (String(orbBgDel) === String(b.file)
+                ? '<div class="ssp-en-confirm">'
+                + '<span class="ssp-en-confirm-t">删掉背景图「' + esc(b.file) + '」？<b>文件一起删</b>，绑着它的卡会一起解绑。</span>'
+                + '<span class="ssp-pbtn danger" data-orb-bgdelgo="' + esc(b.file) + '"><i class="fa-solid fa-trash"></i>确认删掉</span>'
+                + '<span class="ssp-pbtn" data-orb-bgdelcancel="1">算了</span>'
+                + '</div>'
+                : '');
+    }).join('');
+    return head + '<div class="ssp-orb-plist">' + rows + '</div>';
+}
+
+function orbBgHTML() {
+    const ch = orbWbCurChar();
+    const cur = orbBgNow();
+    const bound = ch ? orbBgBound(ch.key) : '';
+    const mine = orbBgUser();
+    const auto = getSettings().bgAuto !== false;
+    let h = '<div class="ssp-orb-pfilter"><i class="fa-solid fa-magnifying-glass"></i>'
+        + '<input class="ssp-inp" type="text" data-orb-bgsearch="1" placeholder="搜背景图名" value="' + esc(orbBgSearch) + '">'
+        + (orbBgSearch ? '<span class="ssp-pbtn" data-orb-bgclear="1">清除</span>' : '')
+        + '</div>';
+    h += '<div class="ssp-orb-empty" style="padding:2px 0 6px">'
+        + (ch
+            ? ('角色：<b>' + esc(ch.name) + '</b>；本卡绑定：<b>' + esc(bound || '（没绑 → 用你自己的背景）') + '</b>；当前生效：<b>' + esc(cur || '（无）') + '</b>')
+            : '先在酒馆里打开一张角色卡，这里才会显示"本卡绑定"。')
+        + '<br>你自己的背景：<b>' + esc(mine || '（还没记下来）') + '</b>'
+        + '　<span class="ssp-orb-auto"><input type="checkbox" data-orb-bgauto="1"' + (auto ? ' checked' : '') + '>'
+        + '<label>换角色自动切背景</label></span></div>';
+    if (orbBgLoading) h += '<div class="ssp-orb-empty">正在读背景图…</div>';
+    else h += '<div id="ssp_orb_bglist">' + orbBgRowsHTML() + '</div>';
+    h += '<div class="ssp-orb-foot">'
+        + '<span class="ssp-pbtn primary" data-orb-bgupload="1">' + (orbBgUploading ? '上传中…' : '＋ 上传背景图') + '</span>'
+        + '<span class="ssp-pbtn" data-orb-bgrefresh="1"><i class="fa-solid fa-rotate"></i>刷新</span>'
+        + (bound ? '<span class="ssp-pbtn" data-orb-bgunbind="1">解绑本卡</span>' : '')
+        + '<span class="ssp-pbtn" data-orb-bguser="1" title="把现在生效的这张记成「你自己的背景」（没绑背景的卡都用它）">把当前这张记成我的</span>'
+        + '</div>'
+        + '<input type="file" accept="image/*" data-orb-bgfile="1" style="display:none">'
+        + '<div class="ssp-orb-empty" style="padding-top:6px">点缩略图或「换成这张」= 直接换背景（跟酒馆自己换一个效果）；'
+        + '「绑给本卡」= 以后切到这张卡自动换；没绑的卡一律用「你自己的背景」。</div>';
+    return h;
+}
 
 /* ============================ 存档（聊天记录）栏 ============================
    把酒馆的「聊天记录」搬进来：列出当前角色的所有 .jsonl 存档 → 读档 / 删除。
@@ -6826,6 +7119,7 @@ const ORB_MODULES = [
     { id: 'theme', name: '美化', icon: 'fa-palette', render: () => orbThemeHTML() },
     { id: 'world', name: '世界书', icon: 'fa-book-atlas', render: () => orbWorldHTML() },
     { id: 'dlc', name: 'DLC', icon: 'fa-cubes', render: () => orbDlcHTML() },
+    { id: 'bg', name: '背景', icon: 'fa-image', render: () => orbBgHTML() },
     { id: 'chat', name: '存档', icon: 'fa-box-archive', render: () => orbChatHTML() },
     { id: 'data', name: '数据', icon: 'fa-database', render: () => orbDataHTML() },
 ];
@@ -8552,6 +8846,7 @@ function orbOnCharChanged() {
         orbLastCharId = (orbWbCurChar() || {}).id || '';
         if (!orbOpenNow) return;
         if (orbTab === 'chat') { try { orbChatsFetch(); } catch (e) { } return; }   // 它会自己重画
+        if (orbTab === 'bg') { try { orbBgSyncChar(true); } catch (e) { } try { orbBgFetch(); } catch (e) { } return; } // 背景页：切卡就对齐 + 重拉（它自己会重画）
         renderOrbPanel();
     }, ms));
     if (now) [400, 1200].forEach(ms => setTimeout(() => { try { orbWbOnChatChanged(); } catch (e) { } }, ms));
@@ -8776,6 +9071,33 @@ function bindOrb() {
         orbChSearch = el.value || '';
         const box = document.getElementById('ssp_orb_chat_list');
         if (box) box.innerHTML = orbChatRowsHTML();
+    });
+
+    /* 背景页：搜索（只换列表那一块，输入框不丢焦点） */
+    document.addEventListener('input', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbBgsearch === undefined) return;
+        orbBgSearch = el.value || '';
+        const box = document.getElementById('ssp_orb_bglist');
+        if (box) box.innerHTML = orbBgRowsHTML();
+    });
+    /* 背景页：选了文件就上传 */
+    document.addEventListener('change', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset) return;
+        if (el.dataset.orbBgfile !== undefined) {
+            const f = el.files && el.files[0];
+            el.value = '';
+            if (f) orbBgUpload(f).then(() => { if (orbOpenNow) renderOrbPanel(); });
+            return;
+        }
+        if (el.dataset.orbBgauto !== undefined) {
+            const s = getSettings();
+            s.bgAuto = !!el.checked;
+            save();
+            if (s.bgAuto) { try { orbBgSyncChar(true); } catch (e) { } }
+            toast(s.bgAuto ? '换角色会自动切背景' : '换角色不再动背景', 'info');
+        }
     });
 
     /* 美化页搜索 */
@@ -9313,6 +9635,7 @@ function bindOrb() {
             orbWbCloseEntries(true);
             renderOrbPanel();
             if (orbTab === 'chat') orbChatsFetch();            // 存档页：打开就拉一次列表
+            if (orbTab === 'bg') { try { orbBgSyncChar(true); } catch (e) { } orbBgFetch(); } // 背景页：打开就对齐 + 拉列表
             if (orbTab === 'world') orbWorldRefresh();         // 世界书页：顺手刷一次清单
             if (orbTab === 'dlc') orbDlcEnsure();              // DLC 页：按需拉那本书的条目
             return;
@@ -9330,6 +9653,47 @@ function bindOrb() {
         if (t.closest('[data-orb-nclear]')) { orbNSearch = ''; renderOrbPanel(); return; }
         /* 魔法棒：收纳 / 展开悬浮球 */
         if (t.closest('[data-orb-wand]')) { orbSetCollapsed(!orbCollapsed); return; }
+        /* 背景页：换一张 / 绑给本卡 / 解绑 / 上传 / 刷新 / 改名 / 删除 / 搜索 / 自动开关 */
+        if (t.closest('[data-orb-bgclear]')) { orbBgSearch = ''; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-bgrefresh]')) { orbBgFetch(); return; }
+        if (t.closest('[data-orb-bgupload]')) { const f = document.querySelector('[data-orb-bgfile]'); if (f) f.click(); return; }
+        if (t.closest('[data-orb-bgfile]')) return;   // 交给下面 input 的 change
+        if (t.closest('[data-orb-bguser]')) {
+            const now = orbBgNow();
+            if (!now) { toast('现在没有生效的背景图', 'warning'); return; }
+            orbBgUserSet(now, true);
+            toast('已记下你自己的背景：' + now, 'success');
+            renderOrbPanel(); return;
+        }
+        if (t.closest('[data-orb-bgunbind]')) { orbBgSetBind(''); renderOrbPanel(); return; }
+        if (t.closest('[data-orb-bgdelcancel]')) { orbBgDel = null; renderOrbPanel(); return; }
+        const bgDelGo = t.closest('[data-orb-bgdelgo]');
+        if (bgDelGo) { const nm = bgDelGo.dataset.orbBgdelgo; orbBgDel = null; orbBgDelete(nm).then(() => renderOrbPanel()); return; }
+        const bgDel = t.closest('[data-orb-bgdel]');
+        if (bgDel) {
+            const nm = bgDel.dataset.orbBgdel;
+            orbBgDel = (orbBgDel !== null && String(orbBgDel) === String(nm)) ? null : String(nm);
+            renderOrbPanel(); return;
+        }
+        const bgRen = t.closest('[data-orb-bgren]');
+        if (bgRen) {
+            const nm = bgRen.dataset.orbBgren;
+            orbAskText('把背景图「' + nm + '」改成什么名字？<br><i style="opacity:.6">酒馆会自动清洗文件名里的非法字符</i>', nm).then(v => {
+                if (!v || String(v).trim() === nm) return;
+                orbBgRenameTo(nm, String(v).trim()).then(() => renderOrbPanel());
+            });
+            return;
+        }
+        const bgBind = t.closest('[data-orb-bgbind]');
+        if (bgBind) { orbBgSetBind(bgBind.dataset.orbBgbind); renderOrbPanel(); return; }
+        const bgOne = t.closest('[data-orb-bg]');
+        if (bgOne) {
+            const nm = bgOne.dataset.orbBg;
+            /* 手动换背景：如果我们正覆盖着，撤销记账，免得切角色时又给"恢复"回去 */
+            try { const key = orbBgChatKey(); if (key && orbBgApplied()[key]) { delete orbBgApplied()[key]; save(); } } catch (e) { }
+            orbBgApply(nm);
+            renderOrbPanel(); return;
+        }
         /* 存档页：刷新 / 读档 / 删除 / 清除搜索 */
         if (t.closest('[data-orb-chrefresh]')) { orbChatsFetch(); return; }        if (t.closest('[data-orb-chclear]')) { orbChSearch = ''; renderOrbPanel(); return; }
         const cren = t.closest('[data-orb-chatren]');
@@ -9524,6 +9888,10 @@ if (globalThis.__SSP_TEST__) {
         orbDataPost, orbDataBlob, getSettings,
         orbPersonaCreate, orbPersonaNew, orbPersonas, orbPlaceholderBlob, orbPersonaDesc,
         orbPersonaDelete, orbActivePersona,
+        orbBgList, orbBgBound, orbBgSetBind, orbBgSyncChar, orbBgApply, orbBgNow, orbBgUser, orbBgUserSet, orbBgUrl,
+        orbBgFetch, orbBgHTML, orbBgRowsHTML, orbBgDelete, orbBgRenameTo,
+        get orbBgSearch() { return orbBgSearch; }, set orbBgSearch(v) { orbBgSearch = v; },
+        get orbBgDel() { return orbBgDel; }, set orbBgDel(v) { orbBgDel = v; },
         get orbPersonaDel() { return orbPersonaDel; }, set orbPersonaDel(v) { orbPersonaDel = v; },
         ORB_IMP_CATS, orbImpHTML, orbImpRead, orbImpRestore, orbImpAvatarOf, orbImpPick,
         extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
