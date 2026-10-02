@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 鼠鼠面板工坊 ShuShu Panel —— v0.3
  * ---------------------------------------------------------------------------
  * 把酒馆「角色管理面板」做成可装配的模块：
@@ -4407,7 +4407,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.40';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.41';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5815,6 +5815,12 @@ var ORB_BEAUTY_TWEAKS = [
         ].join('\n'),
     },
 ];
+/* ⚠️ 用户要求（v1.31.41）：把里面这两个开关（顶部展开面板通底 / 去掉输入框上面那条线）**去掉**，
+   但**面板和引擎都保留**（以后想加别的便捷开关，直接往上面数组里加一条就行）。
+   想恢复这两个：把下面这一行删掉即可 —— 两个开关的定义**原样留在上面，没删**。
+   去掉后：s.beautyTweaks 里那两个键没人认领 → 拼出来的 CSS 为空 → 注入的 <style> 会被自动移除，
+   也就是你本机上那两条样式**会自己消失**，不需要你手动清。 */
+ORB_BEAUTY_TWEAKS = [];
 function orbBeautyState() {
     const s = getSettings();
     if (!s.beautyTweaks || typeof s.beautyTweaks !== 'object') s.beautyTweaks = {};
