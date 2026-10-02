@@ -4407,7 +4407,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.35';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.36';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5779,17 +5779,19 @@ var ORB_BEAUTY_TWEAKS = [
         desc: '顶部栏拉开的那些面板，高度直接铺到屏幕底部 —— 不然下面会露出一节消息框（用户长期困扰）',
         def: false,
         /* 顶部栏本体只有 35px 高（#top-settings-holder，position:relative），
-           面板是挂它下面的绝对定位块，被 max-height 卡住了 → 这里放开并给足高度。
-           选择器写得宽一点：酒馆不同版本的抽屉内容类名不完全一样。 */
+           面板是挂它下面的绝对定位块。⚠️ e2e 量出来：它原本是 **从顶部 0 开始、高 770**（视口 805，
+           底下留 35px），所以光放开 max-height 没用 ✗ —— 必须把 top 也从 0 改成 35、高度按 vh 给，
+           它才会铺到屏幕底（35..805）。 */
         css: [
-            '#top-settings-holder .drawer-content, #top-settings-holder .drawer-content > .scrollable,',
-            '#top-settings-holder .drawer-content > div, #top-settings-holder .drawer > .drawer-content {',
-            '  max-height: none !important;',
-            '  height: calc(100vh - 35px) !important;',
+            '#top-settings-holder .drawer-content, #top-settings-holder .drawer > .drawer-content {',
+            '  top: 35px !important;',
             '  bottom: 0 !important;',
+            '  height: calc(100vh - 35px) !important;',
+            '  max-height: none !important;',
             '}',
             '#top-settings-holder .drawer-content > .scrollable, #top-settings-holder .drawer-content > div {',
             '  height: 100% !important;',
+            '  max-height: none !important;',
             '  overflow-y: auto !important;',
             '}',
         ].join('\n'),
