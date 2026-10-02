@@ -890,6 +890,12 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 /* 球被收进去时，魔法棒高亮一下，提示"球在里头" */
 .ssp-orb-wand.active { color: #fff; border-color: rgba(255, 255, 255, .75); box-shadow: 0 0 0 2px rgba(255, 255, 255, .15), 0 4px 14px rgba(0, 0, 0, .5); }
 
+/* 通用填缝：盖住「消息区底 → 输入框顶」那段空隙（白线的兜底手段，由 JS 每 600ms 对位） */
+#ssp_seam_fill {
+    position: fixed; z-index: 8; pointer-events: none;
+    background: rgba(26, 28, 32, .95);
+}
+
 /* 美化页「常用开关」 */
 .ssp-bt { margin-top: 10px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 8px; padding: 8px; background: rgba(255, 255, 255, .03); }
 .ssp-bt-head { display: flex; flex-direction: column; margin-bottom: 6px; }

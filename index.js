@@ -4407,7 +4407,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.36';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.37';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5826,16 +5826,61 @@ function orbBeautyApply() {
     try {
         const css = ORB_BEAUTY_TWEAKS.filter(t => orbBeautyOn(t.id)).map(t => '/* ' + t.name + ' */\n' + t.css).join('\n\n');
         let el = document.getElementById('ssp_beauty_css');
-        if (!css) { if (el) el.remove(); return ''; }
+        if (!css) { if (el) el.remove(); try { orbSeamFillOff(); } catch (e) { } return ''; }
         if (!el) {
             el = document.createElement('style');
             el.id = 'ssp_beauty_css';
             (document.head || document.documentElement).appendChild(el);
         }
         el.textContent = css;
+        try { orbSeamFillSync(); } catch (e) { }         // 有 JS 参与的那几个开关在这里跟上
         return css;
     } catch (e) { return ''; }
 }
+/* 通用填缝（「去掉输入框上面那条线」的实现核心）：
+   不猜那条线是谁画的 —— 运行时量出「消息区底边 → 输入框顶边」那段空隙的坐标，
+   用一块 pointer-events:none 的色块**盖住**它，颜色取输入框自己的底色。
+   这样不管那条线是壁纸露出来、伪元素画的、还是 1px 边框，只要它在那段缝里就会被盖掉。
+   ⚠️ 每轮都重新量（600ms）：窗口缩放、顶栏抽屉开关、切角色都会改变这段几何。 */
+var orbSeamTimer = null;
+function orbSeamFillOff() {
+    if (orbSeamTimer) { try { clearInterval(orbSeamTimer); } catch (e) { } orbSeamTimer = null; }
+    const el = document.getElementById('ssp_seam_fill');
+    if (el) el.remove();
+}
+function orbSeamFillUpdate() {
+    try {
+        if (!orbBeautyOn('killSeam')) { orbSeamFillOff(); return false; }
+        const chat = document.getElementById('chat');
+        const form = document.getElementById('send_form');
+        if (!chat || !form) return false;
+        const cr = chat.getBoundingClientRect(), fr = form.getBoundingClientRect();
+        const gap = Math.round(fr.top - cr.bottom);
+        let el = document.getElementById('ssp_seam_fill');
+        if (gap <= 0) { if (el) el.remove(); return false; }      // 没缝就不用盖
+        const cs = getComputedStyle(form);
+        const bg = (cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)') ? cs.backgroundColor : 'rgba(26,28,32,.95)';
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'ssp_seam_fill';
+            (document.body || document.documentElement).appendChild(el);
+        }
+        el.style.left = Math.round(cr.left) + 'px';
+        el.style.width = Math.round(cr.width) + 'px';
+        el.style.top = Math.round(cr.bottom) + 'px';
+        el.style.height = gap + 'px';
+        el.style.background = bg;
+        return true;
+    } catch (e) { return false; }
+}
+/** 开关变化时调一次：开着就起轮询、关掉就彻底清掉（完全还原） */
+function orbSeamFillSync() {
+    if (!orbBeautyOn('killSeam')) { orbSeamFillOff(); return false; }
+    orbSeamFillUpdate();
+    if (!orbSeamTimer) orbSeamTimer = setInterval(orbSeamFillUpdate, 600);
+    return true;
+}
+
 function orbBeautySet(id, on) {
     const st = orbBeautyState();
     st[id] = !!on;
