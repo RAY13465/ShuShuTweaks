@@ -5150,6 +5150,7 @@ var orbDbgBusy = false;
 var orbDbgTab = 'script';      // script / diag / pick
 var orbDbgPick = false;        // 是否正在抓元素
 var orbDbgPendEl = null;       // 手机上"已经框住、等第二下确认"的那个元素（桌面不用）
+var orbDbgSeq = 0;             // 输出区里第几条记录（画分割线用，清空时归零）
 
 function orbDbgStore() {
     const s = getSettings();
@@ -5185,8 +5186,20 @@ function orbDbgSay(line) {
     if (orbDbgOut.length > 500) orbDbgOut.splice(0, orbDbgOut.length - 500);
     orbDbgPaint();
 }
-function orbDbgClear() { orbDbgOut = []; orbDbgPaint(); }
+function orbDbgClear() { orbDbgOut = []; orbDbgSeq = 0; orbDbgPaint(); }
 function orbDbgText() { return orbDbgOut.join('\n'); }
+/* 每条记录之间用等宽分割线隔开（用户要求：不然不知道"从哪到哪是这一次的"）。
+   每条开头一条线 + 序号 + 时间戳 + 来源符号：▶ 运行 · ⚙ 诊断 · ⌖ 抓取。
+   （只需要开头这条：下一条的线天然就是上一条的结束边界。） */
+function orbDbgRule(icon, title) {
+    orbDbgSeq = (orbDbgSeq || 0) + 1;
+    const t = new Date().toLocaleTimeString();
+    orbDbgOut.push('');
+    orbDbgOut.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    orbDbgOut.push('  ' + icon + '  ' + title + '   #' + orbDbgSeq + ' · ' + t);
+    orbDbgOut.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    orbDbgPaint();
+}
 function orbDbgDivider(title) {
     orbDbgSay('');
     orbDbgSay('──── ' + title + ' ────');
@@ -5197,7 +5210,7 @@ async function orbDbgRun(code) {
     const src = String(code === undefined || code === null ? orbDbgCode : code);
     if (!src.trim()) { orbDbgSay('（脚本是空的）'); return null; }
     orbDbgBusy = true;
-    orbDbgSay('▶ 运行 ' + new Date().toLocaleTimeString());
+    orbDbgRule('▶', '运行脚本');
     const logged = [];
     const keep = {};
     ['log', 'info', 'warn', 'error'].forEach(k => {
@@ -5445,7 +5458,7 @@ function orbDbgPickHandler(ev) {
        （这样不用再加一套"元素专用脚本框"的 UI，手机上少一个要学的按钮） */
     const winEl = orbDbgEl();
     if (winEl) winEl.__sspPickedEl = t;
-    orbDbgSay('');
+    orbDbgRule('⌖', '抓元素');
     orbDbgSay('抓到了：' + sel);
     orbDbgSay(orbDbgInspect(t));
     orbDbgSay('');
@@ -5669,7 +5682,7 @@ function orbDbgDiag(which) {
     orbDbgTab = 'diag';
     orbDbgMarkTabs();
     const one = k => {
-        orbDbgDivider(k === 'screen' ? '屏幕环境' : k === 'media' ? '媒体查询' : k === 'css' ? 'CSS 支持' : '扩展状态');
+        orbDbgRule('⚙', k === 'screen' ? '诊断 · 屏幕环境' : k === 'media' ? '诊断 · 媒体查询' : k === 'css' ? '诊断 · CSS 支持' : '诊断 · 扩展状态');
         orbDbgSay(k === 'screen' ? orbDbgDiagScreen() : k === 'media' ? orbDbgDiagMedia() : k === 'css' ? orbDbgDiagCss() : orbDbgDiagState());
     };
     if (which === 'all') { ['screen', 'media', 'css', 'state'].forEach(one); }
