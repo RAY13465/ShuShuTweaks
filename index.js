@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 鼠鼠面板工坊 ShuShu Panel —— v0.3
  * ---------------------------------------------------------------------------
  * 把酒馆「角色管理面板」做成可装配的模块：
@@ -10719,6 +10719,7 @@ if (globalThis.__SSP_TEST__) {
         orbDbgEl, orbDbgSaveScript, orbDbgListScripts,
         ORB_BEAUTY_TWEAKS, orbBeautyState, orbBeautyOn, orbBeautyApply, orbBeautySet, orbBeautyReset, orbBeautyHTML,
         orbSeamFillOff, orbSeamFillUpdate, orbSeamFillSync,
+        get orbBeautyOpen() { return orbBeautyOpen; }, set orbBeautyOpen(v) { orbBeautyOpen = v; },
         orbDbgRule, orbDbgDivider, orbDbgHl, orbDbgHlShow, orbDbgHlHide, orbDbgTagOf, orbDbgUnder,
         orbDbgPickMove, orbDbgPickTip,
         get orbDbgSeq() { return orbDbgSeq; }, set orbDbgSeq(v) { orbDbgSeq = v; },
