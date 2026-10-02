@@ -896,11 +896,18 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     background: rgba(26, 28, 32, .95);
 }
 
-/* 美化页「常用开关」 */
-.ssp-bt { margin-top: 10px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 8px; padding: 8px; background: rgba(255, 255, 255, .03); }
-.ssp-bt-head { display: flex; flex-direction: column; margin-bottom: 6px; }
-.ssp-bt-head b { font-size: 12.5px; }
-.ssp-bt-head small { opacity: .6; font-size: 11px; }
+/* 美化页「常用开关」——用户要求：做成展开栏，标题条就在那排按钮下面 */
+.ssp-bt { margin: 6px 0 8px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 8px; background: rgba(255, 255, 255, .03); }
+.ssp-bt.collapsed { padding: 0; }
+.ssp-bt.open { padding: 8px; }
+.ssp-bt-head { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.ssp-bt-toggle { cursor: pointer; padding: 7px 9px; border-radius: 7px; }
+.ssp-bt-toggle:hover { background: rgba(255, 255, 255, .07); }
+.ssp-bt-toggle b { font-size: 12.5px; }
+.ssp-bt-toggle small { opacity: .62; font-size: 11px; }
+.ssp-bt-arrow { margin-left: auto; opacity: .55; }
+.ssp-bt.open .ssp-bt-toggle { border-bottom: 1px solid rgba(255, 255, 255, .1); margin-bottom: 6px; }
+.ssp-bt-note { opacity: .55; font-size: 11px; line-height: 1.5; margin-bottom: 4px; }
 .ssp-bt-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px; border-radius: 6px; border: 1px solid transparent; }
 .ssp-bt-row.on { border-color: rgba(120, 200, 255, .45); background: rgba(70, 140, 220, .12); }
 .ssp-bt-sw { cursor: pointer; font-size: 16px; opacity: .55; flex: 0 0 auto; line-height: 1.2; }

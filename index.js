@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 鼠鼠面板工坊 ShuShu Panel —— v0.3
  * ---------------------------------------------------------------------------
  * 把酒馆「角色管理面板」做成可装配的模块：
@@ -4407,7 +4407,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.39';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.40';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5903,7 +5903,9 @@ function orbBeautyReset() {
    ⚠️ 不去找 init 钩子：模块执行时设置可能还没读回来，所以延时几趟、每趟都重来一次（幂等，安全）。
    刷新页面后开关依然是生效状态 —— 这是"存扩展设置、刷新保持"那一条的落点。 */
 [800, 1800, 3500].forEach(ms => { try { setTimeout(() => { try { orbBeautyApply(); } catch (e) { } }, ms); } catch (e) { } });
-/** 面板里那一块（挂在美化页，'导出当前美化' 旁边） */
+/** 面板里那一块（挂在美化页 —— 用户要求：就在「改当前美化 / 新建美化 / 导出当前美化」**这一排按钮下面**，
+    并且用**展开栏**的格式（点标题展开/收起），而不是扔在页面最底下没人翻得到） */
+var orbBeautyOpen = false;      // 展开栏是否展开（默认收起，标题条就在按钮下面，一眼能看到）
 function orbBeautyHTML() {
     const rows = ORB_BEAUTY_TWEAKS.map(t => {
         const on = orbBeautyOn(t.id);
@@ -5914,10 +5916,17 @@ function orbBeautyHTML() {
             + '<b>' + esc(t.name) + '</b><small>' + esc(t.desc) + '</small></span>'
             + '</div>';
     }).join('');
-    const anyOn = ORB_BEAUTY_TWEAKS.some(t => orbBeautyOn(t.id));
-    return '<div class="ssp-bt">'
-        + '<div class="ssp-bt-head"><b><i class="fa-solid fa-sliders"></i> 常用开关</b>'
-        + '<small>由扩展注入样式实现，不写进你的自定义 CSS；关掉即完全撤销</small></div>'
+    const anyOn = ORB_BEAUTY_TWEAKS.filter(t => orbBeautyOn(t.id)).length;
+    const head = '<div class="ssp-bt-head ssp-bt-toggle" data-orb-btopen="1" role="button" tabindex="0"'
+        + ' title="' + (orbBeautyOpen ? '收起' : '展开') + '常用开关">'
+        + '<i class="fa-solid ' + (orbBeautyOpen ? 'fa-caret-down' : 'fa-caret-right') + '"></i>'
+        + '<b>常用开关</b>'
+        + '<small>' + (anyOn ? ('已开 ' + anyOn + ' 个') : '一键美化小毛病（点标题展开）') + '</small>'
+        + '<span class="ssp-bt-arrow"><i class="fa-solid fa-sliders"></i></span>'
+        + '</div>';
+    if (!orbBeautyOpen) return '<div class="ssp-bt collapsed">' + head + '</div>';
+    return '<div class="ssp-bt open">' + head
+        + '<div class="ssp-bt-note">由扩展注入样式实现，**不写进你的自定义 CSS**；关掉即完全撤销</div>'
         + rows
         + '<div class="ssp-bt-foot">'
         + '<span class="ssp-pbtn" data-orb-btreset="1">' + (anyOn ? '全部关掉（恢复默认）' : '已全部关闭') + '</span>'
@@ -6200,8 +6209,8 @@ function orbThemeHTML() {
         + '<span class="ssp-pbtn" data-orb-thcreate="1"><i class="fa-solid fa-plus"></i>新建美化</span>'
         + '<span class="ssp-pbtn" data-orb-thexport="1"><i class="fa-solid fa-file-export"></i>导出当前美化</span>'
         + '</div>'
-        + '<div id="ssp_orb_theme_list">' + orbThemeRowsHTML() + '</div>'
         + orbBeautyHTML()
+        + '<div id="ssp_orb_theme_list">' + orbThemeRowsHTML() + '</div>'
         + '<div class="ssp-orb-empty" style="padding-top:6px">当前美化：<b>' + esc(orbThemeCur() || '(读不到)') + '</b>'
         + '；「用这个」立刻换，「绑定」选角色 —— <b>一个主题能绑多个角色卡</b>，一张角色卡只认一个主题。</div>';
 }
@@ -10494,6 +10503,8 @@ function bindOrb() {
             orbBgApply(nm);
             renderOrbPanel(); return;
         }
+        /* 美化页：常用开关的展开栏标题（点一下展开/收起） */
+        if (t.closest('[data-orb-btopen]')) { orbBeautyOpen = !orbBeautyOpen; renderOrbPanel(); return; }
         /* 美化页：常用开关（点开关/整行都算，toggle） */
         const bt = t.closest('[data-orb-btweak]');
         if (bt) {
