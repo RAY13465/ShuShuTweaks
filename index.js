@@ -4407,7 +4407,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.30';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.31';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5132,6 +5132,497 @@ function orbBgHTML() {
         + '<div class="ssp-orb-empty" style="padding-top:6px">点缩略图或「换成这张」= 直接换背景（跟酒馆自己换一个效果）；'
         + '「绑给本卡」= 以后切到这张卡自动换；没绑的卡一律用「你自己的背景」。</div>';
     return h;
+}
+
+/* ============================ 调试窗（脚本测试 / 一键诊断 / 抓元素） ============================
+   为什么要它：手机和电脑显示不一致时，最烦的是"没法在手机上现场跑段代码看看"，
+   而导入脚本又麻烦。这里给一个窗口，直接在酒馆页面里跑脚本、看结果、复制结果发出去 ——
+   手机端不用导入任何文件，刷新就能用。
+   可行性已实测（无头浏览器探针）：new Function / eval 可用、页面**没有 CSP meta**、
+   样式表 118 张 9308 条规则**零跨域拦截**、matchMedia / CSS.supports / getComputedStyle /
+   visualViewport / env(safe-area-inset-*) 全都在。
+   ---------------------------------------------------------------------------- */
+var orbDbgOpen = false;        // 窗口开着吗
+var orbDbgCode = '';           // 当前脚本内容
+var orbDbgOut = [];            // 输出区（字符串数组，方便整体复制）
+var orbDbgName = '';           // 当前脚本名（存脚本用）
+var orbDbgBusy = false;
+var orbDbgTab = 'script';      // script / diag / pick
+
+function orbDbgStore() {
+    const s = getSettings();
+    if (!Array.isArray(s.dbgScripts)) s.dbgScripts = [];
+    return s.dbgScripts;
+}
+/** 把任意值变成能看、能复制的文本 */
+function orbDbgFmt(v, depth) {
+    const d = depth || 0;
+    try {
+        if (v === undefined) return 'undefined';
+        if (v === null) return 'null';
+        const t = typeof v;
+        if (t === 'string') return d ? JSON.stringify(v) : v;
+        if (t === 'number' || t === 'boolean' || t === 'bigint') return String(v);
+        if (t === 'function') return 'ƒ ' + (v.name || '') + '()';
+        if (v.nodeType && v.tagName) {
+            let sel = String(v.tagName).toLowerCase();
+            if (v.id) sel += '#' + v.id;
+            const cls = (typeof v.className === 'string') ? v.className.trim() : '';
+            if (cls) sel += '.' + cls.split(/\s+/).slice(0, 3).join('.');
+            return '<' + sel + '>';
+        }
+        if (d >= 2) return Array.isArray(v) ? '[…' + v.length + ']' : '{…}';
+        if (Array.isArray(v)) return '[' + v.slice(0, 30).map(x => orbDbgFmt(x, d + 1)).join(', ') + (v.length > 30 ? ', …共' + v.length + ' 个' : '') + ']';
+        const keys = Object.keys(v);
+        return '{' + keys.slice(0, 24).map(k => k + ': ' + orbDbgFmt(v[k], d + 1)).join(', ')
+            + (keys.length > 24 ? ', …共' + keys.length + ' 个键' : '') + '}';
+    } catch (e) { return '(显示不了: ' + e.message + ')'; }
+}
+function orbDbgSay(line) {
+    orbDbgOut.push(String(line === undefined ? '' : line));
+    if (orbDbgOut.length > 500) orbDbgOut.splice(0, orbDbgOut.length - 500);
+    orbDbgPaint();
+}
+function orbDbgClear() { orbDbgOut = []; orbDbgPaint(); }
+function orbDbgText() { return orbDbgOut.join('\n'); }
+function orbDbgDivider(title) {
+    orbDbgSay('');
+    orbDbgSay('──── ' + title + ' ────');
+}
+
+/** 跑一段脚本：拦 console、抓返回值、抓报错（带回溯行） */
+async function orbDbgRun(code) {
+    const src = String(code === undefined || code === null ? orbDbgCode : code);
+    if (!src.trim()) { orbDbgSay('（脚本是空的）'); return null; }
+    orbDbgBusy = true;
+    orbDbgSay('▶ 运行 ' + new Date().toLocaleTimeString());
+    const logged = [];
+    const keep = {};
+    ['log', 'info', 'warn', 'error'].forEach(k => {
+        keep[k] = console[k];
+        console[k] = function () {
+            const line = Array.prototype.slice.call(arguments).map(a => orbDbgFmt(a, 1)).join(' ');
+            logged.push(k.toUpperCase() + ' ' + line);
+            orbDbgSay('  ' + k.toUpperCase() + ' ' + line);
+            try { keep[k].apply(console, arguments); } catch (e) { }
+        };
+    });
+    let result, err = null;
+    const t0 = Date.now();
+    try {
+        /* 包成 async IIFE：脚本里能写 await、也能 return 交回结果 */
+        const fn = new Function('"use strict"; return (async () => {\n' + src + '\n})();');
+        result = await fn();
+    } catch (e) {
+        err = e;
+    } finally {
+        ['log', 'info', 'warn', 'error'].forEach(k => { console[k] = keep[k]; });
+        orbDbgBusy = false;
+    }
+    if (err) {
+        orbDbgSay('✗ ' + (err && err.name ? err.name + ': ' : '') + ((err && err.message) || err));
+        try {
+            String(err.stack || '').split('\n').filter(l => /anonymous|eval/.test(l)).slice(0, 2)
+                .forEach(l => orbDbgSay('    在 ' + l.trim()));
+        } catch (e) { }
+    } else {
+        orbDbgSay('← 返回：' + orbDbgFmt(result, 1));
+    }
+    orbDbgSay('（用时 ' + (Date.now() - t0) + 'ms' + (logged.length ? '，console ' + logged.length + ' 条' : '') + '）');
+    orbDbgPaint();
+    return err ? null : result;
+}
+
+/* ---------------------------- 一键诊断 ---------------------------- */
+function orbDbgDiagScreen() {
+    const lines = [];
+    const vv = window.visualViewport || null;
+    lines.push('视口 innerWidth×innerHeight：' + window.innerWidth + ' × ' + window.innerHeight);
+    lines.push('屏幕 screen：' + screen.width + ' × ' + screen.height + '（可用 ' + screen.availWidth + '×' + screen.availHeight + '）');
+    lines.push('devicePixelRatio：' + window.devicePixelRatio);
+    if (vv) lines.push('visualViewport：' + Math.round(vv.width) + ' × ' + Math.round(vv.height) + '（offsetTop ' + Math.round(vv.offsetTop) + '，scale ' + vv.scale + '）');
+    lines.push('UA：' + navigator.userAgent);
+    lines.push('平台：' + (navigator.platform || '?') + '　语言：' + navigator.language);
+    lines.push('触摸：ontouchstart=' + ('ontouchstart' in window) + '　maxTouchPoints=' + navigator.maxTouchPoints + '　pointer:' + (window.PointerEvent ? 'PointerEvent' : '无'));
+    lines.push('横竖屏：' + (window.innerWidth > window.innerHeight ? '横屏' : '竖屏') + '　orientation=' + (screen.orientation ? screen.orientation.type : '?'));
+    try {
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position:fixed;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);visibility:hidden';
+        document.body.appendChild(probe);
+        const cs = getComputedStyle(probe);
+        lines.push('安全区：top=' + (cs.paddingTop || '0') + ' bottom=' + (cs.paddingBottom || '0'));
+        probe.remove();
+    } catch (e) { lines.push('安全区：读不到（' + e.message + '）'); }
+    try {
+        const d = document.documentElement;
+        lines.push('文档滚动高度：' + d.scrollHeight + '　body 高度：' + (document.body ? document.body.scrollHeight : '?'));
+        lines.push('缩放：' + (Math.round((window.outerWidth / window.innerWidth) * 100) / 100) + '　standalone=' + (window.matchMedia('(display-mode: standalone)').matches ? '是' : '否'));
+    } catch (e) { }
+    return lines.join('\n');
+}
+function orbDbgDiagMedia() {
+    const q = [
+        ['pointer: coarse（手指）', '(pointer: coarse)'],
+        ['pointer: fine（鼠标）', '(pointer: fine)'],
+        ['hover: none（不能悬停）', '(hover: none)'],
+        ['hover: hover', '(hover: hover)'],
+        ['any-pointer: coarse', '(any-pointer: coarse)'],
+        ['深色模式', '(prefers-color-scheme: dark)'],
+        ['减少动效', '(prefers-reduced-motion: reduce)'],
+        ['横屏', '(orientation: landscape)'],
+        ['竖屏', '(orientation: portrait)'],
+        ['≤480px', '(max-width: 480px)'],
+        ['≤600px', '(max-width: 600px)'],
+        ['≤768px', '(max-width: 768px)'],
+        ['≤900px', '(max-width: 900px)'],
+        ['≤1024px', '(max-width: 1024px)'],
+        ['≥1025px', '(min-width: 1025px)'],
+    ];
+    const lines = ['媒体查询体检（真=命中这一支）：'];
+    q.forEach(pair => {
+        let yes = '?';
+        try { yes = window.matchMedia(pair[1]).matches ? '真 ✓' : '假'; } catch (e) { yes = '不支持'; }
+        lines.push('  ' + (yes === '真 ✓' ? '✓' : ' ') + ' ' + pair[0] + '  ' + pair[1] + '  → ' + yes);
+    });
+    return lines.join('\n');
+}
+function orbDbgDiagCss() {
+    const feats = [
+        ':has()', 'selector(:has(*))',
+        'aspect-ratio: 1', 'inset: 0', 'gap: 1px',
+        'height: 100dvh', 'height: 100svh', 'height: 100lvh',
+        'color: color-mix(in srgb, red, blue)',
+        'backdrop-filter: blur(2px)', '-webkit-backdrop-filter: blur(2px)',
+        'width: min(1px, 2px)', 'width: clamp(1px, 2px, 3px)',
+        'padding: env(safe-area-inset-top)',
+        'position: sticky', 'display: grid', 'display: flex',
+        'grid-template-columns: subgrid',
+        'accent-color: red', 'text-wrap: balance', 'overflow: clip',
+    ];
+    const lines = ['CSS 特性支持检测：'];
+    feats.forEach(f => {
+        let ok = '?';
+        try { ok = CSS.supports(f) ? '支持 ✓' : '不支持 ✗'; } catch (e) { ok = '测不了'; }
+        lines.push('  ' + (ok === '支持 ✓' ? '✓' : '✗') + ' ' + f + '  → ' + ok);
+    });
+    return lines.join('\n');
+}
+function orbDbgDiagState() {
+    const lines = ['扩展状态快照：'];
+    try {
+        const s = getSettings();
+        lines.push('  版本：v' + PANEL_VERSION + '　设备：' + activeDevice() + '　面板开着：' + orbOpenNow);
+        lines.push('  悬浮球：' + (s.orbOn === false ? '关' : '开') + '　已收起：' + (s.orbCollapsed === true ? '是' : '否'));
+        lines.push('  世界书自动：' + (s.worldAuto !== false) + '　美化自动：' + (s.presetAuto !== false) + '　背景自动：' + (s.bgAuto !== false));
+        const cnt = o => (o && typeof o === 'object') ? Object.keys(o).length : 0;
+        lines.push('  绑定表：世界书 ' + cnt(s.worldBinds) + ' 个 / 美化 ' + cnt(s.themeBinds) + ' 个 / 预设 ' + cnt(s.presetBinds) + ' 个 / 背景 ' + cnt(s.bgBinds) + ' 个');
+        lines.push('  你自己的背景：' + (s.bgUser || '（没记）'));
+        lines.push('  番外 ' + cnt(s.notes) + ' 条　存档记录 ' + cnt(s.worldApplied) + ' 条');
+    } catch (e) { lines.push('  读设置失败：' + e.message); }
+    try {
+        const ctx = getContext() || {};
+        const ch = (ctx.characters || [])[ctx.characterId];
+        lines.push('  当前角色：' + (ch ? ch.name + '（' + ch.avatar + '）' : '（没打开）'));
+        lines.push('  当前聊天：' + ((ctx.getCurrentChatId && ctx.getCurrentChatId()) || '（无）'));
+        lines.push('  消息条数：' + ((ctx.chat && ctx.chat.length) || 0));
+        lines.push('  酒馆版本：' + ((ctx.version) || '?'));
+    } catch (e) { lines.push('  读上下文失败：' + e.message); }
+    try {
+        const enabled = Array.from(document.querySelectorAll('#extensions_settings .extension_container, .extension_container'))
+            .map(el => (el.querySelector('.inline-drawer-toggle, b, h4') || {}).textContent || '').map(t => t.trim()).filter(Boolean);
+        lines.push('  扩展条目（DOM 里能看到的）：' + (enabled.length ? enabled.slice(0, 14).join('、') : '（没读到）'));
+    } catch (e) { }
+    lines.push('  高清头像替换：' + (document.querySelectorAll('img[data-ssp-hd]').length || 0) + ' 张');
+    return lines.join('\n');
+}
+
+/* ---------------------------- 窗口本体 ---------------------------- */
+function orbDbgEl() { return document.getElementById('ssp_dbg'); }
+function orbDbgPickOff() {
+    if (!orbDbgPick) return;
+    orbDbgPick = false;
+    const box = document.getElementById('ssp_dbg_pick');
+    if (box) box.remove();
+    document.removeEventListener('touchstart', orbDbgPickHandler, true);
+    document.removeEventListener('mousedown', orbDbgPickHandler, true);
+}
+function orbDbgPickHandler(ev) {
+    if (!orbDbgPick) return;
+    const t = ev.target;
+    if (!t || (t.closest && t.closest('#ssp_dbg'))) return;     // 别抓调试窗自己
+    ev.preventDefault();
+    ev.stopPropagation();
+    const sel = orbDbgSelectorOf(t);
+    orbDbgPickOff();
+    orbDbgOpenWin();
+    orbDbgTab = 'pick';
+    orbDbgSay('');
+    orbDbgSay('抓到了：' + sel);
+    orbDbgSay(orbDbgInspect(t));
+    getSettings().dbgLastPick = sel;
+    save();
+    orbDbgPaint();
+}
+/** 给元素生成一个尽量稳、能直接往 CSS 里粘的选择器 */
+function orbDbgSelectorOf(el) {
+    try {
+        if (!el || !el.tagName) return '';
+        if (el.id && document.querySelectorAll('#' + CSS.escape(el.id)).length === 1) return '#' + el.id;
+        const parts = [];
+        let cur = el;
+        while (cur && cur.tagName && cur !== document.body && parts.length < 6) {
+            let part = String(cur.tagName).toLowerCase();
+            const cls = (typeof cur.className === 'string' ? cur.className.trim() : '').split(/\s+/)
+                .filter(c => c && !/^(on|off|active|hover|selected)$/.test(c)).slice(0, 3);
+            if (cls.length) part += '.' + cls.map(c => CSS.escape(c)).join('.');
+            /* 同层同签名的第几个 */
+            const sibs = cur.parentElement ? Array.from(cur.parentElement.children).filter(s => s.tagName === cur.tagName) : [cur];
+            if (sibs.length > 1) part += ':nth-of-type(' + (sibs.indexOf(cur) + 1) + ')';
+            parts.unshift(part);
+            const cand = parts.join(' > ');
+            try { if (document.querySelectorAll(cand).length === 1) return cand; } catch (e) { }
+            cur = cur.parentElement;
+        }
+        return parts.join(' > ') || String(el.tagName).toLowerCase();
+    } catch (e) { return String((el && el.tagName) || '').toLowerCase(); }
+}
+/** 元素体检：计算样式 / 盒模型 / 父链 / 命中的规则（关键项） */
+function orbDbgInspect(el) {
+    const L = [];
+    try {
+        const cs = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        L.push('  尺寸：' + Math.round(r.width) + ' × ' + Math.round(r.height) + '　位置 left ' + Math.round(r.left) + ' top ' + Math.round(r.top));
+        L.push('  盒模型：内容 ' + Math.round(r.width) + '×' + Math.round(r.height)
+            + '　padding ' + cs.paddingTop + '/' + cs.paddingRight + '/' + cs.paddingBottom + '/' + cs.paddingLeft
+            + '　margin ' + cs.marginTop + '/' + cs.marginRight + '/' + cs.marginBottom + '/' + cs.marginLeft);
+        const keys = ['display', 'visibility', 'opacity', 'position', 'z-index', 'overflow', 'flex', 'gap',
+            'width', 'height', 'min-width', 'max-width', 'font-size', 'line-height', 'color', 'background-color',
+            'background-image', 'border-radius', 'transform', 'backdrop-filter'];
+        L.push('  计算样式：');
+        keys.forEach(k => { const v = cs.getPropertyValue(k); if (v && v !== 'none' && v !== 'normal' && v !== 'auto' && v !== '0px') L.push('    ' + k + ': ' + v); });
+        /* 命中的规则（同源样式表全可枚举；最后几条通常就是"压住你的那位"） */
+        const hits = [];
+        for (let i = 0; i < document.styleSheets.length; i++) {
+            let rules = null;
+            try { rules = document.styleSheets[i].cssRules; } catch (e) { continue; }
+            if (!rules) continue;
+            for (let j = 0; j < rules.length; j++) {
+                const rule = rules[j];
+                if (!rule || !rule.selectorText) continue;
+                const sel = rule.selectorText;
+                if (sel.indexOf('#ssp_dbg') >= 0) continue;
+                let ok = false;
+                try { ok = el.matches(sel); } catch (e) { ok = false; }
+                if (ok) hits.push(sel);
+            }
+        }
+        L.push('  命中规则：' + hits.length + ' 条');
+        hits.slice(-12).forEach(s => L.push('    ' + s));
+        if (hits.length > 12) L.push('    （只列最后 12 条，通常最后几条就是压住你的那个）');
+        /* 图片为什么没显示 */
+        if (el.tagName === 'IMG') L.push('  图片：naturalWidth=' + el.naturalWidth + '（0 = 根本没加载出来）　src=' + String(el.src).slice(0, 120));
+        const bg = cs.backgroundImage;
+        if (bg && bg !== 'none') L.push('  背景图：' + bg.slice(0, 140));
+    } catch (e) { L.push('  体检出错：' + e.message); }
+    return L.join('\n');
+}
+
+function orbDbgPaint() {
+    const el = orbDbgEl();
+    if (el) {
+        const pre = el.querySelector('[data-ssp-dbgout]');
+        if (pre) { pre.textContent = orbDbgText() || '（输出会显示在这里）'; pre.scrollTop = pre.scrollHeight; }
+        const ta = el.querySelector('[data-ssp-dbgcode]');
+        if (ta && document.activeElement !== ta) ta.value = orbDbgCode;
+    }
+    const pickBox = document.getElementById('ssp_dbg_pick');
+    if (pickBox) {
+        const tip = pickBox.querySelector('b');
+        if (tip) tip.textContent = orbDbgPick ? '抓取中：点页面上任意元素（先点这里退出）' : '点这里开始抓元素';
+    }
+}
+function orbDbgOpenWin() {
+    let el = orbDbgEl();
+    if (el) { el.style.display = 'flex'; orbDbgOpen = true; orbDbgPaint(); return el; }
+    el = document.createElement('div');
+    el.id = 'ssp_dbg';
+    el.innerHTML = ''
+        + '<div class="ssp-dbg-head"><b><i class="fa-solid fa-code"></i> 调试窗</b>'
+        + '<span class="ssp-dbg-tabs">'
+        + '<span class="ssp-pbtn' + (orbDbgTab === 'script' ? ' primary' : '') + '" data-ssp-dbgtab="script">脚本</span>'
+        + '<span class="ssp-pbtn' + (orbDbgTab === 'diag' ? ' primary' : '') + '" data-ssp-dbgtab="diag">诊断</span>'
+        + '<span class="ssp-pbtn' + (orbDbgTab === 'pick' ? ' primary' : '') + '" data-ssp-dbgtab="pick">抓元素</span>'
+        + '</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgcopy="1" title="复制输出（拿到手机上跑的结果直接发给作者）"><i class="fa-solid fa-copy"></i> 复制输出</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgclear="1">清空</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgclose="1"><i class="fa-solid fa-xmark"></i></span></div>'
+        + '<div class="ssp-dbg-body">'
+        + '<textarea class="ssp-dbg-code" data-ssp-dbgcode="1" spellcheck="false" placeholder="在这里写脚本，直接跑在酒馆页面里。&#10;可以用 await、可以 return 交回结果。&#10;例：return { 宽: innerWidth, dpr: devicePixelRatio, 暗色: matchMedia(\'(prefers-color-scheme: dark)\').matches }"></textarea>'
+        + '<div class="ssp-dbg-bar">'
+        + '<span class="ssp-pbtn primary" data-ssp-dbgrun="1"><i class="fa-solid fa-play"></i> 运行</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgsave="1">存为脚本</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgsaved="1">我的脚本</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgdiag="screen">屏幕环境</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgdiag="media">媒体查询</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgdiag="css">CSS 支持</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgdiag="state">状态快照</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgdiag="all">全跑一遍</span>'
+        + '</div>'
+        + '<pre class="ssp-dbg-out" data-ssp-dbgout="1"></pre>'
+        + '</div>';
+    document.body.appendChild(el);
+    orbDbgOpen = true;
+    /* 事件：窗口在面板之外，所以自己接 */
+    el.addEventListener('click', ev => {
+        const t = ev.target;
+        if (!t || !t.closest) return;
+        if (t.closest('[data-ssp-dbgclose]')) { orbDbgClose(); return; }
+        if (t.closest('[data-ssp-dbgclear]')) { orbDbgClear(); return; }
+        const dload = t.closest('[data-ssp-dbgload]');
+        if (dload) {
+            const item = orbDbgStore()[Number(dload.dataset.sspDbgload)];
+            if (item) { orbDbgCode = String(item.code || ''); orbDbgName = item.name; orbDbgTab = 'script'; const ta = el.querySelector('[data-ssp-dbgcode]'); if (ta) ta.value = orbDbgCode; toast('已装载脚本：' + item.name, 'success'); }
+            return;
+        }
+        const ddrop = t.closest('[data-ssp-dbgdrop]');
+        if (ddrop) {
+            const i = Number(ddrop.dataset.sspDbgdrop);
+            const list = orbDbgStore();
+            const gone = list.splice(i, 1)[0];
+            save();
+            toast('已删脚本：' + ((gone && gone.name) || i), 'info');
+            orbDbgListScripts();
+            return;
+        }
+        if (t.closest('[data-ssp-dbgcopy]')) {
+            const txt = orbDbgText() || orbDbgOut.join('\n');
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(txt).then(() => toast('输出已复制到剪贴板', 'success'), () => orbDbgFallbackCopy(txt));
+                } else orbDbgFallbackCopy(txt);
+            } catch (e) { orbDbgFallbackCopy(txt); }
+            return;
+        }
+        const tabBtn = t.closest('[data-ssp-dbgtab]');
+        if (tabBtn) { orbDbgTab = tabBtn.dataset.sspDbgtab; orbDbgPaint(); orbDbgMarkTabs(); return; }
+        if (t.closest('[data-ssp-dbgrun]')) { orbDbgRun(); return; }
+        if (t.closest('[data-ssp-dbgsave]')) { orbDbgSaveScript(); return; }
+        if (t.closest('[data-ssp-dbgsaved]')) { orbDbgListScripts(); return; }
+        const dg = t.closest('[data-ssp-dbgdiag]');
+        if (dg) { orbDbgDiag(dg.dataset.sspDbgdiag); return; }
+        const pick = t.closest('[data-ssp-dbgpickstart]');
+        if (pick) { orbDbgPickStart(); return; }
+    });
+    el.addEventListener('input', ev => {
+        const t = ev.target;
+        if (t && t.dataset && t.dataset.sspDbgcode !== undefined) orbDbgCode = t.value;
+    });
+    el.addEventListener('keydown', ev => {
+        const t = ev.target;
+        if (t && t.dataset && t.dataset.sspDbgcode !== undefined && ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
+            ev.preventDefault();
+            orbDbgRun();
+        }
+    });
+    orbDbgPaint();
+    return el;
+}
+function orbDbgMarkTabs() {
+    const el = orbDbgEl();
+    if (!el) return;
+    el.querySelectorAll('[data-ssp-dbgtab]').forEach(b => {
+        const on = b.dataset.sspDbgtab === orbDbgTab;
+        if (b.classList) b.classList.toggle('primary', on);
+    });
+}
+function orbDbgFallbackCopy(txt) {
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = txt;
+        ta.style.cssText = 'position:fixed;left:-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        toast('输出已复制', 'success');
+    } catch (e) { toast('复制失败，手动选中输出区复制吧', 'warning'); }
+}
+function orbDbgDiag(which) {
+    orbDbgOpenWin();
+    orbDbgTab = 'diag';
+    orbDbgMarkTabs();
+    const one = k => {
+        orbDbgDivider(k === 'screen' ? '屏幕环境' : k === 'media' ? '媒体查询' : k === 'css' ? 'CSS 支持' : '扩展状态');
+        orbDbgSay(k === 'screen' ? orbDbgDiagScreen() : k === 'media' ? orbDbgDiagMedia() : k === 'css' ? orbDbgDiagCss() : orbDbgDiagState());
+    };
+    if (which === 'all') { ['screen', 'media', 'css', 'state'].forEach(one); }
+    else one(which);
+    orbDbgSay('');
+    orbDbgSay('（点右上「复制输出」把这段发出去就行）');
+    orbDbgPaint();
+}
+function orbDbgSaveScript() {
+    const code = orbDbgCode.trim();
+    if (!code) { toast('先写点脚本再存', 'warning'); return; }
+    orbAskText('给这段脚本起个名字（同名会覆盖）', orbDbgName || '我的脚本').then(nm => {
+        const name = String(nm || '').trim();
+        if (!name) return;
+        const list = orbDbgStore();
+        const old = list.filter(x => x && x.name === name)[0];
+        if (old) old.code = code; else list.push({ name: name, code: code });
+        orbDbgName = name;
+        save();
+        toast('已存脚本：' + name, 'success');
+    });
+}
+function orbDbgListScripts() {
+    const list = orbDbgStore();
+    orbDbgDivider('我的脚本（' + list.length + ' 个）');
+    if (!list.length) orbDbgSay('  还没有存过脚本。写完点「存为脚本」就存下来了（刷新不丢）。');
+    list.forEach((x, i) => orbDbgSay('  [' + (i + 1) + '] ' + x.name));
+    if (list.length) {
+        orbDbgSay('');
+        orbDbgSay('  想看/用它：在下面输入框里敲它的名字再点运行器旁边的「我的脚本」……');
+        orbDbgSay('  （简单起见：点下面的按钮直接装载）');
+        /* 直接给一排装载按钮：塞进输出区下方 */
+        const el = orbDbgEl();
+        if (el) {
+            let bar = el.querySelector('.ssp-dbg-loadbar');
+            if (!bar) {
+                bar = document.createElement('div');
+                bar.className = 'ssp-dbg-bar ssp-dbg-loadbar';
+                const pre = el.querySelector('[data-ssp-dbgout]');
+                if (pre && pre.parentElement) pre.parentElement.insertBefore(bar, pre);
+            }
+            bar.innerHTML = list.map((x, i) => '<span class="ssp-pbtn" data-ssp-dbgload="' + i + '">' + esc(x.name) + '</span>').join('')
+                + list.map((x, i) => '<span class="ssp-pbtn danger" data-ssp-dbgdrop="' + i + '">删' + (i + 1) + '</span>').join('');
+        }
+    }
+    orbDbgPaint();
+}
+function orbDbgPickStart() {
+    orbDbgPick = true;
+    let box = document.getElementById('ssp_dbg_pick');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'ssp_dbg_pick';
+        box.innerHTML = '<b>抓取中：点页面上任意元素（先点这里退出）</b>';
+        box.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); orbDbgPickOff(); orbDbgOpenWin(); });
+        document.body.appendChild(box);
+    }
+    document.addEventListener('touchstart', orbDbgPickHandler, true);
+    document.addEventListener('mousedown', orbDbgPickHandler, true);
+    /* 抓到之后：把调试窗收起来（免得挡着），抓完自动开回来 */
+    const el = orbDbgEl();
+    if (el) el.style.display = 'none';
+    toast('抓取模式：点页面上任意元素', 'info');
+}
+function orbDbgClose() {
+    orbDbgPickOff();
+    const el = orbDbgEl();
+    if (el) el.remove();
+    orbDbgOpen = false;
 }
 
 /* ============================ 存档（聊天记录）栏 ============================
@@ -8555,6 +9046,7 @@ function orbPanelHTML() {
         + '" data-orb-tab="' + m.id + '"><i class="fa-solid ' + m.icon + '"></i>' + esc(m.name) + '</span>').join('');
     return '<div class="ssp-orb-head"><span class="ssp-orb-logo"></span>'
         + '<div class="ssp-orb-title"><b>鼠鼠口袋</b><small>悬浮球 · ' + ORB_MODULES.length + ' 个模块</small></div>'
+        + '<span class="ssp-pbtn" data-orb-dbgopen="1" title="调试窗（脚本测试 / 一键诊断 / 抓元素）"><i class="fa-solid fa-code"></i></span>'
         + '<span class="ssp-pbtn" data-orb-retract="1" title="收回悬浮球（之后从酒馆「扩展」列表里的鼠鼠面板再打开）"><i class="fa-solid fa-eye-slash"></i></span>'
         + '<span class="ssp-pbtn" data-orb-close="1"><i class="fa-solid fa-xmark"></i></span></div>'
         + '<div class="ssp-orb-tabs">' + tabs + '</div>'
@@ -9249,6 +9741,8 @@ function bindOrb() {
         if (t.closest('[data-orb-pclear]')) { orbPSearch = ''; renderOrbPanel(); return; }
         if (t.closest('[data-orb-close]')) { closeOrb(); return; }
         /* 收回悬浮球：按钮就在面板里（用户要求做在球自己里面） */
+        /* 顶栏：调试窗（大部分人用不到，所以做在收回按钮旁边的小图标） */
+        if (t.closest('[data-orb-dbgopen]')) { orbDbgOpenWin(); return; }
         if (t.closest('[data-orb-retract]')) {
             getSettings().orbOn = false; save();
             orbSetCollapsed(true, true);
