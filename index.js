@@ -4407,7 +4407,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.31';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.32';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5148,6 +5148,8 @@ var orbDbgOut = [];            // 输出区（字符串数组，方便整体复�
 var orbDbgName = '';           // 当前脚本名（存脚本用）
 var orbDbgBusy = false;
 var orbDbgTab = 'script';      // script / diag / pick
+var orbDbgPick = false;        // 是否正在抓元素（⚠️ 这个变量当初漏声明了，ESM 严格模式下
+                               //   在函数里赋值会直接 ReferenceError —— 真机 e2e 抓到的）
 
 function orbDbgStore() {
     const s = getSettings();
@@ -5505,7 +5507,12 @@ function orbDbgOpenWin() {
             return;
         }
         const tabBtn = t.closest('[data-ssp-dbgtab]');
-        if (tabBtn) { orbDbgTab = tabBtn.dataset.sspDbgtab; orbDbgPaint(); orbDbgMarkTabs(); return; }
+        if (tabBtn) {
+            orbDbgTab = tabBtn.dataset.sspDbgtab; orbDbgPaint(); orbDbgMarkTabs();
+            /* 「抓元素」页签：点了就直接进抓取模式（不用再点第二个按钮 —— 手机上少一步是一步） */
+            if (orbDbgTab === 'pick') { try { orbDbgPickStart(); } catch (e) { } }
+            return;
+        }
         if (t.closest('[data-ssp-dbgrun]')) { orbDbgRun(); return; }
         if (t.closest('[data-ssp-dbgsave]')) { orbDbgSaveScript(); return; }
         if (t.closest('[data-ssp-dbgsaved]')) { orbDbgListScripts(); return; }
@@ -10391,6 +10398,14 @@ if (globalThis.__SSP_TEST__) {
         orbBgFetch, orbBgHTML, orbBgRowsHTML, orbBgDelete, orbBgRenameTo,
         get orbBgSearch() { return orbBgSearch; }, set orbBgSearch(v) { orbBgSearch = v; },
         get orbBgDel() { return orbBgDel; }, set orbBgDel(v) { orbBgDel = v; },
+        orbDbgOpenWin, orbDbgClose, orbDbgRun, orbDbgFmt, orbDbgSay, orbDbgText, orbDbgClear,
+        orbDbgDiagScreen, orbDbgDiagMedia, orbDbgDiagCss, orbDbgDiagState, orbDbgDiag,
+        orbDbgSelectorOf, orbDbgInspect, orbDbgPickStart, orbDbgPickOff, orbDbgStore,
+        orbDbgEl, orbDbgSaveScript, orbDbgListScripts,
+        get orbDbgPick() { return orbDbgPick; }, set orbDbgPick(v) { orbDbgPick = v; },
+        get orbDbgOpen() { return orbDbgOpen; }, set orbDbgOpen(v) { orbDbgOpen = v; },
+        get orbDbgCode() { return orbDbgCode; }, set orbDbgCode(v) { orbDbgCode = v; },
+        get orbDbgOut() { return orbDbgOut; }, set orbDbgOut(v) { orbDbgOut = v; },
         get orbPersonaDel() { return orbPersonaDel; }, set orbPersonaDel(v) { orbPersonaDel = v; },
         ORB_IMP_CATS, orbImpHTML, orbImpRead, orbImpRestore, orbImpAvatarOf, orbImpPick,
         extractThinking, applyThinkingShield, thinkTags, registerThinkDisplayHook, registerThinkEvents,
