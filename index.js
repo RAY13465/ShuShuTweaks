@@ -10656,6 +10656,7 @@ if (globalThis.__SSP_TEST__) {
         orbDbgDiagScreen, orbDbgDiagMedia, orbDbgDiagCss, orbDbgDiagState, orbDbgDiag,
         orbDbgSelectorOf, orbDbgInspect, orbDbgPickStart, orbDbgPickOff, orbDbgStore,
         orbDbgEl, orbDbgSaveScript, orbDbgListScripts,
+        ORB_BEAUTY_TWEAKS, orbBeautyState, orbBeautyOn, orbBeautyApply, orbBeautySet, orbBeautyReset, orbBeautyHTML,
         orbDbgRule, orbDbgDivider, orbDbgHl, orbDbgHlShow, orbDbgHlHide, orbDbgTagOf, orbDbgUnder,
         orbDbgPickMove, orbDbgPickTip,
         get orbDbgSeq() { return orbDbgSeq; }, set orbDbgSeq(v) { orbDbgSeq = v; },
