@@ -5148,8 +5148,8 @@ var orbDbgOut = [];            // 输出区（字符串数组，方便整体复�
 var orbDbgName = '';           // 当前脚本名（存脚本用）
 var orbDbgBusy = false;
 var orbDbgTab = 'script';      // script / diag / pick
-var orbDbgPick = false;        // 是否正在抓元素（⚠️ 这个变量当初漏声明了，ESM 严格模式下
-                               //   在函数里赋值会直接 ReferenceError —— 真机 e2e 抓到的）
+var orbDbgPick = false;        // 是否正在抓元素
+var orbDbgPendEl = null;       // 手机上"已经框住、等第二下确认"的那个元素（桌面不用）
 
 function orbDbgStore() {
     const s = getSettings();
@@ -5343,20 +5343,100 @@ function orbDbgDiagState() {
 
 /* ---------------------------- 窗口本体 ---------------------------- */
 function orbDbgEl() { return document.getElementById('ssp_dbg'); }
+
+/* 抓元素用的高亮框：F12 那种"指着谁就框谁"。
+   pointer-events:none 才不会挡住选取（否则 elementFromPoint 永远只拿到它自己）。 */
+function orbDbgHl() {
+    let h = document.getElementById('ssp_dbg_hl');
+    if (!h) {
+        h = document.createElement('div');
+        h.id = 'ssp_dbg_hl';
+        document.body.appendChild(h);
+    }
+    return h;
+}
+function orbDbgTagOf(el) {
+    try {
+        let s = String((el && el.tagName) || '').toLowerCase();
+        if (el && el.id) s += '#' + el.id;
+        const cls = (el && typeof el.className === 'string') ? el.className.trim() : '';
+        if (cls) s += '.' + cls.split(/\s+/).slice(0, 2).join('.');
+        return s || '(未知)';
+    } catch (e) { return '(未知)'; }
+}
+function orbDbgHlShow(el) {
+    try {
+        const h = orbDbgHl();
+        if (!el || !el.getBoundingClientRect || (el.closest && el.closest('#ssp_dbg, #ssp_dbg_pick, #ssp_dbg_hl'))) {
+            h.style.display = 'none'; return;
+        }
+        const r = el.getBoundingClientRect();
+        h.style.display = 'block';
+        h.style.left = Math.round(r.left) + 'px';
+        h.style.top = Math.round(r.top) + 'px';
+        h.style.width = Math.max(1, Math.round(r.width)) + 'px';
+        h.style.height = Math.max(1, Math.round(r.height)) + 'px';
+        const lab = document.getElementById('ssp_dbg_hl_lab');
+        if (lab) lab.textContent = orbDbgTagOf(el) + '  ' + Math.round(r.width) + '×' + Math.round(r.height);
+    } catch (e) { }
+}
+function orbDbgHlHide() {
+    const h = document.getElementById('ssp_dbg_hl');
+    if (h) h.style.display = 'none';
+}
+function orbDbgPickTip(text) {
+    const box = document.getElementById('ssp_dbg_pick');
+    const b = box && box.querySelector('b');
+    if (b && text) b.textContent = text;
+}
+/** 手指/鼠标底下的元素（高亮框 pointer-events:none，所以能拿到真元素） */
+function orbDbgUnder(ev) {
+    try {
+        if (ev.touches && ev.touches[0]) return document.elementFromPoint(ev.touches[0].clientX, ev.touches[0].clientY) || ev.target;
+        if (ev.changedTouches && ev.changedTouches[0]) return document.elementFromPoint(ev.changedTouches[0].clientX, ev.changedTouches[0].clientY) || ev.target;
+    } catch (e) { }
+    return ev.target;
+}
+/* 预览（移动）：桌面 mousemove、手机 touchmove —— 都不确认，只挪框 */
+function orbDbgPickMove(ev) {
+    if (!orbDbgPick) return;
+    const el = orbDbgUnder(ev);
+    if (!el) return;
+    if (el.closest && el.closest('#ssp_dbg, #ssp_dbg_pick')) return;
+    if (ev.cancelable) ev.preventDefault();
+    orbDbgHlShow(el);
+    /* 手机：手指划到别处了 → 清掉"待确认"，免得划完随手一抬就误抓 */
+    if (ev.touches) orbDbgPendEl = (orbDbgPendEl === el) ? orbDbgPendEl : null;
+}
 function orbDbgPickOff() {
+    const h = document.getElementById('ssp_dbg_hl');
+    if (h) h.remove();
     if (!orbDbgPick) return;
     orbDbgPick = false;
+    orbDbgPendEl = null;
     const box = document.getElementById('ssp_dbg_pick');
     if (box) box.remove();
     document.removeEventListener('touchstart', orbDbgPickHandler, true);
+    document.removeEventListener('touchmove', orbDbgPickMove, true);
     document.removeEventListener('mousedown', orbDbgPickHandler, true);
+    document.removeEventListener('mousemove', orbDbgPickMove, true);
 }
 function orbDbgPickHandler(ev) {
     if (!orbDbgPick) return;
-    const t = ev.target;
-    if (!t || (t.closest && t.closest('#ssp_dbg'))) return;     // 别抓调试窗自己
+    const isTouch = !!ev.touches;
+    const t = orbDbgUnder(ev);
+    if (!t || (t.closest && t.closest('#ssp_dbg, #ssp_dbg_pick'))) return;     // 别抓调试窗自己
     ev.preventDefault();
     ev.stopPropagation();
+    /* 手机：第一下只画框（预览），**再点同一个**才确认 —— 用户要求的"点一次出现颜色框、再点一遍"。
+       桌面有 hover，所以点一下就直接确认。 */
+    if (isTouch && orbDbgPendEl !== t) {
+        orbDbgPendEl = t;
+        orbDbgHlShow(t);
+        orbDbgPickTip('已框住 ' + orbDbgTagOf(t) + ' —— 再点它一下确认（点别处就换目标）');
+        return;
+    }
+    orbDbgPendEl = null;
     const sel = orbDbgSelectorOf(t);
     orbDbgPickOff();
     orbDbgOpenWin();
@@ -5639,20 +5719,32 @@ function orbDbgListScripts() {
 }
 function orbDbgPickStart() {
     orbDbgPick = true;
+    orbDbgPendEl = null;
     let box = document.getElementById('ssp_dbg_pick');
     if (!box) {
         box = document.createElement('div');
         box.id = 'ssp_dbg_pick';
-        box.innerHTML = '<b>抓取中：点页面上任意元素（先点这里退出）</b>';
+        box.innerHTML = '<b>点一下预览 · 再点一下确认（点这条退出）</b>';
         box.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); orbDbgPickOff(); orbDbgOpenWin(); });
         document.body.appendChild(box);
+    } else {
+        orbDbgPickTip('点一下预览 · 再点一下确认（点这条退出）');
+    }
+    /* 高亮框（右上角带小标签：tag#id 宽×高） */
+    const hl = orbDbgHl();
+    if (!document.getElementById('ssp_dbg_hl_lab')) {
+        const lab = document.createElement('i');
+        lab.id = 'ssp_dbg_hl_lab';
+        hl.appendChild(lab);
     }
     document.addEventListener('touchstart', orbDbgPickHandler, true);
+    document.addEventListener('touchmove', orbDbgPickMove, true);
     document.addEventListener('mousedown', orbDbgPickHandler, true);
-    /* 抓到之后：把调试窗收起来（免得挡着），抓完自动开回来 */
+    document.addEventListener('mousemove', orbDbgPickMove, true);
+    /* 抓的时候把调试窗收起来（免得挡着），抓完自动开回来 */
     const el = orbDbgEl();
     if (el) el.style.display = 'none';
-    toast('抓取模式：点页面上任意元素', 'info');
+    toast('抓取模式：指着（手机上划到）元素就会画框，点一下预览、再点一下确认', 'info');
 }
 function orbDbgClose() {
     orbDbgPickOff();

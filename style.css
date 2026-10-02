@@ -929,6 +929,20 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     padding: 8px 14px; border-radius: 999px; box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
     cursor: pointer; max-width: 90vw; text-align: center;
 }
+/* 抓元素的彩色高亮框（F12 那种"指着谁框谁"）。
+   pointer-events:none 必须留着 —— 否则 elementFromPoint 只会拿到这个框自己，选取就废了。 */
+#ssp_dbg_hl {
+    position: fixed; z-index: 3400; display: none; pointer-events: none;
+    background: rgba(90, 180, 255, .22);
+    border: 2px solid #5ab4ff;
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, .45);
+}
+#ssp_dbg_hl > i {
+    position: absolute; left: 0; top: -21px; font-style: normal;
+    background: #5ab4ff; color: #04263f; font-size: 11px; font-weight: 700;
+    padding: 1px 6px; border-radius: 4px; white-space: nowrap; max-width: 60vw; overflow: hidden;
+}
 /* 手机上：留更小的边距，代码框矮一点，别把输出挤没 */
 @media (max-width: 700px) {
     #ssp_dbg { left: 6px; right: 6px; top: 36px; bottom: 6px; padding: 8px; }
