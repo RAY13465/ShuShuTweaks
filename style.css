@@ -934,3 +934,25 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     #ssp_dbg { left: 6px; right: 6px; top: 36px; bottom: 6px; padding: 8px; }
     .ssp-dbg-code { flex: 0 0 24%; min-height: 70px; }
 }
+
+/* 用户反馈两轮："能够点动的按钮做边框，不然我什么都看不见" → 后来精确成
+   "不是看不见，是我分不清哪个是按钮"。
+   所以目标不是加粗，而是**让能点的和纯文字一眼分开**：
+   有边框 + 有底色 + 圆角 + 手型光标 + 按下有反馈（纯文字全都没有这些）。 */
+.ssp-pbtn {
+    border: 1px solid rgba(255, 255, 255, .3);
+    border-radius: 6px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, .05);
+}
+.ssp-pbtn:hover { border-color: rgba(255, 255, 255, .55); background: rgba(255, 255, 255, .11); }
+.ssp-pbtn:active { transform: translateY(1px); }
+/* 调试窗里的按钮一律更明确（!important：面板/主题可能把它盖掉，这里必须能分清） */
+#ssp_dbg .ssp-pbtn {
+    border: 1px solid rgba(255, 255, 255, .42) !important;
+    background: rgba(255, 255, 255, .07);
+    padding: 3px 9px;
+}
+#ssp_dbg .ssp-pbtn:hover { border-color: rgba(255, 255, 255, .75) !important; background: rgba(255, 255, 255, .14); }
+#ssp_dbg .ssp-pbtn.primary { border-color: rgba(120, 200, 255, .75) !important; background: rgba(70, 140, 220, .3); }
+#ssp_dbg .ssp-pbtn.danger { border-color: rgba(255, 130, 130, .75) !important; background: rgba(200, 70, 70, .24); }

@@ -4407,7 +4407,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.33';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.34';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5460,6 +5460,24 @@ function orbDbgOpenWin() {
     if (el) { el.style.display = 'flex'; orbDbgOpen = true; orbDbgPaint(); return el; }
     el = document.createElement('div');
     el.id = 'ssp_dbg';
+    /* ⚠️ 用户要求：调试窗要**待在鼠鼠口袋里面**，不要全屏铺满。
+       做法：拿口袋面板内容区（.ssp-orb-body）的矩形，把窗口贴着它放 ——
+       面板本身是 fixed 定位，所以这个矩形是稳的，滚动也不会漂。拿不到才退回全屏。 */
+    try {
+        const host = document.querySelector('.ssp-orb-body') || document.querySelector('#ssp_orb') || null;
+        if (host) {
+            const r = host.getBoundingClientRect();
+            if (r && r.width > 120 && r.height > 120) {
+                el.style.position = 'fixed';
+                el.style.left = Math.round(r.left) + 'px';
+                el.style.top = Math.round(r.top) + 'px';
+                el.style.width = Math.round(r.width) + 'px';
+                el.style.height = Math.round(r.height) + 'px';
+                el.style.right = 'auto'; el.style.bottom = 'auto';
+                el.style.borderRadius = '8px';
+            }
+        }
+    } catch (e) { }
     el.innerHTML = ''
         + '<div class="ssp-dbg-head"><b><i class="fa-solid fa-code"></i> 调试窗</b>'
         + '<span class="ssp-dbg-tabs">'
