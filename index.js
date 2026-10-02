@@ -4407,7 +4407,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.38';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.39';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5802,17 +5802,15 @@ var ORB_BEAUTY_TWEAKS = [
         desc: '消息区与底部输入框之间那条 1px 的白线（勘查出来是 #sheld 的 bottom:1px 露了底，以及各层透明露壁纸）',
         def: false,
         css: [
-            /* 用户结论（比我的勘查更准）：那条线是**底部栏容器边框 + 输入框边框**两道白边叠出来的。
-               所以这里不再只盖缝，而是把整条底部输入链的边框/描边/阴影统一抹掉 ——
-               白边不管画在容器上、输入框上还是里面的子元素上，一律消失。
-               注意：只作用于底部输入区这一小块，不动页面其它地方；关掉开关即完全还原。 */
+            /* ⚠️ 上一版下手太重了：border-color/box-shadow 一网打尽，把用户自定义 CSS
+               给输入框**下部**画的那条线也一起干掉了 ✗（用户立刻反馈）。
+               现在收窄成**只掐上边** —— 只把顶部那条白边的颜色改成透明，
+               下边框/左右边框/阴影/描边**一律不碰**，用户的设计线原样保留 ✓。
+               残留的 1px 缝交给下面的 JS 填缝处理（那是非破坏性的盖色块）。 */
             '#form_sheld, #form_sheld *, #send_form, #send_form *, #nonQRFormItems, #nonQRFormItems * {',
-            '  border-color: transparent !important;',
-            '  outline-color: transparent !important;',
-            '  box-shadow: none !important;',
+            '  border-top-color: transparent !important;',
             '}',
-            '#form_sheld, #send_form { border: 0 !important; }',
-            /* 顺带把 #sheld 那 1px 的露底也收掉（勘查量到它有 bottom: 1px） */
+            /* #sheld 那 1px 露底：改成贴底（不删任何边框） */
             '#sheld { bottom: 0 !important; }',
         ].join('\n'),
     },
