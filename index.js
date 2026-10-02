@@ -4407,7 +4407,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.29';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.30';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4926,15 +4926,17 @@ function orbBgSyncChar(quiet) {
             save();
         };
         if (bound) {
-            if (!rec && now && now !== bound) orbBgUserSet(now, false);   // 覆盖前先把"你的那张"记牢
             if (now !== bound) orbBgApply(bound, !!quiet);
             remember(bound);
             return { now: bound, bound: bound, changed: now !== bound };
         }
+        /* 没绑 → 用「你自己的背景」。
+           ⚠️ 「你的背景」**只由你点那个按钮来记**，绝不在这里从"当前这张"回填 ——
+              酒馆换卡时会自己套这张卡的背景，一回填就把你的记录污染成别人的图了（真机 e2e 抓到过）。 */
         const mine = orbBgUser();
+        if (rec) { delete ledger[key]; save(); }                        // 之前是我们换的 → 收回记账
+        if (!mine) return { now: now, bound: '', changed: false, kept: 'no-user-bg' };  // 没记过 → 不动，保持酒馆自己那套
         if (now === mine) return { now: now, bound: '', changed: false };
-        if (rec) { delete ledger[key]; save(); }                         // 之前是我们换的 → 收回记账
-        if (!rec && now) orbBgUserSet(now, false);                       // 你正看着的那张就是"你的背景"
         orbBgApply(mine, !!quiet);
         return { now: mine, bound: '', changed: now !== mine };
     } catch (e) {
@@ -4970,8 +4972,7 @@ async function orbBgFetch() {
     try {
         const d = await orbDataPost('/api/backgrounds/all', {});
         orbBgList = orbDataArr(d).map(x => ({ file: orbDataNameOf(x, '') })).filter(x => x.file);
-        const now = orbBgNow();
-        if (now && !orbBgUser()) orbBgUserSet(now, true);   // 首次用这功能时，把你现在这张记成"你的背景"
+        /* 「你自己的背景」不在这里偷偷回填 —— 由面板上那个按钮负责（见 orbBgSyncChar 的注释） */
     } catch (e) {
         orbBgList = [];
         toast('读背景图列表失败：' + ((e && e.message) || e), 'warning');
@@ -8846,10 +8847,14 @@ function orbOnCharChanged() {
         orbLastCharId = (orbWbCurChar() || {}).id || '';
         if (!orbOpenNow) return;
         if (orbTab === 'chat') { try { orbChatsFetch(); } catch (e) { } return; }   // 它会自己重画
-        if (orbTab === 'bg') { try { orbBgSyncChar(true); } catch (e) { } try { orbBgFetch(); } catch (e) { } return; } // 背景页：切卡就对齐 + 重拉（它自己会重画）
+        if (orbTab === 'bg') { try { orbBgFetch(); } catch (e) { } return; } // 背景页：重拉列表（它自己会重画）
         renderOrbPanel();
     }, ms));
     if (now) [400, 1200].forEach(ms => setTimeout(() => { try { orbWbOnChatChanged(); } catch (e) { } }, ms));
+    /* 背景：换角色/换聊天就要对齐，**不管面板开着哪一页**（之前只挂在"背景页开着"那个分支里，
+       不在那页切卡压根不换 —— 真机 e2e 抓到的）。
+       而且酒馆自己也会给这张卡套它的背景，所以我们要跑在它**后面**（900/1800ms 这两趟），不然会被盖掉。 */
+    [900, 1800].forEach(ms => setTimeout(() => { try { orbBgSyncChar(true); } catch (e) { } }, ms));
 }
 
 /** 挂「世界书被改了」的监听 + 回到页面时的兜底重读。
