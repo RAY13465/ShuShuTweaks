@@ -890,6 +890,20 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 /* 球被收进去时，魔法棒高亮一下，提示"球在里头" */
 .ssp-orb-wand.active { color: #fff; border-color: rgba(255, 255, 255, .75); box-shadow: 0 0 0 2px rgba(255, 255, 255, .15), 0 4px 14px rgba(0, 0, 0, .5); }
 
+/* 美化页「常用开关」 */
+.ssp-bt { margin-top: 10px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 8px; padding: 8px; background: rgba(255, 255, 255, .03); }
+.ssp-bt-head { display: flex; flex-direction: column; margin-bottom: 6px; }
+.ssp-bt-head b { font-size: 12.5px; }
+.ssp-bt-head small { opacity: .6; font-size: 11px; }
+.ssp-bt-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px; border-radius: 6px; border: 1px solid transparent; }
+.ssp-bt-row.on { border-color: rgba(120, 200, 255, .45); background: rgba(70, 140, 220, .12); }
+.ssp-bt-sw { cursor: pointer; font-size: 16px; opacity: .55; flex: 0 0 auto; line-height: 1.2; }
+.ssp-bt-row.on .ssp-bt-sw { opacity: 1; color: #7cc4ff; }
+.ssp-bt-main { cursor: pointer; display: flex; flex-direction: column; min-width: 0; }
+.ssp-bt-main b { font-size: 12px; }
+.ssp-bt-main small { opacity: .62; font-size: 11px; line-height: 1.45; }
+.ssp-bt-foot { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+
 /* 收纳态：球收进魔法棒（缩到 0 + 淡出，不占位置也不会被点到） */
 #ssp_orb.ssp-collapsed {
     opacity: 0; transform: scale(.2); pointer-events: none;

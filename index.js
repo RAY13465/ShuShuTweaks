@@ -5766,6 +5766,113 @@ function orbDbgClose() {
     orbDbgOpen = false;
 }
 
+/* ============================ 常用开关（美化页里的便捷美化） ============================
+   用户诉求：一些长期的视觉毛病想靠**插件代码**解决，而不是写进自己的自定义 CSS。
+   做法：开关状态存扩展设置（s.beautyTweaks），开启时把对应 CSS 注入到一个
+   <style id="ssp_beauty_css"> 里；关掉就把那段样式移除（= 完全还原，不留痕迹）。
+   新增一个开关只需要往 ORB_BEAUTY_TWEAKS 里加一条（id / 名字 / 说明 / css / 默认）。
+   ---------------------------------------------------------------------------- */
+var ORB_BEAUTY_TWEAKS = [
+    {
+        id: 'topbarBottom',
+        name: '顶部展开面板通底',
+        desc: '顶部栏拉开的那些面板，高度直接铺到屏幕底部 —— 不然下面会露出一节消息框（用户长期困扰）',
+        def: false,
+        /* 顶部栏本体只有 35px 高（#top-settings-holder，position:relative），
+           面板是挂它下面的绝对定位块，被 max-height 卡住了 → 这里放开并给足高度。
+           选择器写得宽一点：酒馆不同版本的抽屉内容类名不完全一样。 */
+        css: [
+            '#top-settings-holder .drawer-content, #top-settings-holder .drawer-content > .scrollable,',
+            '#top-settings-holder .drawer-content > div, #top-settings-holder .drawer > .drawer-content {',
+            '  max-height: none !important;',
+            '  height: calc(100vh - 35px) !important;',
+            '  bottom: 0 !important;',
+            '}',
+            '#top-settings-holder .drawer-content > .scrollable, #top-settings-holder .drawer-content > div {',
+            '  height: 100% !important;',
+            '  overflow-y: auto !important;',
+            '}',
+        ].join('\n'),
+    },
+    {
+        id: 'killSeam',
+        name: '去掉输入框上面那条线',
+        desc: '消息区与底部输入框之间那条 1px 的白线（勘查出来是 #sheld 的 bottom:1px 露了底，以及各层透明露壁纸）',
+        def: false,
+        css: [
+            /* #sheld 有 bottom: 1px → 最底下露 1px；把它贴到底，并让这条缝的颜色跟输入框一致 */
+            '#sheld { bottom: 0 !important; }',
+            '#form_sheld, #send_form, #nonQRFormItems { border-top-color: transparent !important; }',
+            /* 缝里露出来的底色统一成输入框的底色（深色），壁纸就不会透出白线 */
+            '#sheld::after { content: ""; display: block; position: absolute; left: 0; right: 0; bottom: -2px; height: 4px; background: rgba(26,28,32,.95); pointer-events: none; }',
+        ].join('\n'),
+    },
+];
+function orbBeautyState() {
+    const s = getSettings();
+    if (!s.beautyTweaks || typeof s.beautyTweaks !== 'object') s.beautyTweaks = {};
+    return s.beautyTweaks;
+}
+function orbBeautyOn(id) {
+    const st = orbBeautyState();
+    const t = ORB_BEAUTY_TWEAKS.filter(x => x.id === id)[0];
+    if (typeof st[id] === 'boolean') return st[id];
+    return !!(t && t.def);
+}
+/** 把当前开着的开关拼成一段 CSS，注入/更新 <style id="ssp_beauty_css">；全关就整段移除 */
+function orbBeautyApply() {
+    try {
+        const css = ORB_BEAUTY_TWEAKS.filter(t => orbBeautyOn(t.id)).map(t => '/* ' + t.name + ' */\n' + t.css).join('\n\n');
+        let el = document.getElementById('ssp_beauty_css');
+        if (!css) { if (el) el.remove(); return ''; }
+        if (!el) {
+            el = document.createElement('style');
+            el.id = 'ssp_beauty_css';
+            (document.head || document.documentElement).appendChild(el);
+        }
+        el.textContent = css;
+        return css;
+    } catch (e) { return ''; }
+}
+function orbBeautySet(id, on) {
+    const st = orbBeautyState();
+    st[id] = !!on;
+    save();
+    orbBeautyApply();
+    return !!on;
+}
+function orbBeautyReset() {
+    getSettings().beautyTweaks = {};
+    save();
+    orbBeautyApply();
+    toast('常用开关已全部恢复默认（注入的样式已撤销）', 'success');
+}
+/* 页面加载时自动把开着的开关注入进去。
+   ⚠️ 不去找 init 钩子：模块执行时设置可能还没读回来，所以延时几趟、每趟都重来一次（幂等，安全）。
+   刷新页面后开关依然是生效状态 —— 这是"存扩展设置、刷新保持"那一条的落点。 */
+[800, 1800, 3500].forEach(ms => { try { setTimeout(() => { try { orbBeautyApply(); } catch (e) { } }, ms); } catch (e) { } });
+/** 面板里那一块（挂在美化页，'导出当前美化' 旁边） */
+function orbBeautyHTML() {
+    const rows = ORB_BEAUTY_TWEAKS.map(t => {
+        const on = orbBeautyOn(t.id);
+        return '<div class="ssp-bt-row' + (on ? ' on' : '') + '">'
+            + '<span class="ssp-bt-sw" data-orb-btweak="' + t.id + '" role="button" tabindex="0"'
+            + ' title="点一下' + (on ? '关掉' : '开启') + '"><i class="fa-solid ' + (on ? 'fa-toggle-on' : 'fa-toggle-off') + '"></i></span>'
+            + '<span class="ssp-bt-main" data-orb-btweak="' + t.id + '">'
+            + '<b>' + esc(t.name) + '</b><small>' + esc(t.desc) + '</small></span>'
+            + '</div>';
+    }).join('');
+    const anyOn = ORB_BEAUTY_TWEAKS.some(t => orbBeautyOn(t.id));
+    return '<div class="ssp-bt">'
+        + '<div class="ssp-bt-head"><b><i class="fa-solid fa-sliders"></i> 常用开关</b>'
+        + '<small>由扩展注入样式实现，不写进你的自定义 CSS；关掉即完全撤销</small></div>'
+        + rows
+        + '<div class="ssp-bt-foot">'
+        + '<span class="ssp-pbtn" data-orb-btreset="1">' + (anyOn ? '全部关掉（恢复默认）' : '已全部关闭') + '</span>'
+        + '<span class="ssp-pbtn" data-orb-btreload="1" title="重新注入一次（排错用）">重新应用</span>'
+        + '</div></div>';
+}
+
 /* ============================ 存档（聊天记录）栏 ============================
    把酒馆的「聊天记录」搬进来：列出当前角色的所有 .jsonl 存档 → 读档 / 删除。
      列表：POST /api/characters/chats  { avatar_url }
@@ -6042,6 +6149,7 @@ function orbThemeHTML() {
         + '<span class="ssp-pbtn" data-orb-thexport="1"><i class="fa-solid fa-file-export"></i>导出当前美化</span>'
         + '</div>'
         + '<div id="ssp_orb_theme_list">' + orbThemeRowsHTML() + '</div>'
+        + orbBeautyHTML()
         + '<div class="ssp-orb-empty" style="padding-top:6px">当前美化：<b>' + esc(orbThemeCur() || '(读不到)') + '</b>'
         + '；「用这个」立刻换，「绑定」选角色 —— <b>一个主题能绑多个角色卡</b>，一张角色卡只认一个主题。</div>';
 }
@@ -10334,6 +10442,16 @@ function bindOrb() {
             orbBgApply(nm);
             renderOrbPanel(); return;
         }
+        /* 美化页：常用开关（点开关/整行都算，toggle） */
+        const bt = t.closest('[data-orb-btweak]');
+        if (bt) {
+            const id = bt.dataset.orbBtweak;
+            orbBeautySet(id, !orbBeautyOn(id));
+            renderOrbPanel();
+            return;
+        }
+        if (t.closest('[data-orb-btreset]')) { orbBeautyReset(); renderOrbPanel(); return; }
+        if (t.closest('[data-orb-btreload]')) { orbBeautyApply(); toast('已重新注入常用开关样式', 'info'); return; }
         /* 存档页：刷新 / 读档 / 删除 / 清除搜索 */
         if (t.closest('[data-orb-chrefresh]')) { orbChatsFetch(); return; }        if (t.closest('[data-orb-chclear]')) { orbChSearch = ''; renderOrbPanel(); return; }
         const cren = t.closest('[data-orb-chatren]');
