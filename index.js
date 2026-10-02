@@ -4407,7 +4407,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.37';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.38';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5802,11 +5802,18 @@ var ORB_BEAUTY_TWEAKS = [
         desc: '消息区与底部输入框之间那条 1px 的白线（勘查出来是 #sheld 的 bottom:1px 露了底，以及各层透明露壁纸）',
         def: false,
         css: [
-            /* #sheld 有 bottom: 1px → 最底下露 1px；把它贴到底，并让这条缝的颜色跟输入框一致 */
+            /* 用户结论（比我的勘查更准）：那条线是**底部栏容器边框 + 输入框边框**两道白边叠出来的。
+               所以这里不再只盖缝，而是把整条底部输入链的边框/描边/阴影统一抹掉 ——
+               白边不管画在容器上、输入框上还是里面的子元素上，一律消失。
+               注意：只作用于底部输入区这一小块，不动页面其它地方；关掉开关即完全还原。 */
+            '#form_sheld, #form_sheld *, #send_form, #send_form *, #nonQRFormItems, #nonQRFormItems * {',
+            '  border-color: transparent !important;',
+            '  outline-color: transparent !important;',
+            '  box-shadow: none !important;',
+            '}',
+            '#form_sheld, #send_form { border: 0 !important; }',
+            /* 顺带把 #sheld 那 1px 的露底也收掉（勘查量到它有 bottom: 1px） */
             '#sheld { bottom: 0 !important; }',
-            '#form_sheld, #send_form, #nonQRFormItems { border-top-color: transparent !important; }',
-            /* 缝里露出来的底色统一成输入框的底色（深色），壁纸就不会透出白线 */
-            '#sheld::after { content: ""; display: block; position: absolute; left: 0; right: 0; bottom: -2px; height: 4px; background: rgba(26,28,32,.95); pointer-events: none; }',
         ].join('\n'),
     },
 ];
