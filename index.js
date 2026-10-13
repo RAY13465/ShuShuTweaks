@@ -4488,7 +4488,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.42';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.43';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5517,6 +5517,7 @@ var orbDbgBusy = false;
 var orbDbgTab = 'script';      // script / diag / pick
 var orbDbgPick = false;        // 是否正在抓元素
 var orbDbgPendEl = null;       // 手机上"已经框住、等第二下确认"的那个元素（桌面不用）
+var orbDbgPickEl = null;       // 抓到的元素 —— 用模块变量存（页签内容每次重画，挂在 DOM 上会丢）
 var orbDbgSeq = 0;             // 输出区里第几条记录（画分割线用，清空时归零）
 
 function orbDbgStore() {
@@ -5595,7 +5596,7 @@ async function orbDbgRun(code) {
         /* 包成 async IIFE：脚本里能写 await、也能 return 交回结果。
            第一个参数是 `el` —— 抓元素抓到的那个（没抓过就是 null），
            所以抓完可以直接写 el.xxx 继续查它。 */
-        const picked = (orbDbgEl() || {}).__sspPickedEl || null;
+        const picked = orbDbgPickEl || null;
         const fn = new Function('el', '"use strict"; return (async () => {\n' + src + '\n})();');
         result = await fn(picked);
     } catch (e) {
@@ -5722,6 +5723,7 @@ function orbDbgDiagState() {
 }
 
 /* ---------------------------- 窗口本体 ---------------------------- */
+/** 调试 UI 的根节点 —— 现在是鼠鼠口袋里的一个页签内容（只在停在该页时存在） */
 function orbDbgEl() { return document.getElementById('ssp_dbg'); }
 
 /* 抓元素用的高亮框：F12 那种"指着谁就框谁"。
@@ -5819,12 +5821,11 @@ function orbDbgPickHandler(ev) {
     orbDbgPendEl = null;
     const sel = orbDbgSelectorOf(t);
     orbDbgPickOff();
-    orbDbgOpenWin();
     orbDbgTab = 'pick';
-    /* 把抓到的元素挂在窗口元素上 —— 之后在主脚本框里直接用 `el` 指它就能跑代码
+    orbDbgOpenWin();                       // 切回「调试」页签（顺便重画，输出区才看得到）
+    /* 把抓到的元素记在模块变量上 —— 之后在主脚本框里直接用 `el` 指它就能跑代码
        （这样不用再加一套"元素专用脚本框"的 UI，手机上少一个要学的按钮） */
-    const winEl = orbDbgEl();
-    if (winEl) winEl.__sspPickedEl = t;
+    orbDbgPickEl = t;
     orbDbgRule('⌖', '抓元素');
     orbDbgSay('抓到了：' + sel);
     orbDbgSay(orbDbgInspect(t));
@@ -5901,11 +5902,60 @@ function orbDbgInspect(el) {
     return L.join('\n');
 }
 
+/** 调试 UI 的 HTML —— 它是**鼠鼠口袋里的一个页签**（不另外开窗）。
+    ⚠️ 历史：以前是一个 position:fixed 的独立窗口（#ssp_dbg），照口袋内容区的矩形摆，
+       手机上那个矩形常超出视口 → 窗口跑到屏幕外、按钮也点不到（用户反馈
+       "调试面板完全移位了、相关都关不掉"）。现在直接做进面板当页签：
+       跟随面板布局、跟随面板滚动，再也没有对不齐的问题。
+       抓元素模式仍然用两个 fixed 的小浮层（#ssp_dbg_pick 提示条 / #ssp_dbg_hl 高亮框）——
+       那两个本来就要盖在页面元素上，是正常设计。 */
+function orbDbgHTML() {
+    const pre = orbDbgText();
+    return '<div class="ssp-dbgwrap" id="ssp_dbg">'
+        + '<div class="ssp-dbg-bar">'
+        + '<span class="ssp-pbtn' + (orbDbgTab === 'script' ? ' primary' : '') + '" data-ssp-dbgtab="script"><i class="fa-solid fa-terminal"></i> 脚本</span>'
+        + '<span class="ssp-pbtn' + (orbDbgTab === 'diag' ? ' primary' : '') + '" data-ssp-dbgtab="diag"><i class="fa-solid fa-stethoscope"></i> 诊断</span>'
+        + '<span class="ssp-pbtn' + (orbDbgTab === 'pick' ? ' primary' : '') + '" data-ssp-dbgtab="pick"><i class="fa-solid fa-crosshairs"></i> 抓元素</span>'
+        + '</div>'
+        + (orbDbgTab === 'pick'
+            ? '<div class="ssp-dbgnote">点下面的「开始抓取」，然后指着（手机上划到）页面上的元素 —— '
+                + '会画框、点一下预览、再点一下确认。<br>抓到的元素在脚本里就是变量 <b>el</b>。</div>'
+                + '<div class="ssp-dbg-bar"><span class="ssp-pbtn primary" data-ssp-dbgpickstart="1">'
+                + '<i class="fa-solid fa-crosshairs"></i> 开始抓取</span></div>'
+            : '')
+        + (orbDbgTab === 'script'
+            ? '<textarea class="ssp-dbg-code" data-ssp-dbgcode="1" spellcheck="false" placeholder="在这里写脚本，直接跑在酒馆页面里。&#10;可以用 await、可以 return 交回结果。&#10;例：return { 宽: innerWidth, dpr: devicePixelRatio, 暗色: matchMedia(\'(prefers-color-scheme: dark)\').matches }"></textarea>'
+            : '')
+        + '<div class="ssp-dbg-bar">'
+        + (orbDbgTab === 'script'
+            ? '<span class="ssp-pbtn primary" data-ssp-dbgrun="1"><i class="fa-solid fa-play"></i> 运行</span>'
+                + '<span class="ssp-pbtn" data-ssp-dbgsave="1">存为脚本</span>'
+                + '<span class="ssp-pbtn" data-ssp-dbgsaved="1">我的脚本</span>'
+            : '')
+        + '<span class="ssp-pbtn" data-ssp-dbgdiag="screen">屏幕环境</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgdiag="media">媒体查询</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgdiag="css">CSS 支持</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgdiag="state">状态快照</span>'
+        + '<span class="ssp-pbtn" data-ssp-dbgdiag="all">全跑一遍</span>'
+        + '</div>'
+        + '<div class="ssp-dbg-bar ssp-dbgtools">'
+        + '<span class="ssp-pbtn" data-ssp-dbgcopy="1" title="复制输出（拿到手机上跑的结果直接发给作者）"><i class="fa-solid fa-copy"></i> 复制输出</span>'
+        + '<span class="ssp-pbtn danger" data-ssp-dbgclear="1">清空</span>'
+        + '</div>'
+        + '<div class="ssp-dbgnote ssp-dbghint">输出（越靠后越新）</div>'
+        + '<pre class="ssp-dbg-out" data-ssp-dbgout="1">' + esc(pre || '（输出会显示在这里）') + '</pre>'
+        + '</div>';
+}
+
 function orbDbgPaint() {
     const el = orbDbgEl();
     if (el) {
         const pre = el.querySelector('[data-ssp-dbgout]');
-        if (pre) { pre.textContent = orbDbgText() || '（输出会显示在这里）'; pre.scrollTop = pre.scrollHeight; }
+        if (pre) {
+            const txt = orbDbgText() || '（输出会显示在这里）';
+            if (pre.textContent !== txt) pre.textContent = txt;
+            pre.scrollTop = pre.scrollHeight;
+        }
         const ta = el.querySelector('[data-ssp-dbgcode]');
         if (ta && document.activeElement !== ta) ta.value = orbDbgCode;
     }
@@ -5915,126 +5965,18 @@ function orbDbgPaint() {
         if (tip) tip.textContent = orbDbgPick ? '抓取中：点页面上任意元素（先点这里退出）' : '点这里开始抓元素';
     }
 }
+/** 打开调试 = **切到「调试」页签**（不再另开窗口）。
+    外部（抓元素结束、菜单入口）调它都安全：面板没开就先打开面板。 */
 function orbDbgOpenWin() {
-    let el = orbDbgEl();
-    if (el) { el.style.display = 'flex'; orbDbgOpen = true; orbDbgPaint(); return el; }
-    el = document.createElement('div');
-    el.id = 'ssp_dbg';
-    /* ⚠️ 用户要求：调试窗要**待在鼠鼠口袋里面**，不要全屏铺满。
-       做法：拿口袋面板内容区（.ssp-orb-body）的矩形，把窗口贴着它放 ——
-       面板本身是 fixed 定位，所以这个矩形是稳的，滚动也不会漂。拿不到才退回全屏。
-       ⚠️ 手机上加一步：把矩形**夹进视口**（留 12px 边），并且用 dvh 当上限 ——
-          手机上 100vh 比真正可视区大，口袋面板的矩形常常超出屏幕，
-          直接照抄那个矩形会让调试窗底/顶被裁掉，看着就是"被压缩"（用户反馈）。 */
-    try {
-        const host = document.querySelector('.ssp-orb-body') || document.querySelector('#ssp_orb') || null;
-        if (host) {
-            const r = host.getBoundingClientRect();
-            if (r && r.width > 120 && r.height > 120) {
-                const PAD = 12;
-                const vw = globalThis.innerWidth || 0, vh = globalThis.innerHeight || 0;
-                const left = Math.max(PAD, Math.round(r.left));
-                const top = Math.max(PAD, Math.round(r.top));
-                const width = Math.min(Math.round(r.width), Math.max(200, vw - left - PAD));
-                const height = Math.min(Math.round(r.height), Math.max(180, vh - top - PAD));
-                el.style.position = 'fixed';
-                el.style.left = left + 'px';
-                el.style.top = top + 'px';
-                el.style.width = width + 'px';
-                el.style.height = height + 'px';
-                /* 手机上再给一条 dvh 上限当保险（地址栏收放时 innerHeight 不准） */
-                el.style.maxHeight = 'calc(100dvh - ' + (top + PAD) + 'px)';
-                el.style.right = 'auto'; el.style.bottom = 'auto';
-                el.style.borderRadius = '8px';
-            }
-        }
-    } catch (e) { }
-    el.innerHTML = ''
-        + '<div class="ssp-dbg-head"><b><i class="fa-solid fa-code"></i> 调试窗</b>'
-        + '<span class="ssp-dbg-tabs">'
-        + '<span class="ssp-pbtn' + (orbDbgTab === 'script' ? ' primary' : '') + '" data-ssp-dbgtab="script">脚本</span>'
-        + '<span class="ssp-pbtn' + (orbDbgTab === 'diag' ? ' primary' : '') + '" data-ssp-dbgtab="diag">诊断</span>'
-        + '<span class="ssp-pbtn' + (orbDbgTab === 'pick' ? ' primary' : '') + '" data-ssp-dbgtab="pick">抓元素</span>'
-        + '</span>'
-        + '<span class="ssp-pbtn" data-ssp-dbgcopy="1" title="复制输出（拿到手机上跑的结果直接发给作者）"><i class="fa-solid fa-copy"></i> 复制输出</span>'
-        + '<span class="ssp-pbtn" data-ssp-dbgclear="1">清空</span>'
-        + '<span class="ssp-pbtn" data-ssp-dbgclose="1"><i class="fa-solid fa-xmark"></i></span></div>'
-        + '<div class="ssp-dbg-body">'
-        + '<textarea class="ssp-dbg-code" data-ssp-dbgcode="1" spellcheck="false" placeholder="在这里写脚本，直接跑在酒馆页面里。&#10;可以用 await、可以 return 交回结果。&#10;例：return { 宽: innerWidth, dpr: devicePixelRatio, 暗色: matchMedia(\'(prefers-color-scheme: dark)\').matches }"></textarea>'
-        + '<div class="ssp-dbg-bar">'
-        + '<span class="ssp-pbtn primary" data-ssp-dbgrun="1"><i class="fa-solid fa-play"></i> 运行</span>'
-        + '<span class="ssp-pbtn" data-ssp-dbgsave="1">存为脚本</span>'
-        + '<span class="ssp-pbtn" data-ssp-dbgsaved="1">我的脚本</span>'
-        + '<span class="ssp-pbtn" data-ssp-dbgdiag="screen">屏幕环境</span>'
-        + '<span class="ssp-pbtn" data-ssp-dbgdiag="media">媒体查询</span>'
-        + '<span class="ssp-pbtn" data-ssp-dbgdiag="css">CSS 支持</span>'
-        + '<span class="ssp-pbtn" data-ssp-dbgdiag="state">状态快照</span>'
-        + '<span class="ssp-pbtn" data-ssp-dbgdiag="all">全跑一遍</span>'
-        + '</div>'
-        + '<pre class="ssp-dbg-out" data-ssp-dbgout="1"></pre>'
-        + '</div>';
-    document.body.appendChild(el);
     orbDbgOpen = true;
-    /* 事件：窗口在面板之外，所以自己接 */
-    el.addEventListener('click', ev => {
-        const t = ev.target;
-        if (!t || !t.closest) return;
-        if (t.closest('[data-ssp-dbgclose]')) { orbDbgClose(); return; }
-        if (t.closest('[data-ssp-dbgclear]')) { orbDbgClear(); return; }
-        const dload = t.closest('[data-ssp-dbgload]');
-        if (dload) {
-            const item = orbDbgStore()[Number(dload.dataset.sspDbgload)];
-            if (item) { orbDbgCode = String(item.code || ''); orbDbgName = item.name; orbDbgTab = 'script'; const ta = el.querySelector('[data-ssp-dbgcode]'); if (ta) ta.value = orbDbgCode; toast('已装载脚本：' + item.name, 'success'); }
-            return;
-        }
-        const ddrop = t.closest('[data-ssp-dbgdrop]');
-        if (ddrop) {
-            const i = Number(ddrop.dataset.sspDbgdrop);
-            const list = orbDbgStore();
-            const gone = list.splice(i, 1)[0];
-            save();
-            toast('已删脚本：' + ((gone && gone.name) || i), 'info');
-            orbDbgListScripts();
-            return;
-        }
-        if (t.closest('[data-ssp-dbgcopy]')) {
-            const txt = orbDbgText() || orbDbgOut.join('\n');
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(txt).then(() => toast('输出已复制到剪贴板', 'success'), () => orbDbgFallbackCopy(txt));
-                } else orbDbgFallbackCopy(txt);
-            } catch (e) { orbDbgFallbackCopy(txt); }
-            return;
-        }
-        const tabBtn = t.closest('[data-ssp-dbgtab]');
-        if (tabBtn) {
-            orbDbgTab = tabBtn.dataset.sspDbgtab; orbDbgPaint(); orbDbgMarkTabs();
-            /* 「抓元素」页签：点了就直接进抓取模式（不用再点第二个按钮 —— 手机上少一步是一步） */
-            if (orbDbgTab === 'pick') { try { orbDbgPickStart(); } catch (e) { } }
-            return;
-        }
-        if (t.closest('[data-ssp-dbgrun]')) { orbDbgRun(); return; }
-        if (t.closest('[data-ssp-dbgsave]')) { orbDbgSaveScript(); return; }
-        if (t.closest('[data-ssp-dbgsaved]')) { orbDbgListScripts(); return; }
-        const dg = t.closest('[data-ssp-dbgdiag]');
-        if (dg) { orbDbgDiag(dg.dataset.sspDbgdiag); return; }
-        const pick = t.closest('[data-ssp-dbgpickstart]');
-        if (pick) { orbDbgPickStart(); return; }
-    });
-    el.addEventListener('input', ev => {
-        const t = ev.target;
-        if (t && t.dataset && t.dataset.sspDbgcode !== undefined) orbDbgCode = t.value;
-    });
-    el.addEventListener('keydown', ev => {
-        const t = ev.target;
-        if (t && t.dataset && t.dataset.sspDbgcode !== undefined && ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
-            ev.preventDefault();
-            orbDbgRun();
-        }
-    });
-    orbDbgPaint();
-    return el;
+    if (!orbOpenNow) { try { openOrb(); } catch (e) { } }
+    if (orbTab !== 'debug') { orbTab = 'debug'; orbEditing = null; }
+    try { renderOrbPanel(); } catch (e) { }
+    return orbDbgEl();
 }
+/* ⚠️ 调试页签里的所有按钮走**口袋面板上的委托**，不再自己挂监听 ——
+   页签只换面板内部 innerHTML，自己挂的监听会随重画一起消失（以前是独立窗口才自己接）。
+   处理逻辑在 bindOrb() 的 document 委托里（搜 data-ssp-dbg）。 */
 function orbDbgMarkTabs() {
     const el = orbDbgEl();
     if (!el) return;
@@ -6132,16 +6074,23 @@ function orbDbgPickStart() {
     document.addEventListener('touchmove', orbDbgPickMove, true);
     document.addEventListener('mousedown', orbDbgPickHandler, true);
     document.addEventListener('mousemove', orbDbgPickMove, true);
-    /* 抓的时候把调试窗收起来（免得挡着），抓完自动开回来 */
+    /* 抓的时候只把调试**内容**压低一点（别挡着页面），抓完自动恢复。
+       ⚠️ 以前这里是 el.style.display='none' —— 那时它是独立窗口，藏起来没事；
+          现在 #ssp_dbg 是页签内容，藏了等于整页空白（"相关都关不掉"的来源之一）。 */
     const el = orbDbgEl();
-    if (el) el.style.display = 'none';
+    if (el && el.classList) el.classList.add('ssp-picking');
     toast('抓取模式：指着（手机上划到）元素就会画框，点一下预览、再点一下确认', 'info');
+}
+function orbDbgPickDoneRestore() {
+    const el = orbDbgEl();
+    if (el && el.classList) el.classList.remove('ssp-picking');
 }
 function orbDbgClose() {
     orbDbgPickOff();
-    const el = orbDbgEl();
-    if (el) el.remove();
+    /* 现在没有独立窗口可关：退回「番外」页签（= 收起调试） */
     orbDbgOpen = false;
+    try { orbDbgPickDoneRestore(); } catch (e) { }
+    if (orbTab === 'debug') { orbTab = 'notes'; try { renderOrbPanel(); } catch (e) { } }
 }
 
 /* ============================ 常用开关（美化页里的便捷美化） ============================
@@ -8366,7 +8315,9 @@ function orbInsert(text) {
     return true;
 }
 
-/** 面板里的模块表 —— 以后加功能往这里加一项 */
+/** 面板里的模块表 —— 以后加功能往这里加一项
+    ⚠️ 调试是**最后一个**页签：加在末尾，前面 9 个页签的顺序和位置一个都不动
+       （用户要求"按钮位置不变"）。 */
 const ORB_MODULES = [
     { id: 'notes', name: '番外', icon: 'fa-feather-pointed', render: () => orbNotesHTML() },
     { id: 'persona', name: '面具', icon: 'fa-masks-theater', render: () => orbPersonaHTML() },
@@ -8377,6 +8328,7 @@ const ORB_MODULES = [
     { id: 'bg', name: '背景', icon: 'fa-image', render: () => orbBgHTML() },
     { id: 'chat', name: '存档', icon: 'fa-box-archive', render: () => orbChatHTML() },
     { id: 'data', name: '数据', icon: 'fa-database', render: () => orbDataHTML() },
+    { id: 'debug', name: '调试', icon: 'fa-code', render: () => orbDbgHTML() },
 ];
 function orbModule(id) { return ORB_MODULES.find(m => m.id === id) || null; }
 
@@ -9809,7 +9761,7 @@ function orbPanelHTML() {
         + '" data-orb-tab="' + m.id + '"><i class="fa-solid ' + m.icon + '"></i>' + esc(m.name) + '</span>').join('');
     return '<div class="ssp-orb-head"><span class="ssp-orb-logo"></span>'
         + '<div class="ssp-orb-title"><b>鼠鼠口袋</b><small>悬浮球 · ' + ORB_MODULES.length + ' 个模块</small></div>'
-        + '<span class="ssp-pbtn" data-orb-dbgopen="1" title="调试窗（脚本测试 / 一键诊断 / 抓元素）"><i class="fa-solid fa-code"></i></span>'
+        + '<span class="ssp-pbtn" data-orb-dbgopen="1" title="调试（脚本测试 / 一键诊断 / 抓元素）→ 见最后那个「调试」页签"><i class="fa-solid fa-code"></i></span>'
         + '<span class="ssp-pbtn" data-orb-retract="1" title="收回悬浮球（之后从酒馆「扩展」列表里的鼠鼠面板再打开）"><i class="fa-solid fa-eye-slash"></i></span>'
         + '<span class="ssp-pbtn" data-orb-close="1"><i class="fa-solid fa-xmark"></i></span></div>'
         + '<div class="ssp-orb-tabs">' + tabs + '</div>'
@@ -9842,6 +9794,8 @@ function renderOrbPanel() {
         newBody.scrollTop = Math.min(keepTop, max);
     }
     refreshOrbBadge();
+    /* 「调试」页签：重画后把脚本内容 / 输出补回去（HTML 里只放了输出，文本框是空的） */
+    if (orbTab === 'debug') { try { orbDbgPaint(); } catch (e) { } }
     return true;
 }
 
@@ -10384,6 +10338,19 @@ function bindOrb() {
         orbThemePreview(orbThemeDraft);
     });
 
+    /* 「调试」页签的脚本框：只存内容，**绝不重画面板**（重画会丢焦点和光标位置） */
+    document.addEventListener('input', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.sspDbgcode === undefined) return;
+        orbDbgCode = String(el.value || '');
+    });
+    /* Ctrl/Cmd+Enter 在脚本框里直接跑 */
+    document.addEventListener('keydown', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.sspDbgcode === undefined) return;
+        if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); orbDbgRun(); }
+    });
+
     /* 预设页搜索 */
     document.addEventListener('input', ev => {
         const el = ev.target;
@@ -10506,6 +10473,51 @@ function bindOrb() {
         /* 收回悬浮球：按钮就在面板里（用户要求做在球自己里面） */
         /* 顶栏：调试窗（大部分人用不到，所以做在收回按钮旁边的小图标） */
         if (t.closest('[data-orb-dbgopen]')) { orbDbgOpenWin(); return; }
+        /* ---- 「调试」页签里的按钮（以前是独立窗口自己接监听；现在是页签，走面板委托）---- */
+        if (t.closest('[data-ssp-dbgclose]')) { orbDbgClose(); return; }
+        if (t.closest('[data-ssp-dbgclear]')) { orbDbgClear(); return; }
+        {
+            const dload = t.closest('[data-ssp-dbgload]');
+            if (dload) {
+                const item = orbDbgStore()[Number(dload.dataset.sspDbgload)];
+                if (item) { orbDbgCode = String(item.code || ''); orbDbgName = item.name; orbDbgTab = 'script'; renderOrbPanel(); toast('已装载脚本：' + item.name, 'success'); }
+                return;
+            }
+            const ddrop = t.closest('[data-ssp-dbgdrop]');
+            if (ddrop) {
+                const i = Number(ddrop.dataset.sspDbgdrop);
+                const list = orbDbgStore();
+                const gone = list.splice(i, 1)[0];
+                save();
+                toast('已删脚本：' + ((gone && gone.name) || i), 'info');
+                orbDbgListScripts();
+                return;
+            }
+            if (t.closest('[data-ssp-dbgcopy]')) {
+                const txt = orbDbgText() || orbDbgOut.join('\n');
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(txt).then(() => toast('输出已复制到剪贴板', 'success'), () => orbDbgFallbackCopy(txt));
+                    } else orbDbgFallbackCopy(txt);
+                } catch (e) { orbDbgFallbackCopy(txt); }
+                return;
+            }
+            const dbgTab = t.closest('[data-ssp-dbgtab]');
+            if (dbgTab) {
+                orbDbgTab = dbgTab.dataset.sspDbgtab || 'script';
+                if (orbDbgTab !== 'pick') { try { orbDbgPickOff(); } catch (e) { } }
+                renderOrbPanel();                        // 重画这一页（子页签的高亮、脚本框/抓元素说明都跟着换）
+                /* 「抓元素」子页签：切过去不自动进抓取模式 —— 给一个明确的「开始抓取」按钮，
+                   免得用户只是想看看就被拉进抓取（手机上"关不掉"的观感来源） */
+                return;
+            }
+            if (t.closest('[data-ssp-dbgrun]')) { orbDbgRun(); return; }
+            if (t.closest('[data-ssp-dbgsave]')) { orbDbgSaveScript(); return; }
+            if (t.closest('[data-ssp-dbgsaved]')) { orbDbgListScripts(); return; }
+            const dg = t.closest('[data-ssp-dbgdiag]');
+            if (dg) { orbDbgDiag(dg.dataset.sspDbgdiag); return; }
+            if (t.closest('[data-ssp-dbgpickstart]')) { orbDbgPickStart(); return; }
+        }
         if (t.closest('[data-orb-retract]')) {
             getSettings().orbOn = false; save();
             orbSetCollapsed(true, true);

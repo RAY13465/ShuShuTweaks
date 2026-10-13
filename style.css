@@ -970,35 +970,31 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     transition: opacity .18s ease, transform .18s ease;
 }
 
-/* ============================ 调试窗（顶栏小图标打开） ============================ */
-#ssp_dbg {
-    position: fixed; left: 12px; right: 12px; top: 48px; bottom: 12px; z-index: 3200;
-    display: flex; flex-direction: column; gap: 8px;
-    background: linear-gradient(#16161c, #101014);
-    border: 1px solid rgba(255, 255, 255, .18); border-radius: 10px;
-    box-shadow: 0 18px 50px rgba(0, 0, 0, .6);
-    color: #dcdce4; font-size: 12.5px; padding: 10px;
-}
-.ssp-dbg-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.ssp-dbg-head b { margin-right: auto; font-size: 13px; }
-.ssp-dbg-tabs { display: flex; gap: 4px; }
-.ssp-dbg-body { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-height: 0; }
-/* ⚠️ 代码框别用百分比抢高度：手机上窗口只有 ~500px 高，`flex:0 0 30% + min-height:90`
-   再加上下面 8 个换行按钮（~70px）和固定最小高 120px 的输出区，输出区会被压成一条缝
-   （用户反馈"调试窗在手机上会被压缩"）。改成：高度自适应、最多占 34%，输出区保底。 */
+/* ============ 调试（鼠鼠口袋里的最后一个页签，不再是独立窗口） ============
+   ⚠️ 历史：以前 #ssp_dbg 是 position:fixed 的独立窗口，靠 JS 照着口袋内容区的矩形摆，
+      手机上那个矩形常超出视口 → 窗口跑到屏幕外、按钮也点不到（用户反馈
+      "调试面板完全移位了、相关都关不掉"）。现在它是页签内容：跟随面板布局与滚动。 */
+.ssp-dbgwrap { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.ssp-dbg-bar { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.ssp-dbgtools { border-top: 1px solid rgba(255, 255, 255, .08); padding-top: 6px; }
+.ssp-dbgnote { font-size: 11px; line-height: 1.6; opacity: .68; }
+.ssp-dbghint { opacity: .5; }
+/* ⚠️ 脚本框别用百分比抢高度：手机上口袋面板可视区只有 ~500px，
+   `flex:0 0 30% + min-height:90` 再加上几排换行按钮，输出区会被压成一条缝。 */
 .ssp-dbg-code {
-    flex: 0 1 auto; min-height: 56px; max-height: 34vh; resize: vertical;
-    background: #0c0c10; color: #d7e3ff; border: 1px solid rgba(255, 255, 255, .16);
+    flex: 0 1 auto; min-height: 56px; max-height: 34vh; resize: vertical; box-sizing: border-box;
+    width: 100%; background: #0c0c10; color: #d7e3ff; border: 1px solid rgba(255, 255, 255, .16);
     border-radius: 6px; padding: 8px; font: 12px/1.5 ui-monospace, Consolas, monospace;
     white-space: pre; overflow: auto;
 }
-.ssp-dbg-bar { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
 .ssp-dbg-out {
-    flex: 1 1 auto; min-height: 72px; overflow: auto; margin: 0;
+    flex: 1 1 auto; min-height: 72px; max-height: 46vh; overflow: auto; margin: 0; box-sizing: border-box;
     background: #0a0a0d; color: #cfe9d6; border: 1px solid rgba(255, 255, 255, .12);
     border-radius: 6px; padding: 8px; font: 11.5px/1.55 ui-monospace, Consolas, monospace;
     white-space: pre-wrap; word-break: break-word;
 }
+/* 抓元素时把调试内容压低一点（别挡着页面），抓完自动恢复 */
+.ssp-dbgwrap.ssp-picking { opacity: .45; max-height: 34vh; overflow: hidden; }
 .ssp-dbg-loadbar { border-top: 1px solid rgba(255, 255, 255, .08); padding-top: 6px; }
 #ssp_dbg_pick {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 3300;
@@ -1020,21 +1016,14 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     background: #5ab4ff; color: #04263f; font-size: 11px; font-weight: 700;
     padding: 1px 6px; border-radius: 4px; white-space: nowrap; max-width: 60vw; overflow: hidden;
 }
-/* 手机上：窗口本身撑到安全区以内（用 dvh —— 手机上 100vh 比真正可视区大，
-   地址栏一收一放会让窗口底部被裁掉），按钮排紧凑一点给输出区让地方 */
+/* 手机上：调试页签里的按钮排紧凑一点给输出区让地方 */
 @media (max-width: 700px) {
-    #ssp_dbg { top: 8px !important; bottom: 8px !important; padding: 8px; gap: 6px; font-size: 12px; }
-    .ssp-dbg-head { gap: 4px; }
-    .ssp-dbg-head b { font-size: 12px; }
-    .ssp-dbg-code { min-height: 48px; max-height: 26vh; font-size: 11.5px; padding: 6px; }
+    .ssp-dbgwrap { gap: 5px; }
     .ssp-dbg-bar { gap: 3px; }
-    .ssp-dbg-bar .ssp-pbtn, .ssp-dbg-head .ssp-pbtn { padding: 2px 6px; font-size: 11px; }
-    .ssp-dbg-out { min-height: 60px; font-size: 11px; padding: 6px; }
-}
-@supports (height: 100dvh) {
-    @media (max-width: 700px) {
-        #ssp_dbg { height: auto !important; max-height: calc(100dvh - 16px); }
-    }
+    .ssp-dbg-bar .ssp-pbtn { padding: 2px 6px; font-size: 11px; }
+    .ssp-dbg-code { min-height: 48px; max-height: 26vh; font-size: 11.5px; padding: 6px; }
+    .ssp-dbg-out { min-height: 60px; max-height: 40vh; font-size: 11px; padding: 6px; }
+    .ssp-dbgwrap.ssp-picking { max-height: 26vh; }
 }
 
 /* 用户反馈两轮："能够点动的按钮做边框，不然我什么都看不见" → 后来精确成
