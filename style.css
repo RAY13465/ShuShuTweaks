@@ -460,6 +460,13 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 #ssp_panel .ssp-cardsec { border-top: 1px solid var(--ssp-line); }
 #ssp_panel .ssp-cardsec:first-child { border-top: 0; }
 #ssp_panel .ssp-note { font-size: 10.5px; opacity: .5; line-height: 1.5; padding: 2px 0; }
+/* 完整性检查的结果框：等宽字体、可选中、纵向可拉，整段复制走 */
+#ssp_panel .ssp-diagbox {
+    width: 100%; box-sizing: border-box; margin: 6px 0 2px; padding: 7px 9px;
+    font-family: ui-monospace, Consolas, 'Courier New', monospace;
+    font-size: 10.5px; line-height: 1.5; white-space: pre; overflow: auto;
+    resize: vertical; min-height: 96px; max-height: 40vh;
+}
 #ssp_panel .ssp-swatch { display: flex; flex-wrap: wrap; gap: 5px; }
 
 /* 窄屏：面板铺满、行内控件允许换行 */

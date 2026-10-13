@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 鼠鼠面板工坊 ShuShu Panel —— v0.3
  * ---------------------------------------------------------------------------
  * 把酒馆「角色管理面板」做成可装配的模块：
@@ -4266,6 +4266,57 @@ function toast(msg, level = 'info') {
 }
 
 /* ==========================================================================
+   运行时错误收集（给「完整性检查」用）
+   --------------------------------------------------------------------------
+   为什么要自己收：出事的那一刻用户只看到"东西不见了"，控制台他打不开、
+   或者打开也看不懂。这里把本页发生过的 JS 报错和未处理的 Promise 拒绝
+   攒起来（滚动保留最后 40 条），点一下检查按钮就能连现场一起复制出来。
+   ⚠️ 只读收集，不拦截、不改变任何原有行为（handler 一律原样返回 false）。
+   ========================================================================== */
+const SSP_ERR_MAX = 40;
+const SSP_ERR_LOG = [];
+let sspErrHooked = false;
+/** 只留可能和本插件有关的报错（第三方扩展的报错太多，全会把有用的淹掉） */
+const SSP_ERR_KEEP = /shushu|ssp[-_]|ShuShuPanel|shushu_panel|cardStyle|cardImportantify|orbWb|orbEntry|orbDlc|orbBg|orbPersona|orbPreset|orbTheme|orbData|orbChat|orbNotes|ssp_card_css|ssp_orb|ssp_mount|ssp_box|ssp_cardslot/i;
+
+function sspPushErr(kind, msg, extra) {
+    try {
+        const s = String(msg == null ? '' : msg);
+        if (!s) return;
+        /* 无关的第三方报错直接丢：不然有用的会被淹掉 */
+        if (!SSP_ERR_KEEP.test(s) && !SSP_ERR_KEEP.test(String(extra || ''))) return;
+        const now = new Date();
+        const hh = ('0' + now.getHours()).slice(-2), mm = ('0' + now.getMinutes()).slice(-2), ss = ('0' + now.getSeconds()).slice(-2);
+        SSP_ERR_LOG.push('[' + hh + ':' + mm + ':' + ss + '] ' + kind + '：' + s.slice(0, 400)
+            + (extra ? '　（位置：' + String(extra).slice(0, 160) + '）' : ''));
+        while (SSP_ERR_LOG.length > SSP_ERR_MAX) SSP_ERR_LOG.shift();
+    } catch (e) { /* 收集器自己绝不能抛错 */ }
+}
+function sspHookErrors() {
+    if (sspErrHooked) return false;
+    sspErrHooked = true;
+    try {
+        globalThis.addEventListener?.('error', ev => {
+            const t = ev && ev.target;
+            /* 资源加载失败（img/script/link）也记 —— 高清头像换原图失败就是这种 */
+            if (t && t !== globalThis && t.tagName) {
+                sspPushErr('资源加载失败', (t.tagName + ' ' + (t.src || t.href || '')), '');
+                return false;
+            }
+            sspPushErr('JS 报错', (ev && ev.message) || '未知错误',
+                (ev && ev.filename ? ev.filename + ':' + ev.lineno + ':' + ev.colno : ''));
+            return false;
+        }, true);
+        globalThis.addEventListener?.('unhandledrejection', ev => {
+            const r = ev && ev.reason;
+            sspPushErr('未处理的 Promise 拒绝', (r && (r.message || r)) || '未知原因', (r && r.stack ? String(r.stack).split('\n')[0] : ''));
+            return false;
+        });
+    } catch (e) { /* 无妨 */ }
+    return true;
+}
+
+/* ==========================================================================
    设置抽屉（兜底入口）
    ========================================================================== */
 function mountDrawer() {
@@ -4317,6 +4368,36 @@ function bindSettings(root) {
                 const s = getSettings();
                 s.devices[activeDevice()] = defaultLayout(activeDevice());
                 commit(); toast('已恢复成酒馆原版', 'info');
+            }
+            /* 🩺 完整性检查：跑一遍、把结果写进下面的框；再点一次就重跑 */
+            if (ev.target.closest('[data-ssp-diag]')) {
+                const out = wrap.querySelector('[data-ssp-diagout]');
+                let txt;
+                try { txt = sspIntegrityProbe(); }
+                catch (e) {
+                    txt = '🐭 完整性检查\n检查过程本身出错了（这本身就是个 bug，请把下面这段发我）：\n'
+                        + String((e && e.stack) || e);
+                }
+                if (out) out.value = txt;
+                const line = String(txt).split('\n')[0] || '';
+                toast(line.replace(/^结论：/, '检查完成：'), /异常/.test(line) ? 'warning' : 'success');
+                return;
+            }
+            if (ev.target.closest('[data-ssp-diagcopy]')) {
+                const out = wrap.querySelector('[data-ssp-diagout]');
+                const txt = out && out.value ? out.value : '';
+                if (!txt) { toast('先点上面的「开始检查」', 'warning'); return; }
+                /* 优先剪贴板；http 页面上 clipboard 可能不可用 → 退回 execCommand */
+                const done = () => toast('已复制，粘贴给开发者就行', 'success');
+                try {
+                    if (globalThis.navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(txt).then(done, () => { if (out && out.select) { out.select(); try { document.execCommand('copy'); done(); } catch (e) { toast('复制失败，请手动选中文本框内容', 'warning'); } } });
+                        return;
+                    }
+                } catch (e) { /* 退回下面的老办法 */ }
+                try { if (out && out.select) { out.select(); document.execCommand('copy'); done(); } }
+                catch (e) { toast('复制失败，请手动选中文本框内容', 'warning'); }
+                return;
             }
         });
         /* 下拉框 / 复选框 / 文字框：改完立刻生效并落盘 */
@@ -4421,6 +4502,239 @@ function frow(label, desc, ctl) {
         + `<div class="ssp-ctl">${ctl}</div></div>`;
 }
 
+/* ==========================================================================
+   🩺 完整性检查（面板最底下那个按钮）
+   --------------------------------------------------------------------------
+   用户视角的诉求：「我这个插件是不是坏了？坏在哪？我描述不清楚，你把现场拿走。」
+   所以这里只做两件事：
+     ① 把插件依赖的每一块 DOM/设置逐项核对一遍（在 → 不在 → 为什么不在）
+     ② 把本页攒下来的、和本插件有关的报错一起附上，整段可一键复制
+   ⚠️ 全程只读：不写设置、不动 DOM、不修任何东西。
+      修不修是下一步的事 —— 先拿到现场。
+   ========================================================================== */
+/** 某项检查：ok=true 过 / false 不过（note 是给人看的一句话）
+    ⚠️ 往 L 里塞的必须是**字符串**（后面要按前后缀统计 ★/☆）；结构化结果单独放 cks */
+function sspCk(L, cks, name, ok, note) {
+    const okk = Boolean(ok);
+    cks.push({ ok: okk, name: name, note: note || '' });
+    L.push((okk ? '  ✓ ' : '  ★ ') + name + (note ? '：' + note : ''));
+    return okk;
+}
+/** 元素在不在 + 视觉上有没有尺寸（0×0 = 在 DOM 里但用户看不到，最常见的"消失了"） */
+function sspBoxOf(selOrEl) {
+    const el = typeof selOrEl === 'string' ? query(selOrEl) : selOrEl;
+    if (!el) return { el: null, exists: false, w: 0, h: 0, visible: false, display: '(不存在)' };
+    const r = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : { width: 0, height: 0 };
+    const cs = globalThis.getComputedStyle ? globalThis.getComputedStyle(el) : null;
+    const display = cs ? cs.display : '(量不到)';
+    return {
+        el: el, exists: true,
+        w: Math.round(r.width), h: Math.round(r.height),
+        visible: display !== 'none' && r.width > 0 && r.height > 0,
+        display: display,
+    };
+}
+
+/** 从扩展脚本的 URL 里读酒馆缓存串（?...&version=1.31.41）—— 判断"浏览器里跑的是不是最新那份" */
+function sspManifestVersion() {
+    try {
+        const s = document.currentScript
+            || query('script[src*="ShuShuTweaks/index.js"]')
+            || query('script[src*="extensions"][src*="index.js"]');
+        const src = s && s.getAttribute ? (s.getAttribute('src') || '') : '';
+        const m = /[?&]version=([^&]+)/.exec(src);
+        return m ? decodeURIComponent(m[1]) : '';
+    } catch (e) { return ''; }
+}
+
+function sspIntegrityProbe() {
+    const L = [];
+    const cks = [];          // 结构化结果（给汇总用）
+    const notes = [];        // 需要额外说一句的提示（☆ 开头）
+    const detail = {};
+    const s = getSettings();
+    const dev = activeDevice();
+    const layout = layoutOf(s, dev);
+
+    L.push('🐭 鼠鼠小助手 · 完整性检查');
+    L.push('时间：' + new Date().toLocaleString());
+    L.push('版本：v' + PANEL_VERSION + (sspManifestVersion() ? '（浏览器缓存串 ' + sspManifestVersion() + '）' : ''));
+    L.push('模块名：' + MODULE_NAME + '　设备：' + dev + '（窗口 ' + globalThis.innerWidth + '×' + globalThis.innerHeight + '）');
+    L.push('浏览器：' + String(globalThis.navigator && globalThis.navigator.userAgent || '').slice(0, 120));
+    L.push('');
+
+    /* ---------- 1. 基本依赖 ---------- */
+    L.push('── 1. 基本依赖 ──');
+    let ctx = null;
+    try { ctx = getContext() || null; } catch (e) { ctx = null; }
+    sspCk(L, cks, '酒馆 getContext()', !!ctx, ctx ? '' : '★ 拿不到酒馆上下文 → 插件根本没启动，所有功能都不会有');
+    sspCk(L, cks, '扩展设置容器 extensionSettings', !!(ctx && ctx.extensionSettings), !ctx ? '上下文都没有' : (ctx.extensionSettings ? '' : '★ 酒馆还没把设置加载进来'));
+    const store = ctx && ctx.extensionSettings ? ctx.extensionSettings[MODULE_NAME] : null;
+    sspCk(L, cks, '本扩展设置键 ' + MODULE_NAME, !!store, store ? '' : '★ 设置键丢了 → 你的布局/样式会回到默认（MODULE_NAME 被改过就是这个症状）');
+    sspCk(L, cks, '面板工坊总开关 enabled', s.enabled !== false, s.enabled === false ? '★ 是关着的 —— 关着的时候插件会主动把自己撤干净，界面看着就像"东西没了"' : '');
+    sspCk(L, cks, '设置版本 schemaVersion', Number(s.schemaVersion) === SCHEMA_VERSION, '当前 ' + s.schemaVersion + '，代码要 ' + SCHEMA_VERSION + (Number(s.schemaVersion) === SCHEMA_VERSION ? '' : '（旧配置会自动升级）'));
+
+    /* ---------- 2. 鼠鼠面板本体 ---------- */
+    L.push('');
+    L.push('── 2. 鼠鼠面板本体 ──');
+    const pRoot = sspBoxOf('#ssp_panel_root');
+    const pEl = sspBoxOf('#ssp_panel');
+    const slot = sspBoxOf('#ssp_cardslot');
+    const styleSel = query('[data-ssp-card-style]');
+    const crowN = queryAll('#ssp_cardslot .ssp-crow').length;
+    const secN = queryAll('#ssp_panel .ssp-sec').length;
+    sspCk(L, cks, '面板根节点 #ssp_panel_root', pRoot.exists, pRoot.exists ? '没打开时 display=none 是正常的' : '★ 面板容器没建起来 → 点「打开鼠鼠面板」会没反应');
+    sspCk(L, cks, '面板 #ssp_panel', pEl.exists, pEl.exists ? '' : '★ 面板本体不在 DOM 里');
+    sspCk(L, cks, '分区数量', secN >= 8, '数到 ' + secN + ' 个分区' + (secN >= 8 ? '' : '（正常 ≥8；少了说明面板是旧的/被截断了）'));
+    sspCk(L, cks, '角色卡样式槽位 #ssp_cardslot', slot.exists, slot.exists ? '' : '★ 槽位不存在 —— 这就是"角色卡样式那块消失了"的直接原因');
+    sspCk(L, cks, '角色卡样式行数', crowN >= 15, '数到 ' + crowN + ' 行' + (crowN >= 15 ? '' : '（正常 17 行：样式下拉/高清头像/颜色/渐隐/取景/对齐/高度/圆角/间距/叠压/字号×2/歌单底色/显示什么/学生证/量一下卡片）'));
+    sspCk(L, cks, '样式下拉框 [data-ssp-card-style]', !!styleSel, styleSel ? '当前值 ' + styleSel.value : '★ 下拉框不在 → 没法换样式');
+    sspCk(L, cks, '「展开装配面板」按钮 [data-ssp-open]', !!query('[data-ssp-open]'), query('[data-ssp-open]') ? '' : '★ 按钮不在 → 装配入口没了');
+    sspCk(L, cks, '「恢复原版」按钮 [data-ssp-restore]', !!query('[data-ssp-restore]'), query('[data-ssp-restore]') ? '' : '★ 按钮不在');
+    detail.面板 = { 分区数: secN, 样式行数: crowN, 面板文本长度: (query('#ssp_panel') || {}).textContent ? query('#ssp_panel').textContent.length : 0 };
+
+    /* ---------- 3. 布局配置 vs 实际 DOM ---------- */
+    L.push('');
+    L.push('── 3. 布局配置 vs 实际 DOM ──');
+    const dupIds = [];
+    (layout.modules || []).forEach(m => {
+        const used = [].concat(...(m.rows || []));
+        used.forEach(id => { if (used.filter(x => x === id).length > 1 && dupIds.indexOf(id) < 0) dupIds.push(id); });
+    });
+    sspCk(L, cks, '布局模块数', (layout.modules || []).length > 0, (layout.modules || []).length + ' 个模块，分区 ' + JSON.stringify(layout.zones || {}));
+    sspCk(L, cks, '同一按钮没有重复占位', dupIds.length === 0, dupIds.length ? '★ 重复的按钮 id：' + dupIds.join('、') + '（会导致按钮来回跳 / 丢位置）' : '');
+    const placedIds = new Set([].concat(...Object.keys(layout.zones || {}).map(z => layout.zones[z] || [])));
+    const missingNative = [];
+    BUTTONS.forEach(b => {
+        if (!b.native || !placedIds.has(b.id)) return;
+        const el = resolveNative(b);
+        if (!el || el.isConnected === false) missingNative.push(b.name + '(' + b.native + ')');
+    });
+    sspCk(L, cks, '原生按钮都在', missingNative.length === 0, missingNative.length ? '★ 找不到：' + missingNative.join('、') + '（酒馆改了 DOM 或按钮被搬丢了；这些按钮会从面板上消失）' : '');
+    sspCk(L, cks, '新增按钮都造出来了', BUTTONS.filter(b => b.isNew && b.made).every(b => !!newEls.get(b.id)),
+        '新增：' + BUTTONS.filter(b => b.isNew && b.made).map(b => b.id).join('/'));
+    /* 哪些模块被判成"空"而收起来了 —— 这是用户眼里"模块消失"最常见的原因 */
+    const hidMods = [];
+    modEls.forEach((rec, id) => { if (rec.root && rec.root.style.display === 'none') hidMods.push(id); });
+    sspCk(L, cks, '没有模块被收起来', hidMods.length === 0, hidMods.length ? '★ 被收起：' + hidMods.join('、') + '（模块里一个按钮都没认领到就会自动隐藏）' : '');
+    const hidZones = [];
+    zoneEls.forEach((el, z) => { if (el && el.style.display === 'none') hidZones.push(z); });
+    sspCk(L, cks, '分区都在显示', hidZones.length === 0, hidZones.length ? '★ 被收起的分区：' + hidZones.join('、') : '');
+    detail.布局 = { 模块: (layout.modules || []).map(m => m.id + ':' + m.rows.map(r => r.join('+')).join('|')), zones: layout.zones };
+
+    /* ---------- 4. 角色卡样式 ---------- */
+    L.push('');
+    L.push('── 4. 角色卡样式（她出问题的这一块）──');
+    const c = cardStyleSettings();
+    const styleOk = c.style === 'none' || !!CARD_STYLES[c.style];
+    const csEl = document.getElementById(CARD_STYLE_ID);
+    sspCk(L, cks, '当前样式值合法', styleOk, '当前 style=' + c.style + (styleOk ? '' : ' ★ 不是已知样式，会回落到默认'));
+    sspCk(L, cks, '样式表 ' + CARD_STYLE_ID, c.style === 'none' ? true : !!csEl,
+        c.style === 'none' ? '当前是「原版」，本来就不该有注入（正常）' : (csEl ? '已注入 ' + csEl.textContent.length + ' 字符' : '★ 选了样式却没注入 CSS → 卡片会看着没美化'));
+    const cards = queryAll('#rm_print_characters_block .character_select');
+    const c0 = sspBoxOf(cards[0]);
+    const listBox = sspBoxOf('#rm_print_characters_block');
+    const blockBox = sspBoxOf('#rm_characters_block');
+    sspCk(L, cks, '角色列表容器在', listBox.exists, listBox.exists ? '' : '★ 找不到 #rm_print_characters_block');
+    sspCk(L, cks, '角色列表当前可见', listBox.visible, listBox.visible ? '' : '见下面 ☆ 提示');
+    if (!listBox.visible) notes.push('☆ 角色列表现在看不到：卡容器 ' + listBox.w + '×' + listBox.h
+        + '，容器 #rm_characters_block display=' + blockBox.display + '。'
+        + (blockBox.display === 'none'
+            ? '这是酒馆的正常行为 —— 点完一张卡进聊天它就会收起，再点顶部「角色列表」按钮就能叫回来。'
+            + '注意：此时装配面板的挂载点也在它里面，会跟着变成 0×0（点不到），要用装配得先把列表打开。'
+            : '容器还在布局里但尺寸是 0，可能是被别的样式/扩展压住了（这时候"是酒馆收起了列表"这条解释不成立）。'));
+    sspCk(L, cks, '列表里有卡片', cards.length > 0, '数到 ' + cards.length + ' 张');
+    sspCk(L, cks, '卡片有实际尺寸', cards.length === 0 || c0.visible, c0.visible ? '首卡 ' + c0.w + '×' + c0.h : '★ 首卡 ' + c0.w + '×' + c0.h + '（用户看到的就是"列表空了"）');
+    /* 卡片能不能点：排序模式会主动屏蔽点击（用户报"点不进去"的头号原因） */
+    const sorting = !!(document.body && document.body.classList && document.body.classList.contains(SORT_CLASS));
+    sspCk(L, cks, '不是"手动排序"模式', !sorting, sorting ? '★ 排序模式开着 —— 这时候点卡片是"拖动"、不会进聊天（面板最底下「角色列表排序」里点一次「手动排序」即可关掉）' : '');
+    const cardPE = c0.el && globalThis.getComputedStyle ? globalThis.getComputedStyle(c0.el).pointerEvents : '(量不到)';
+    sspCk(L, cks, '卡片可点（pointer-events）', cardPE === 'auto', '首卡 pointer-events=' + cardPE);
+    detail.角色卡 = { style: c.style, 注入长度: csEl ? csEl.textContent.length : 0, 卡片数: cards.length, 首卡: c0.w + 'x' + c0.h, 排序模式: sorting, 列表display: blockBox.display };
+
+    /* ---------- 5. 面板工坊的挂载点 ---------- */
+    L.push('');
+    L.push('── 5. 面板工坊挂载点（装配）──');
+    const mountBox = sspBoxOf('#' + MOUNT_ID);
+    const zoneHead = sspBoxOf('#' + ZONE_PREFIX + 'head');
+    const zoneFoot = sspBoxOf('#' + ZONE_PREFIX + 'foot');
+    sspCk(L, cks, '装配挂载 #' + MOUNT_ID + ' 在', mountBox.exists, mountBox.exists ? '' : '★ 挂载点不在（角色列表收起时会被一起藏起来）');
+    sspCk(L, cks, '装配挂载有尺寸', mountBox.visible, mountBox.exists ? (mountBox.visible ? '' : '见下面 ☆ 提示') : '');
+    if (mountBox.exists && !mountBox.visible) notes.push('☆ 装配挂载 ' + mountBox.w + '×' + mountBox.h + '（点不到）：它挂在角色列表顶部，列表一收起就跟着 0×0。'
+        + '先把角色列表打开，再点列表顶部那条「装配面板 ▾」。');
+    sspCk(L, cks, '分区 head 在', zoneHead.exists, zoneHead.exists ? '' : '★ 头部按钮条的分区没建起来');
+    sspCk(L, cks, '分区 foot 在', zoneFoot.exists, zoneFoot.exists ? '' : '★ 底部栏分区没建起来');
+    const boxEl = sspBoxOf('#' + BOX_ID);
+    sspCk(L, cks, '装配界面 #' + BOX_ID, true, boxEl.exists ? '开着（' + boxEl.w + '×' + boxEl.h + '）' : '收起着（正常，点「展开装配面板」才出现）');
+    /* 遮罩提示：这是"点了展开却看不见"的已知坑 */
+    const panelOpenNow = !!query('#ssp_panel_root.on');
+    if (panelOpenNow && boxEl.exists) {
+        notes.push('☆ 鼠鼠面板是带全屏遮罩的弹层（z-index 30000），装配界面在它**后面** —— '
+            + '开着面板点「展开装配面板」，装配框其实出现了但被遮住看不见。'
+            + '请先按 Esc 关掉面板，再从角色列表顶部那条「装配面板 ▾」开（已知 bug，待修）。');
+    }
+
+    /* ---------- 6. 悬浮球 ---------- */
+    L.push('');
+    L.push('── 6. 悬浮球 / 鼠鼠口袋 ──');
+    const orbOn = s.orbOn !== false;
+    const ball = sspBoxOf('#ssp_orb');
+    const orbRoot = sspBoxOf('#ssp_orb_root');
+    const orbPanel = sspBoxOf('#ssp_orb_panel');
+    sspCk(L, cks, '悬浮球开关 orbOn', true, orbOn ? '开着' : '☆ 是关着的（收回状态）—— 想要球就回面板勾「显示悬浮球」');
+    if (orbOn) {
+        sspCk(L, cks, '球 #ssp_orb 在', ball.exists, ball.exists ? '位置 ' + ball.w + '×' + ball.h : '★ 球不在 DOM 里');
+        sspCk(L, cks, '球有尺寸', ball.visible, ball.visible ? '' : '★ 0×0：球被隐藏了（收回过？或位置算到屏幕外了）');
+    }
+    sspCk(L, cks, '口袋面板 #ssp_orb_panel 在', orbPanel.exists, orbPanel.exists ? '模块数 ' + ORB_MODULES.length + '（' + ORB_MODULES.map(m => m.name).join('/') + '）' : '☆ 口袋面板还没建（开一次球才会建，正常）');
+    sspCk(L, cks, '口袋根 #ssp_orb_root', orbRoot.exists, orbRoot.exists ? '' : '☆ 还没建（开一次球才会建，正常）');
+
+    /* ---------- 7. 本页报错 ---------- */
+    L.push('');
+    L.push('── 7. 本页报错（只收和本插件有关的）──');
+    if (SSP_ERR_LOG.length) {
+        L.push('共 ' + SSP_ERR_LOG.length + ' 条：');
+        SSP_ERR_LOG.forEach(x => L.push('  ' + x));
+        cks.push({ ok: false, name: '没有运行时报错', note: '上面这些就是要查的（越靠后越新）' });
+    } else {
+        L.push('（无 —— 从这次打开页面到现在，没收到和本插件有关的报错）');
+        cks.push({ ok: true, name: '没有运行时报错', note: '' });
+    }
+    L.push('⚠️ 注意：报错只在**这一次打开页面之后**才有记录。如果问题是刷新前出的，');
+    L.push('   请先复现一次（别刷新），再点这个检查。');
+
+    /* ---------- 8. 明细 ---------- */
+    L.push('');
+    L.push('── 8. 明细（给开发者看的）──');
+    let detailTxt = '';
+    try { detailTxt = JSON.stringify(detail, null, 1); } catch (e) { detailTxt = '(序列化失败)'; }
+    L.push(detailTxt);
+
+    /* ---------- 汇总 ---------- */
+    const bad = cks.filter(x => !x.ok);
+    const warn = notes;
+    const foot = [];
+    if (notes.length) {
+        foot.push('');
+        foot.push('── 提示（☆，多数是酒馆的正常行为，不一定有问题）──');
+        notes.forEach(n => foot.push('  ' + n));
+    }
+    if (bad.length) {
+        foot.push('');
+        foot.push('── 需要处理的项（★）──');
+        bad.forEach(b => foot.push('  ★ ' + b.name + (b.note ? '：' + b.note.replace(/^[★☆]\s*/, '') : '')));
+    }
+    const head = [];
+    head.push('结论：' + (bad.length
+        ? '发现 ' + bad.length + ' 项异常' + (warn.length ? '、' + warn.length + ' 项提示' : '')
+        : (warn.length ? '结构完整，有 ' + warn.length + ' 项提示' : '结构完整，没发现问题 ✓')));
+    head.push('检查项 ' + cks.length + ' 项：通过 ' + cks.filter(x => x.ok).length + '，异常 ' + bad.length);
+    return head.concat([''], L, foot).join('\n');
+}
+
+/* ==========================================================================
+   设置面板（扁平）
+   ========================================================================== */
 function settingsPanelHTML() {
     const s = getSettings();
     const c = cardStyleSettings();
@@ -4470,6 +4784,16 @@ function settingsPanelHTML() {
         </select>`),
     ].join(''), 'About 版＝左边大头像、右边一列从卡里自动抓的字段；视频页版＝头像拉成 16:9 当播放器，'
         + '标签变话题 chips、按钮变点赞栏、收藏变「订阅」。两种都保留下面的标签 / 注释 / 描述。');
+
+    /* —— 完整性检查（放在最底下，出问题才翻到这里）—— */
+    const secDiag = sec('fa-stethoscope', '完整性检查', [
+        frow('检查插件完整性', '逐项核对面板 / 装配 / 卡片样式 / 球 / 布局配置，并把本页的报错一起收上来',
+            '<div class="ssp-pbtn" data-ssp-diag="1"><i class="fa-solid fa-play"></i>开始检查</div>'),
+        '<textarea class="ssp-inp ssp-diagbox" data-ssp-diagout="1" readonly rows="7" '
+        + 'placeholder="点上面的「开始检查」，结果会出现在这里 —— 然后按右边「复制全部」发给我"></textarea>',
+        frow('把结果带走', '整段复制（含报错），粘给开发者最快定位',
+            '<div class="ssp-pbtn" data-ssp-diagcopy="1"><i class="fa-solid fa-copy"></i>复制全部</div>'),
+    ].join(''), '检查是<b>只读</b>的：不改设置、不动界面。带 ★ 的是异常、☆ 的是提示（多数是酒馆的正常行为，比如列表被收起）。');
 
     /* —— 导入即更新 —— */
     const secImport = sec('fa-file-import', '导入即更新', [
