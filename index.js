@@ -4506,7 +4506,7 @@ function settingsPanelHTML() {
         <div class="ssp-p-x" data-ssp-panel-close="1" title="关闭"><i class="fa-solid fa-xmark"></i></div>
       </div>
       <div class="ssp-p-body">
-        ${secOrb}${secThink}${secCard}${secDetail}${secImport}${secBuild}${secSort}
+        ${secOrb}${secThink}${secCard}${secDetail}${secImport}${secBuild}${secSort}${secDiag}
       </div>
       <div class="ssp-p-foot">
         <span>改完立刻生效并落盘，不用点保存</span>
@@ -6473,12 +6473,34 @@ function orbWbToggleBound(key, name) {
     orbWbSetBound(key, cur);
     return orbWbBound(key);
 }
-/** 反向查：谁绑了这本书（返回角色名数组）*/
+/** 反向查：谁绑了这本书（返回角色名数组）
+    ⚠️ 「绑定」有两个来源，**两个都算**：
+      ① 本扩展的绑定表 worldBinds（面板里点出来的）
+      ② 角色卡自带的酒馆原生绑定 data.extensions.world（卡里写死的）
+    只算 ① 的话，卡自带那本在自己那一行会显示"没有别的角色卡绑它" ——
+    明明上面横幅刚说了"这张卡自带：XXX"，自相矛盾（用户反馈的就是这个）。
+    ② 要遍历全部角色卡才能查出来：角色数 × 本书数 的量级（几十×几十），
+    只在面板渲染时调，可接受。 */
 function orbWbCharNames(name) {
+    const n = String(name || '').trim();
+    if (!n) return [];
     const b = orbWbBinds(), chars = orbCharList();
-    return Object.keys(b)
-        .filter(k => Array.isArray(b[k]) && b[k].indexOf(name) >= 0)
+    const out = Object.keys(b)
+        .filter(k => Array.isArray(b[k]) && b[k].indexOf(n) >= 0)
         .map(k => (chars.find(c => orbWbCharKey(c.id) === k) || {}).name || k);
+    /* ② 卡自带的那本：遍历所有卡，谁的 extensions.world 是这本书就算谁 */
+    let raw = [];
+    try { raw = (getContext() || {}).characters || []; } catch (e) { raw = []; }
+    raw.forEach(c => {
+        if (!c || !c.name) return;
+        let w = (c.data && c.data.extensions) ? c.data.extensions.world : '';
+        /* ⚠️ extensions.world 正常情况下是字符串，但**可能是数组**（多本）——
+           数组时要逐个比，不能只取 [0] 全等，否则会漏（自己踩过）。 */
+        const ws = Array.isArray(w) ? w : [w];
+        const hit = ws.some(x => String(x || '').trim() === n);
+        if (hit && out.indexOf(c.name) < 0) out.push(c.name);
+    });
+    return out;
 }
 /** 这本书有没有绑在任何一张卡上 */
 function orbWbIsBound(name) { return orbWbCharNames(name).length > 0; }
@@ -7424,7 +7446,33 @@ function orbWbTargetChar() {
     return cur;
 }
 
+/** 「角色卡自带的」那本世界书（卡里 data.extensions.world）。
+    只读展示用 —— 绝不写进 worldBinds 绑定表：
+      · 酒馆的 getCharacterLore() 会**绕过下拉框**直接把它纳入扫描（chat lore），
+        所以在面板里它一直是"没绑"的灰样子，用户会以为它没生效、又去勾一遍。
+      · 一旦写进绑定表，orbWbSyncChar() 就会把它当成"我们加的"而在切卡时撤掉它，
+        跟酒馆自己的加载打架（6739 那条注释记的就是这个坑）。
+    所以这里只读、只显示。 */
+function orbWbNativeBook(ch) {
+    if (!ch) return '';
+    try {
+        const ctx = getContext() || {};
+        const list = ctx.characters || [];
+        let c = list.find(x => x && x.avatar === ch.id);
+        if (!c && ctx.characterId !== undefined) {
+            const cur = list[ctx.characterId];
+            if (cur && (cur.avatar === ch.id || (cur.name && cur.name === ch.name))) c = cur;
+        }
+        const ex = (c && c.data && c.data.extensions) || {};
+        let w = ex.world;
+        if (Array.isArray(w)) w = w.length ? w[0] : '';
+        return String(w || '').trim();
+    } catch (e) { return ''; }
+}
+
+
 function orbWorldRowsHTML() {
+
     const all = orbWorldList();
     const ch = orbWbTargetChar();
     if (!all.length) {
@@ -7449,6 +7497,19 @@ function orbWorldRowsHTML() {
         ? '<div class="ssp-orb-pcount">' + (orbWbCat !== ORB_CAT_ALL ? '「' + esc(orbWbCat || '未分类') + '」' : '')
             + (orbWbSearch ? '筛出 ' : '共 ') + hit.length + ' / ' + all.length + ' 本世界书</div>'
         : '';
+    /* 顶部：这张卡**自带**的世界书（只读）。
+       酒馆靠 getCharacterLore() 直接加载它，不走这个多选框，所以下面列表里它永远是"没绑"的样子
+       —— 用户会以为没生效、又去勾一遍。这里说清楚，免得重复选。 */
+    const nativeBook = orbWbNativeBook(ch);
+    const nativeBanner = (ch && nativeBook)
+        ? '<div class="ssp-wb-native">'
+            + '<i class="fa-solid fa-book-bookmark"></i>'
+            + '<span>这张卡自带：<b>' + esc(nativeBook) + '</b>'
+            + (all.indexOf(nativeBook) >= 0
+                ? '（酒馆自动生效，不用在这里选）'
+                : '（酒馆里没这本书，可能被删了）') + '</span>'
+        + '</div>'
+        : '';
     const rows = hit.map(n => {
         const st = orbWbState(n);
         const mine = (bound.indexOf(n) >= 0);
@@ -7457,6 +7518,14 @@ function orbWorldRowsHTML() {
            绑了就是生效中（绑定即生效），所以竖条和它永远同步 ——
            不再有"本聊天生效但不属于这张卡"这种悬空状态（用户反馈过那是脏的）。 */
         const others = orbWbCharNames(n).filter(x => !ch || x !== ch.name);
+        /* 「谁绑了这本书」已由 orbWbCharNames 一并给出（含卡自带绑定），
+           这里直接用；当前这张卡自己不再重复露脸（白框 + 生效中已经表达了）。 */
+        const whoBinds = others;
+        /* 这行小字＝**谁绑了这本书**（反向查）。旧版只在"别的卡也绑了"时才显示，
+           一本没人共用的书就写死"没有别的角色卡绑它"，信息量等于零。 */
+        const bindLine = whoBinds.length
+            ? esc(whoBinds.join('、')) + ' 也绑了'
+            : (ch ? '没有别的角色卡绑它' : '还没有角色卡绑它');
         const tip = !ch ? '先在酒馆里打开一个聊天，才能给角色卡配绑定'
             : (mine ? '点一下＝从「' + ch.name + '」解绑，并从本聊天撤掉'
                 : '点一下＝绑给「' + ch.name + '」，并在本聊天启用');
@@ -7474,8 +7543,8 @@ function orbWorldRowsHTML() {
             + (st === 'active' ? '<span class="ssp-orb-ptag">生效中</span>' : '')
             + (st === 'bound' ? '<span class="ssp-orb-ptag">已绑·未启用</span>' : '')
             + '</div>'
-            + '<div class="ssp-orb-pbind' + (others.length ? ' has' : '') + '"><i class="fa-solid fa-link"></i>'
-            + (others.length ? esc(others.join('、') + ' 也绑了') : '没有别的角色卡绑它') + '</div>'
+            + '<div class="ssp-orb-pbind' + (whoBinds.length ? ' has' : '') + '" title="' + esc(whoBinds.join('、')) + '"><i class="fa-solid fa-link"></i>'
+            + bindLine + '</div>'
             + '</div>'
             /* 归到哪个分类（文件夹）：点了就地展开一排分类按钮 */
             + '<span class="ssp-pbtn ssp-wb-catbtn' + (cat ? ' has' : '') + '" data-orb-catpick="' + esc(n) + '"'
@@ -7488,7 +7557,7 @@ function orbWorldRowsHTML() {
             + picker
             + '</div>';
     }).join('');
-    return head + '<div class="ssp-orb-plist">' + rows + '</div>';
+    return head + nativeBanner + '<div class="ssp-orb-plist">' + rows + '</div>';
 }
 
 /** 条目列表 HTML（世界书栏的"展开"页和 DLC 栏共用一套长相与行为）
@@ -10648,6 +10717,7 @@ function bindOrb() {
 function init() {
     const ctx = getContext();
     if (!ctx) { warn('拿不到 getContext()，扩展不启动'); return false; }
+    sspHookErrors();          // 先挂错误收集，后面任何一步出错都能被「完整性检查」抓到
     getSettings();
 
     let tries = 0;
@@ -10785,6 +10855,7 @@ if (globalThis.__SSP_TEST__) {
         get orbWbSearch() { return orbWbSearch; }, set orbWbSearch(v) { orbWbSearch = v; },
         get orbWbLastKey() { return orbWbLastKey; }, set orbWbLastKey(v) { orbWbLastKey = v; },
         mountSettingsPanel, openSettingsPanel, closeSettingsPanel, panelOpen, settingsPanelHTML, bindSettings, refreshCardSection, trimListCreatorNotes,
+        sspIntegrityProbe, sspHookErrors, sspPushErr, SSP_ERR_LOG, SSP_ERR_KEEP, sspBoxOf,
         get boxOpen() { return boxOpen; }, set boxOpen(v) { boxOpen = v; },
         get renaming() { return renaming; }, set renaming(v) { renaming = v; },
         get drag() { return drag; }, set drag(v) { drag = v; },

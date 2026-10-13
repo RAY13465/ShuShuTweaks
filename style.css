@@ -707,8 +707,21 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-orb-pdesc { font-size: 11px; opacity: .6; margin-top: 2px; line-height: 1.5; word-break: break-word; }
 .ssp-orb-pbind { font-size: 10.5px; opacity: .5; margin-top: 3px; display: flex; align-items: center; gap: 4px; }
 .ssp-orb-pbind.has { opacity: .9; }
+/* 绑了同一本书的角色卡名单可能很长 —— 允许换行，别把书名挤变形 */
+.ssp-orb-pbind { word-break: break-word; }
+.ssp-orb-pbind > i { flex: 0 0 auto; }
 .ssp-orb-pacts { flex: 0 0 auto; display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
 .ssp-orb-pacts .ssp-pbtn { justify-content: center; white-space: nowrap; }
+
+/* 世界书栏顶部：这张卡自带的那本（只读信息条，跟"扩展绑的"在长相上区分开） */
+.ssp-wb-native {
+    display: flex; align-items: flex-start; gap: 6px;
+    margin: 0 2px 8px; padding: 6px 9px; font-size: 11px; line-height: 1.5;
+    border-left: 3px solid rgba(120, 190, 255, .75);
+    background: rgba(120, 190, 255, .10); border-radius: 4px;
+}
+.ssp-wb-native > i { margin-top: 2px; opacity: .85; color: #9ecbff; }
+.ssp-wb-native b { font-weight: 700; }
 
 /* ---------- 世界书栏（角色卡 → 多本世界书）----------
    复用上面 prow / plist 的骨架，这里只补「勾选框」和「绑定页的整行可选行」。
