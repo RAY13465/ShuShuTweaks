@@ -469,11 +469,38 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 }
 #ssp_panel .ssp-swatch { display: flex; flex-wrap: wrap; gap: 5px; }
 
+/* 分区折叠（点标题收起/展开）——手机上 8 个分区排 3399px，不折叠根本找不到目标那一块 */
+#ssp_panel .ssp-sec-h { cursor: pointer; user-select: none; }
+#ssp_panel .ssp-sec-h:hover { color: #fff; }
+#ssp_panel .ssp-sec-chev { margin-left: 6px; font-size: 11px; opacity: .55; transition: transform .16s ease; }
+#ssp_panel .ssp-sec.ssp-collapsed .ssp-sec-chev { transform: rotate(-90deg); }
+#ssp_panel .ssp-sec.ssp-collapsed .ssp-secbody,
+#ssp_panel .ssp-sec.ssp-collapsed .ssp-fnote { display: none; }
+
 /* 窄屏：面板铺满、行内控件允许换行 */
 @media (max-width: 560px) {
     #ssp_panel { width: 96vw; max-height: 92vh; border-radius: 12px; }
     #ssp_panel .ssp-row { flex-wrap: wrap; }
     #ssp_panel .ssp-ctl { width: 100%; justify-content: flex-end; }
+}
+
+/* 手机上的「角色卡样式」：17 行太高（实测整块 1091px，比整个可视区 680px 还高 →
+   一屏只看得见第 1 行，用户以为"这块只剩一点了"）。三招压到一半以内：
+     ① 两列排（宽行仍占满）
+     ② ⚠️ 标签必须 nowrap、并且 flex:0 0 auto —— 实测窄列里标签会**自己折行**
+        （"卡片高度"折成 3 行 = 70px），行高其实是被标签撑的，不是控件
+     ③ 滑块占满剩余宽度，行高回到 ~30px */
+@media (max-width: 560px), (pointer: coarse) {
+    #ssp_panel .ssp-cardsec { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; align-items: center; }
+    #ssp_panel .ssp-cardsec > .ssp-crow.wide,
+    #ssp_panel .ssp-cardsec > .ssp-note,
+    #ssp_panel .ssp-cardsec > .ssp-measure { grid-column: 1 / -1; }
+    #ssp_panel .ssp-cardsec > .ssp-crow { min-height: 30px; margin: 1px 0; padding: 2px 0; gap: 6px; }
+    #ssp_panel .ssp-cardsec .ssp-clabel { flex: 0 0 auto; font-size: 12px; white-space: nowrap; }
+    #ssp_panel .ssp-cardsec .ssp-crange { flex: 1 1 auto; width: auto; min-width: 0; }
+    #ssp_panel .ssp-cardsec .ssp-cinput, #ssp_panel .ssp-cardsec select.ssp-cinput { width: 100%; min-width: 0; }
+    #ssp_panel .ssp-cardsec .ssp-ccheck { font-size: 11px; gap: 4px; }
+    #ssp_panel .ssp-cardsec .ssp-cval { min-width: 26px; font-size: 11px; }
 }
 
 /* ==========================================================================
@@ -956,15 +983,18 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-dbg-head b { margin-right: auto; font-size: 13px; }
 .ssp-dbg-tabs { display: flex; gap: 4px; }
 .ssp-dbg-body { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-height: 0; }
+/* ⚠️ 代码框别用百分比抢高度：手机上窗口只有 ~500px 高，`flex:0 0 30% + min-height:90`
+   再加上下面 8 个换行按钮（~70px）和固定最小高 120px 的输出区，输出区会被压成一条缝
+   （用户反馈"调试窗在手机上会被压缩"）。改成：高度自适应、最多占 34%，输出区保底。 */
 .ssp-dbg-code {
-    flex: 0 0 30%; min-height: 90px; resize: vertical;
+    flex: 0 1 auto; min-height: 56px; max-height: 34vh; resize: vertical;
     background: #0c0c10; color: #d7e3ff; border: 1px solid rgba(255, 255, 255, .16);
     border-radius: 6px; padding: 8px; font: 12px/1.5 ui-monospace, Consolas, monospace;
     white-space: pre; overflow: auto;
 }
 .ssp-dbg-bar { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
 .ssp-dbg-out {
-    flex: 1 1 auto; min-height: 120px; overflow: auto; margin: 0;
+    flex: 1 1 auto; min-height: 72px; overflow: auto; margin: 0;
     background: #0a0a0d; color: #cfe9d6; border: 1px solid rgba(255, 255, 255, .12);
     border-radius: 6px; padding: 8px; font: 11.5px/1.55 ui-monospace, Consolas, monospace;
     white-space: pre-wrap; word-break: break-word;
@@ -990,10 +1020,21 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     background: #5ab4ff; color: #04263f; font-size: 11px; font-weight: 700;
     padding: 1px 6px; border-radius: 4px; white-space: nowrap; max-width: 60vw; overflow: hidden;
 }
-/* 手机上：留更小的边距，代码框矮一点，别把输出挤没 */
+/* 手机上：窗口本身撑到安全区以内（用 dvh —— 手机上 100vh 比真正可视区大，
+   地址栏一收一放会让窗口底部被裁掉），按钮排紧凑一点给输出区让地方 */
 @media (max-width: 700px) {
-    #ssp_dbg { left: 6px; right: 6px; top: 36px; bottom: 6px; padding: 8px; }
-    .ssp-dbg-code { flex: 0 0 24%; min-height: 70px; }
+    #ssp_dbg { top: 8px !important; bottom: 8px !important; padding: 8px; gap: 6px; font-size: 12px; }
+    .ssp-dbg-head { gap: 4px; }
+    .ssp-dbg-head b { font-size: 12px; }
+    .ssp-dbg-code { min-height: 48px; max-height: 26vh; font-size: 11.5px; padding: 6px; }
+    .ssp-dbg-bar { gap: 3px; }
+    .ssp-dbg-bar .ssp-pbtn, .ssp-dbg-head .ssp-pbtn { padding: 2px 6px; font-size: 11px; }
+    .ssp-dbg-out { min-height: 60px; font-size: 11px; padding: 6px; }
+}
+@supports (height: 100dvh) {
+    @media (max-width: 700px) {
+        #ssp_dbg { height: auto !important; max-height: calc(100dvh - 16px); }
+    }
 }
 
 /* 用户反馈两轮："能够点动的按钮做边框，不然我什么都看不见" → 后来精确成

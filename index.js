@@ -4488,7 +4488,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.41';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.42';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4535,14 +4535,15 @@ function sspBoxOf(selOrEl) {
     };
 }
 
-/** 从扩展脚本的 URL 里读酒馆缓存串（?...&version=1.31.41）—— 判断"浏览器里跑的是不是最新那份" */
-function sspManifestVersion() {
+/** 从扩展脚本的 URL 里读酒馆的缓存串（`...index.js?v=1792…` 或 `?version=1.31.41`）
+    —— 用来判断"浏览器里跑的是不是最新那份文件" */
+function sspScriptVersion() {
     try {
         const s = document.currentScript
             || query('script[src*="ShuShuTweaks/index.js"]')
             || query('script[src*="extensions"][src*="index.js"]');
         const src = s && s.getAttribute ? (s.getAttribute('src') || '') : '';
-        const m = /[?&]version=([^&]+)/.exec(src);
+        const m = /[?&](?:version|v)=([^&]+)/.exec(src);
         return m ? decodeURIComponent(m[1]) : '';
     } catch (e) { return ''; }
 }
@@ -4558,7 +4559,7 @@ function sspIntegrityProbe() {
 
     L.push('🐭 鼠鼠小助手 · 完整性检查');
     L.push('时间：' + new Date().toLocaleString());
-    L.push('版本：v' + PANEL_VERSION + (sspManifestVersion() ? '（浏览器缓存串 ' + sspManifestVersion() + '）' : ''));
+    L.push('版本：v' + PANEL_VERSION + (sspScriptVersion() ? '（浏览器缓存串 ' + sspScriptVersion() + '）' : ''));
     L.push('模块名：' + MODULE_NAME + '　设备：' + dev + '（窗口 ' + globalThis.innerWidth + '×' + globalThis.innerHeight + '）');
     L.push('浏览器：' + String(globalThis.navigator && globalThis.navigator.userAgent || '').slice(0, 120));
     L.push('');
@@ -4848,6 +4849,40 @@ function mountSettingsPanel() {
     box.innerHTML = settingsPanelHTML();
     document.body.append(box);
     panelEl = document.getElementById('ssp_panel');
+    sspBindSectionCollapse(box);
+    return true;
+}
+
+/* ==========================================================================
+   分区折叠（点分区标题就收起/展开那一块）
+   --------------------------------------------------------------------------
+   为什么加：手机实测（390×844）面板体可视高只有 680px，而里面排了 8 个分区、
+   内容高 3399px —— 「角色卡样式」自己就 1243px，被前面两个大分区压到屏幕外，
+   用户以为"那一块没了 / 只剩一行"。能折叠就没这个误会了。
+   默认全部展开（不动用户现在的习惯），只是标题变成一个可点的开关。
+   ========================================================================== */
+function sspBindSectionCollapse(root) {
+    if (!root) return false;
+    root.querySelectorAll('#ssp_panel .ssp-sec > h4').forEach(h => {
+        if (h.querySelector('.ssp-sec-chev')) return;
+        const ch = document.createElement('i');
+        ch.className = 'fa-solid fa-chevron-down ssp-sec-chev';
+        h.append(ch);
+        h.classList.add('ssp-sec-h');
+        h.setAttribute('title', '点一下收起 / 展开这一块');
+        h.setAttribute('role', 'button');
+    });
+    if (root.dataset.sspSecBind) return true;
+    root.dataset.sspSecBind = '1';
+    root.addEventListener('click', ev => {
+        const h = ev.target && ev.target.closest ? ev.target.closest('#ssp_panel .ssp-sec > h4') : null;
+        if (!h) return;
+        /* 标题里要是哪天放了真的控件，别把它的点击吃掉 */
+        if (ev.target.closest && ev.target.closest('input, select, textarea, button, a, .menu_button, .ssp-pbtn')) return;
+        const sec = h.parentElement;
+        if (!sec) return;
+        sec.classList.toggle('ssp-collapsed');
+    });
     return true;
 }
 
@@ -4894,7 +4929,14 @@ function bindSettingsOnce() {
     return true;
 }
 
-/** 抽屉里的「角色卡样式」那一块 */
+/** 抽屉里的「角色卡样式」那一块
+    ⚠️ 行的顺序是按「手机上能不能第一眼看到」排的（实测：手机面板可视高只有 680px，
+       这一块一共 1243px —— 旧顺序把最常用的样式/高度/圆角排在第 8~10 行，全在屏幕外，
+       用户以为"角色卡样式只剩了最上面一行"）。所以：
+         第 1~2 行  = 样式 + 高清头像（最先要动的）
+         第 3~6 行  = 卡片高度 / 圆角 / 间距 / 名字字号（配合样式微调）
+         第 7~10 行 = 渐隐 / 取景 / 对齐 / 图片颜色（调风格）
+         第 11 行起 = 叠压 / 简介字号 / 歌单底色 / 显示什么 / 学生证（用得少） */
 function cardDrawerHTML() {
     const c = cardStyleSettings();
     const on = c.style !== 'none';
@@ -4912,16 +4954,17 @@ function cardDrawerHTML() {
     return `<div class="ssp-cardsec"${on ? '' : ' hidden'}>
         ${row('角色卡样式', '<select class="text_pole ssp-cinput" data-ssp-card-style="1">' + opts + '</select>')}
         ${row('高清头像', '<label class="ssp-ccheck"><input type="checkbox" data-ssp-card-check="hd" ' + (c.hd ? 'checked' : '') + '><span>换成原图（酒馆缩略图只有 96×144，铺满整行会糊）</span></label>', true)}
-        ${row('图片颜色', sel('color', [['hover', '悬停变彩'], ['always', '一直彩色'], ['gray', '一直灰']]))}
+        ${/* ⚠️ 这几行是手机上的"床头开关"：必须排在最前面看得见（见函数头注释） */''}
+        ${slider('h', '卡片高度', 40, 420, 1, 'px')}
+        ${slider('radius', '圆角', 0, 40, 1, 'px')}
+        ${slider('gap', '卡片间距', 0, 40, 1, 'px')}
+        ${slider('name', '名字字号', 10, 34, 0.5, 'px')}
         ${row('渐隐方式', sel('fade', [['mask', '遮罩（自适应底色）'], ['solid', '色块覆盖'], ['none', '不渐隐']]))}
         ${slider('fadeStop', '渐隐强度', 0, 100, 1, '%')}
         ${row('取景', sel('focus', [['18%', '偏上'], ['32%', '居中'], ['62%', '偏下']]))}
         ${row('内容对齐', sel('align', [['left', '靠左'], ['center', '居中'], ['right', '靠右']]))}
-        ${slider('h', '卡片高度', 40, 420, 1, 'px')}
-        ${slider('radius', '圆角', 0, 40, 1, 'px')}
-        ${slider('gap', '卡片间距', 0, 40, 1, 'px')}
+        ${row('图片颜色', sel('color', [['hover', '悬停变彩'], ['always', '一直彩色'], ['gray', '一直灰']]))}
         ${slider('overlay', '叠压程度', 0, 90, 5, '%')}
-        ${slider('name', '名字字号', 10, 34, 0.5, 'px')}
         ${slider('desc', '简介字号', 8, 24, 0.5, 'px')}
         ${row('歌单底色', `<input type="color" class="ssp-ccolor" data-ssp-card-color="songBg" value="${esc(/^#[0-9a-f]{6}$/i.test(String(c.songBg)) ? c.songBg : '#4a2b7d')}" title="只有「歌单行」样式用得到">
             <b class="ssp-cval" data-ssp-card-out="songBg">${esc(String(c.songBg || '#4a2b7d'))}</b>
@@ -5879,17 +5922,28 @@ function orbDbgOpenWin() {
     el.id = 'ssp_dbg';
     /* ⚠️ 用户要求：调试窗要**待在鼠鼠口袋里面**，不要全屏铺满。
        做法：拿口袋面板内容区（.ssp-orb-body）的矩形，把窗口贴着它放 ——
-       面板本身是 fixed 定位，所以这个矩形是稳的，滚动也不会漂。拿不到才退回全屏。 */
+       面板本身是 fixed 定位，所以这个矩形是稳的，滚动也不会漂。拿不到才退回全屏。
+       ⚠️ 手机上加一步：把矩形**夹进视口**（留 12px 边），并且用 dvh 当上限 ——
+          手机上 100vh 比真正可视区大，口袋面板的矩形常常超出屏幕，
+          直接照抄那个矩形会让调试窗底/顶被裁掉，看着就是"被压缩"（用户反馈）。 */
     try {
         const host = document.querySelector('.ssp-orb-body') || document.querySelector('#ssp_orb') || null;
         if (host) {
             const r = host.getBoundingClientRect();
             if (r && r.width > 120 && r.height > 120) {
+                const PAD = 12;
+                const vw = globalThis.innerWidth || 0, vh = globalThis.innerHeight || 0;
+                const left = Math.max(PAD, Math.round(r.left));
+                const top = Math.max(PAD, Math.round(r.top));
+                const width = Math.min(Math.round(r.width), Math.max(200, vw - left - PAD));
+                const height = Math.min(Math.round(r.height), Math.max(180, vh - top - PAD));
                 el.style.position = 'fixed';
-                el.style.left = Math.round(r.left) + 'px';
-                el.style.top = Math.round(r.top) + 'px';
-                el.style.width = Math.round(r.width) + 'px';
-                el.style.height = Math.round(r.height) + 'px';
+                el.style.left = left + 'px';
+                el.style.top = top + 'px';
+                el.style.width = width + 'px';
+                el.style.height = height + 'px';
+                /* 手机上再给一条 dvh 上限当保险（地址栏收放时 innerHeight 不准） */
+                el.style.maxHeight = 'calc(100dvh - ' + (top + PAD) + 'px)';
                 el.style.right = 'auto'; el.style.bottom = 'auto';
                 el.style.borderRadius = '8px';
             }
