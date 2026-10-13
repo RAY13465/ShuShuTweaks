@@ -4488,7 +4488,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.44';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.45';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4589,6 +4589,37 @@ function sspIntegrityProbe() {
     sspCk(L, cks, '分区数量', secN >= 8, '数到 ' + secN + ' 个分区' + (secN >= 8 ? '' : '（正常 ≥8；少了说明面板是旧的/被截断了）'));
     sspCk(L, cks, '角色卡样式槽位 #ssp_cardslot', slot.exists, slot.exists ? '' : '★ 槽位不存在 —— 这就是"角色卡样式那块消失了"的直接原因');
     sspCk(L, cks, '角色卡样式行数', crowN >= 15, '数到 ' + crowN + ' 行' + (crowN >= 15 ? '' : '（正常 17 行：样式下拉/高清头像/颜色/渐隐/取景/对齐/高度/圆角/间距/叠压/字号×2/歌单底色/显示什么/学生证/量一下卡片）'));
+    /* ★ 关键补充：「在 DOM 里」不等于「用户看得见」。
+       实测（手机 390×844）：这一块自己就 1080px，而面板体可视高只有 680px —— 如果它前面
+       压着「悬浮球 + 思维链收纳」两个分区，它会被推到屏幕外，用户看到的就是「只剩最上面一行」
+       或「下面的调整界面没有了」。这里把"折叠无关分区后还剩多少行在视口里"量出来，
+       让报告能一句话区分「没渲染」和「渲染了但在屏幕外」。 */
+    const cardSecEl = slot.el ? slot.el.closest('.ssp-sec') : null;
+    if (cardSecEl) {
+        const beforeTop = cardSecEl.getBoundingClientRect().top;
+        const collapsed = [];
+        queryAll('#ssp_panel .ssp-sec').forEach(sec => {
+            if (sec !== cardSecEl && !sec.classList.contains('ssp-folded')) {
+                sec.classList.add('ssp-folded');
+                collapsed.push(sec);
+            }
+        });
+        const visRows = queryAll('#ssp_cardslot .ssp-crow').filter(r => {
+            const rr = r.getBoundingClientRect();
+            return rr.height > 0 && rr.top >= 0 && rr.bottom <= globalThis.innerHeight;
+        }).length;
+        collapsed.forEach(sec => sec.classList.remove('ssp-folded'));
+        const afterTop = cardSecEl.getBoundingClientRect().top;
+        detail.角色卡样式可视性 = { 折叠前top: Math.round(beforeTop), 折叠后top: Math.round(afterTop), 折叠后一屏可见行数: visRows, 行总数: crowN, 面板体可视高: (query('#ssp_panel .ssp-p-body') || {}).clientHeight || 0 };
+        sspCk(L, cks, '角色卡样式「看得见」', beforeTop < globalThis.innerHeight,
+            beforeTop < globalThis.innerHeight
+                ? ('起始位置 top=' + Math.round(beforeTop) + '（视口高 ' + globalThis.innerHeight + '），折叠上面那些分区后能看见 ' + visRows + '/' + crowN + ' 行')
+                : ('★ 它在屏幕外：折叠前 top=' + Math.round(beforeTop) + '（视口高 ' + globalThis.innerHeight + '），'
+                    + '折叠掉上面那些分区后就到 top=' + Math.round(afterTop) + '、能看见 ' + visRows + '/' + crowN + ' 行。'
+                    + '原因：这一块自己就有 ' + Math.round(cardSecEl.getBoundingClientRect().height) + 'px，'
+                    + '而面板可视高只有 ' + ((query('#ssp_panel .ssp-p-body') || {}).clientHeight || 0) + 'px —— 需要往下滚，'
+                    + '或者点上面分区的标题把它们折叠起来'));
+    }
     sspCk(L, cks, '样式下拉框 [data-ssp-card-style]', !!styleSel, styleSel ? '当前值 ' + styleSel.value : '★ 下拉框不在 → 没法换样式');
     sspCk(L, cks, '「展开装配面板」按钮 [data-ssp-open]', !!query('[data-ssp-open]'), query('[data-ssp-open]') ? '' : '★ 按钮不在 → 装配入口没了');
     sspCk(L, cks, '「恢复原版」按钮 [data-ssp-restore]', !!query('[data-ssp-restore]'), query('[data-ssp-restore]') ? '' : '★ 按钮不在');
@@ -4744,7 +4775,7 @@ function settingsPanelHTML() {
 
     const sec = (icon, title, inner, note) => `
       <section class="ssp-sec">
-        <h4><i class="fa-solid ${icon}"></i>${esc(title)}</h4>
+        <h4><i class="fa-solid ${icon}"></i>${esc(title)}<span class="ssp-sec-fold" data-ssp-fold="1" title="折叠 / 展开这一整块（想快点看到下面那块时用）"><i class="fa-solid fa-chevron-down"></i></span></h4>
         <div class="ssp-secbody">${inner}${note ? `<div class="ssp-fnote">${note}</div>` : ''}</div>
       </section>`;
 
@@ -4768,7 +4799,7 @@ function settingsPanelHTML() {
 
     /* —— 角色卡样式（沿用原来那块渲染器，只是搬进面板）—— */
     const secCard = `<section class="ssp-sec">
-        <h4><i class="fa-solid fa-image"></i>角色卡样式</h4>
+        <h4><i class="fa-solid fa-image"></i>角色卡样式<span class="ssp-sec-fold" data-ssp-fold="1" title="折叠 / 展开这一整块（想快点看到下面那块时用）"><i class="fa-solid fa-chevron-down"></i></span></h4>
         <div class="ssp-secbody">
           ${frow('作者注释只显示第一行', '列表里那行是角色卡的「创作者注释」；关掉就整段显示（长文本会被省略号截断）',
               fsw('data-ssp-notesone="1"', s.listNotesFirstLine !== false))}
@@ -4875,10 +4906,19 @@ function sspBindSectionCollapse(root) {
     if (root.dataset.sspSecBind) return true;
     root.dataset.sspSecBind = '1';
     root.addEventListener('click', ev => {
-        const h = ev.target && ev.target.closest ? ev.target.closest('#ssp_panel .ssp-sec > h4') : null;
+        const t = ev.target;
+        if (!t || !t.closest) return;
+        /* 标题右边那个小箭头 = 折叠/展开这一整块（就是想快点看到下面那块时点的） */
+        const fold = t.closest('[data-ssp-fold]');
+        if (fold) {
+            const sec = fold.closest('.ssp-sec');
+            if (sec) sec.classList.toggle('ssp-folded');
+            return;
+        }
+        const h = t.closest('#ssp_panel .ssp-sec > h4');
         if (!h) return;
         /* 标题里要是哪天放了真的控件，别把它的点击吃掉 */
-        if (ev.target.closest && ev.target.closest('input, select, textarea, button, a, .menu_button, .ssp-pbtn')) return;
+        if (t.closest('input, select, textarea, button, a, .menu_button, .ssp-pbtn')) return;
         const sec = h.parentElement;
         if (!sec) return;
         sec.classList.toggle('ssp-collapsed');

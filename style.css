@@ -469,13 +469,29 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 }
 #ssp_panel .ssp-swatch { display: flex; flex-wrap: wrap; gap: 5px; }
 
-/* 分区折叠（点标题收起/展开）——手机上 8 个分区排 3399px，不折叠根本找不到目标那一块 */
+/* 分区折叠（两种）：
+   ① 点标题 → .ssp-collapsed（收成一条）
+   ② 点标题右边那个小箭头 → .ssp-folded（就是 ① + 让标题条贴在滚动容器顶部，
+      这样一连折几个分区时，被折的都缩到顶上，下面的分区立刻上移、一眼能看到）
+   ——手机上 8 个分区排 3000+px，「角色卡样式」自己就 1080px（可视区只有 680px），
+     不折叠就会出现"下面的调整界面没有了"的错觉（用户反馈过两次）。 */
 #ssp_panel .ssp-sec-h { cursor: pointer; user-select: none; }
 #ssp_panel .ssp-sec-h:hover { color: #fff; }
 #ssp_panel .ssp-sec-chev { margin-left: 6px; font-size: 11px; opacity: .55; transition: transform .16s ease; }
 #ssp_panel .ssp-sec.ssp-collapsed .ssp-sec-chev { transform: rotate(-90deg); }
 #ssp_panel .ssp-sec.ssp-collapsed .ssp-secbody,
 #ssp_panel .ssp-sec.ssp-collapsed .ssp-fnote { display: none; }
+/* 标题右边的小箭头：折叠这一整块 */
+#ssp_panel .ssp-sec-fold {
+    margin-left: 8px; font-size: 11px; opacity: .5; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, .22); border-radius: 5px; padding: 1px 6px;
+    transition: transform .16s ease, opacity .16s ease, background .16s ease;
+}
+#ssp_panel .ssp-sec-fold:hover { opacity: 1; background: rgba(255, 255, 255, .12); }
+#ssp_panel .ssp-sec.ssp-folded > h4 { position: sticky; top: -8px; z-index: 2; background: rgba(22, 22, 28, .96); }
+#ssp_panel .ssp-sec.ssp-folded > h4 .ssp-sec-fold { transform: rotate(-90deg); }
+#ssp_panel .ssp-sec.ssp-folded .ssp-secbody,
+#ssp_panel .ssp-sec.ssp-folded .ssp-fnote { display: none; }
 
 /* 窄屏：面板铺满、行内控件允许换行 */
 @media (max-width: 560px) {
