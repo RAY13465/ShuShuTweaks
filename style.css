@@ -484,23 +484,20 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     #ssp_panel .ssp-ctl { width: 100%; justify-content: flex-end; }
 }
 
-/* 手机上的「角色卡样式」：17 行太高（实测整块 1091px，比整个可视区 680px 还高 →
-   一屏只看得见第 1 行，用户以为"这块只剩一点了"）。三招压到一半以内：
-     ① 两列排（宽行仍占满）
-     ② ⚠️ 标签必须 nowrap、并且 flex:0 0 auto —— 实测窄列里标签会**自己折行**
-        （"卡片高度"折成 3 行 = 70px），行高其实是被标签撑的，不是控件
-     ③ 滑块占满剩余宽度，行高回到 ~30px */
+/* 手机上的「角色卡样式」：**保持单列**（用户明确否掉了双排：窄列里滑块难对准、
+   数值和标签挤在一起更难调）。省高度只靠三件不改变排布的事：
+     ① 行距/内边距/字号收紧（一行一项，滑块拿到整行剩余宽度 → 更好拖）
+     ② 标签 nowrap + flex:0 0 auto —— 实测窄容器里标签会自己折行（"卡片高度"折 3 行 = 70px），
+        行高其实是被标签撑的；不折行 + 让滑块吃掉剩余宽度，行回落到 ~30px
+     ③ 分区标题可折叠（省的是"翻到这一块"的距离，不是动排布）
+   ⚠️ 以后别再加 grid 两列 —— 试过，用户明确说"双排好难调整"。 */
 @media (max-width: 560px), (pointer: coarse) {
-    #ssp_panel .ssp-cardsec { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; align-items: center; }
-    #ssp_panel .ssp-cardsec > .ssp-crow.wide,
-    #ssp_panel .ssp-cardsec > .ssp-note,
-    #ssp_panel .ssp-cardsec > .ssp-measure { grid-column: 1 / -1; }
-    #ssp_panel .ssp-cardsec > .ssp-crow { min-height: 30px; margin: 1px 0; padding: 2px 0; gap: 6px; }
+    #ssp_panel .ssp-cardsec > .ssp-crow { min-height: 34px; margin: 1px 0; padding: 2px 0; gap: 8px; }
     #ssp_panel .ssp-cardsec .ssp-clabel { flex: 0 0 auto; font-size: 12px; white-space: nowrap; }
-    #ssp_panel .ssp-cardsec .ssp-crange { flex: 1 1 auto; width: auto; min-width: 0; }
-    #ssp_panel .ssp-cardsec .ssp-cinput, #ssp_panel .ssp-cardsec select.ssp-cinput { width: 100%; min-width: 0; }
+    #ssp_panel .ssp-cardsec .ssp-crange { flex: 1 1 auto; width: auto; min-width: 60px; }
+    #ssp_panel .ssp-cardsec .ssp-cinput, #ssp_panel .ssp-cardsec select.ssp-cinput { min-width: 0; }
     #ssp_panel .ssp-cardsec .ssp-ccheck { font-size: 11px; gap: 4px; }
-    #ssp_panel .ssp-cardsec .ssp-cval { min-width: 26px; font-size: 11px; }
+    #ssp_panel .ssp-cardsec .ssp-cval { min-width: 30px; font-size: 11px; }
 }
 
 /* ==========================================================================
