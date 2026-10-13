@@ -600,7 +600,7 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 }
 
 /* 面板容器：全屏但不吃点击 */
-.ssp-orb-root { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 2999; pointer-events: none; display: block; }
+.ssp-orb-root { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 3100; pointer-events: none; display: block; }
 .ssp-orb-root .ssp-orb-mask,
 .ssp-orb-root .ssp-orb-panel { display: none; }
 .ssp-orb-root.on .ssp-orb-mask { display: block; pointer-events: auto; }
@@ -983,6 +983,216 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     transition: opacity .18s ease, transform .18s ease;
 }
 
+/* ==========================================================================
+   写卡页签 · 「密」样式（v1.31.49）
+   --------------------------------------------------------------------------
+   结构：分页栏（分段控件）→ 分组框（组头 + 行内标签的字段行）→ 吸底保存条
+   配色：**跟随酒馆主题**（用户明确要"跟随主题"）—— 全部指向主题变量，换美化会自动跟。
+        ⚠️ 想改成"写死的夜紫"（跟鼠鼠面板/球一个策略），把这 8 行换成固定色即可：
+             --ch-bg:#0f0f11; --ch-2:#17171a; --ch-3:#1e1e22; --ch-ink:#e8e8ec;
+             --ch-ink-2:#a8a8b2; --ch-ink-3:#74747e; --ch-line:rgba(255,255,255,.10);
+             --ch-accent:#a78bfa; --ch-accent-deep:#7c5cf0;
+   圆角：容器 4 / 控件 3（用户要求"少圆角"）
+   ========================================================================== */
+#ssp_orb_panel {
+    --ch-ink: var(--SmartThemeBodyColor, #e8e8ec);
+    --ch-bg: var(--SmartThemeBlurTintColor, #0f0f11);
+    --ch-line: var(--SmartThemeBorderColor, rgba(255,255,255,.12));
+    --ch-accent: var(--SmartThemeEmColor, #a78bfa);
+    /* 面与次级文字：从主题色按比例混出来（深色/浅色主题都成立）；
+       不支持 color-mix 时退回半透明叠色，效果接近 */
+    --ch-2: color-mix(in srgb, var(--ch-ink) 5%, var(--ch-bg));
+    --ch-3: color-mix(in srgb, var(--ch-ink) 8%, var(--ch-bg));
+    --ch-ink-2: color-mix(in srgb, var(--ch-ink) 72%, var(--ch-bg));
+    --ch-ink-3: color-mix(in srgb, var(--ch-ink) 48%, var(--ch-bg));
+    /* 强调面：主题强调色调稀（选中态 / 主动作底） */
+    --ch-acc-2: color-mix(in srgb, var(--ch-accent) 20%, var(--ch-bg));
+    --ch-acc-3: color-mix(in srgb, var(--ch-accent) 30%, var(--ch-bg));
+    --ch-accent-deep: color-mix(in srgb, var(--ch-accent) 85%, var(--ch-ink));
+    --r-box: 4px; --r-ctl: 3px; --r-tag: 2px;
+}
+
+/* ---------- 分页栏：分段控件 ---------- */
+.ssp-ch-tabs {
+    display: flex; flex-wrap: wrap; gap: 0; margin: 2px 0 8px;
+    border: 1px solid var(--ch-line); border-radius: var(--r-ctl) !important; overflow: hidden;
+}
+.ssp-ch-tab {
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap;
+    padding: 6px 11px; border-radius: 0 !important; font-size: 11.5px;
+    color: var(--ch-ink-3); background: var(--ch-2);
+    border-right: 1px solid var(--ch-line);
+}
+.ssp-ch-tab:last-child { border-right: 0; }
+.ssp-ch-tab:hover { color: var(--ch-ink); background: var(--ch-3); }
+.ssp-ch-tab.on { color: var(--ch-ink); background: var(--ch-acc-2); box-shadow: inset 0 -2px 0 var(--ch-accent); }
+
+/* ---------- 分页 ---------- */
+.ssp-ch-pane { display: none; }
+.ssp-ch-pane.on { display: block; }
+
+/* ---------- 分组框：组头 + 内容 ---------- */
+.ssp-ch-group {
+    border: 1px solid var(--ch-line); border-radius: var(--r-box) !important;
+    margin-bottom: 8px; overflow: hidden; background: var(--ch-2);
+}
+.ssp-ch-group > .ssp-ch-ghead {
+    display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+    background: var(--ch-3); border-bottom: 1px solid var(--ch-line);
+    font-size: 11px; color: var(--ch-ink-2); letter-spacing: .03em;
+}
+.ssp-ch-group > .ssp-ch-ghead i { opacity: .7; font-size: 10.5px; color: var(--ch-accent); }
+.ssp-ch-group > .ssp-ch-gbody { padding: 0; }
+
+/* ---------- 字段行：标签与值同行（"密"的核心） ---------- */
+.ssp-ch-row {
+    display: grid; grid-template-columns: 88px minmax(0, 1fr);
+    align-items: start; gap: 8px; padding: 6px 10px; min-width: 0;
+}
+.ssp-ch-row + .ssp-ch-row { border-top: 1px solid var(--ch-line); }
+.ssp-ch-row > .ssp-ch-rlabel {
+    font-size: 11.5px; color: var(--ch-ink-2); padding-top: 7px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ssp-ch-row > .ssp-ch-rbody { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+/* ⚠️ 行内容区里的原生容器（`.flex1` / 并排两列那个盒子）必须铺满并改成竖排 ——
+   否则它们带着 flex 项基准宽度进来，会把字段压成窄缝（实测作者注释被挤到 88px 宽）。 */
+.ssp-ch-rbody > div { width: 100% !important; min-width: 0 !important; flex: none !important; max-width: none !important; }
+.ssp-ch-cols { display: flex !important; flex-direction: column !important; gap: 4px !important; }
+/* ⚠️ grid 子项必须 min-width:0 / minmax(0,1fr)，否则字段的 min-content 会把列撑开
+   （实测：textarea 一撑，左标签栏变很宽、右列反而变窄 —— 规范 1-4 引的 Vercel 那条） */
+.ssp-ch-row > * { min-width: 0; }
+.ssp-ch-row .ssp-ch-hint { font-size: 10.5px; color: var(--ch-ink-3); line-height: 1.5; margin: 0; }
+.ssp-ch-row .ssp-ch-hint b { color: var(--ch-ink-2); }
+.ssp-ch-row.stack { grid-template-columns: 1fr; }          /* 整行字段（大文本框） */
+.ssp-ch-row.stack > .ssp-ch-rlabel { padding-top: 0; font-size: 11px; color: var(--ch-ink-3); }
+
+/* 密：控件在行里去掉自己的边框/底色，悬停才显出"能点" */
+.ssp-ch-pane textarea, .ssp-ch-pane input[type=text], .ssp-ch-pane input[type=number],
+.ssp-ch-pane select, .ssp-ch-pane .text_pole {
+    width: 100%; box-sizing: border-box; min-width: 0;
+    color: var(--ch-ink) !important; background: transparent !important;
+    border: 1px solid transparent !important; border-radius: var(--r-ctl) !important;
+    padding: 6px 8px !important; font-size: 12.5px;
+}
+.ssp-ch-pane textarea:hover, .ssp-ch-pane input[type=text]:hover, .ssp-ch-pane input[type=number]:hover,
+.ssp-ch-pane select:hover, .ssp-ch-pane .text_pole:hover {
+    background: var(--ch-bg) !important; border-color: var(--ch-line) !important;
+}
+.ssp-ch-pane textarea:focus, .ssp-ch-pane input:focus, .ssp-ch-pane select:focus, .ssp-ch-pane .text_pole:focus {
+    background: var(--ch-bg) !important; border-color: var(--ch-accent-deep) !important; outline: none;
+}
+.ssp-ch-pane ::placeholder { color: var(--ch-ink-3) !important; }
+/* 原生 h4/h5：在"密"里让位给组头，压小但**不隐藏**（不然用户找不到字段名） */
+.ssp-ch-pane h4 { margin: 2px 0 2px; font-size: 11.5px; color: var(--ch-ink-2); font-weight: 500; }
+.ssp-ch-pane h5 { margin: 0 0 2px; font-size: 10.5px; color: var(--ch-ink-3); font-weight: 400; }
+.ssp-ch-pane .extension_token_counter { font-size: 10px; color: var(--ch-ink-3); }
+.ssp-ch-pane a.notes-link, .ssp-ch-pane .note-link-span { opacity: .5; }
+/* 原生 inline-drawer（Prompt 覆盖）搬进来后去掉它自己的外框，交给我们的分组框 */
+.ssp-ch-pane .inline-drawer { border: 0 !important; background: transparent !important; margin: 0 !important; }
+.ssp-ch-pane .inline-drawer-header { padding: 6px 10px !important; font-size: 11.5px; color: var(--ch-ink-2); }
+.ssp-ch-pane .inline-drawer-content { padding: 0 10px 6px !important; }
+
+/* ---------- 各分页的字段高度（要写很多字的给足） ---------- */
+.ssp-ch-pane-info #creator_notes_textarea { min-height: 152px; }
+.ssp-ch-pane-info #tags_textarea { min-height: 48px; }
+.ssp-ch-pane-info #creator_textarea, .ssp-ch-pane-info #character_version_textarea { min-height: 32px; }
+.ssp-ch-pane-persona #description_textarea { min-height: 200px; }
+.ssp-ch-pane-persona #personality_textarea { min-height: 88px; }
+.ssp-ch-pane-persona #scenario_pole { min-height: 96px; }
+.ssp-ch-pane-dialog #firstmessage_textarea { min-height: 200px; }
+.ssp-ch-pane-dialog #mes_example_textarea { min-height: 168px; }
+.ssp-ch-pane-advanced #system_prompt_textarea,
+.ssp-ch-pane-advanced #post_history_instructions_textarea { min-height: 88px; }
+.ssp-ch-pane-advanced #depth_prompt_prompt { min-height: 96px; }
+
+/* ---------- 吸底保存条（放在分页栏下面，随时点得到） ---------- */
+.ssp-ch-savebar {
+    position: sticky; top: -8px; z-index: 3;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    margin: 0 0 8px; padding: 6px 8px;
+    border: 1px solid var(--ch-line); border-radius: var(--r-box) !important;
+    background: var(--ch-3);
+}
+.ssp-ch-savebar .menu_button { margin: 0; }
+.ssp-ch-savebar #create_button_label {
+    order: -1; padding: 5px 12px !important; font-size: 12.5px !important;
+    border: 1px solid var(--ch-accent-deep) !important; border-radius: var(--r-ctl) !important;
+    background: var(--ch-acc-3) !important; color: var(--ch-ink) !important;
+}
+.ssp-ch-savebar #character_version_textarea {
+    width: 96px; min-height: 26px; height: 26px; font-size: 11.5px;
+    border-color: var(--ch-line) !important; background: var(--ch-2) !important;
+}
+/* 原生弹窗被我们搬进来当"字段宿主"：清掉它作为浮层的身段 */
+#ssp_editor_box #character_popup.ssp-ch-popup { display: block !important; }
+#ssp_editor_box #character_popup.ssp-ch-popup .inline-drawer-content { display: block; }
+/* 基本信息：头像大一点、名字铺满 */
+.ssp-ch-pane-base #name_div { width: 100%; }
+.ssp-ch-pane-base #avatar_div { gap: 10px; }
+.ssp-ch-pane-base #avatar_div_div { max-width: 132px; }
+.ssp-ch-pane-base #character_name_pole { font-size: 15px; min-height: 34px; width: 100%; }
+
+/* 手机：行内标签收窄；再窄就上下排（一行放不下别硬挤） */
+@media (max-width: 560px), (pointer: coarse) {
+    .ssp-ch-row { grid-template-columns: 76px minmax(0, 1fr); gap: 6px; padding: 6px 8px; }
+    .ssp-ch-row > .ssp-ch-rlabel { font-size: 11px; }
+    .ssp-ch-tab { padding: 6px 9px; }
+    .ssp-ch-savebar { position: static; }
+}
+@media (max-width: 380px) {
+    .ssp-ch-row { grid-template-columns: 1fr; }
+    .ssp-ch-row > .ssp-ch-rlabel { padding-top: 0; }
+}
+
+/* ==================== 写卡 / 选卡 页签（把酒馆的写卡块搬进口袋） ====================
+   写卡块本体（#rm_ch_create_block / #form_create）是**酒馆自己的 DOM**：
+   它的字段、头像控件、标签、世界书按钮的样式都在酒馆的 style.css 里，按 id/class 命中，
+   所以我们**只补"在口袋里怎么排"**，绝不重写下拉/输入框/按钮的皮肤（风格按用户要求保持原生）。
+   ⚠️ 它原生是 `#right-nav-panel > .right_menu`（靠 selectRightMenuWithAnimation 设 display:flex）；
+      搬出来后 `.right_menu{display:none}` 那条不再命中（不是直接子元素了），显示由我们的内联 style 负责。 */
+.ssp-ch-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.ssp-ch-now { font-size: 11.5px; opacity: .75; }
+.ssp-ch-now b { font-weight: 600; }
+.ssp-ch-none { font-size: 11.5px; line-height: 1.7; opacity: .6; padding: 8px 2px; }
+.ssp-ch-box { min-height: 40px; }
+/* 搬进来的写卡块：宽度铺满口袋，内部自己滚，高度别撑爆面板 */
+#rm_ch_create_block.ssp-ch-edit {
+    display: flex !important; flex-direction: column;
+    width: 100%; max-width: 100%; box-sizing: border-box;
+    max-height: 68vh; overflow-y: auto; overflow-x: hidden;
+    padding: 0 2px 6px;
+}
+#rm_ch_create_block.ssp-ch-edit #avatar_div_div { max-width: 100%; }
+#rm_ch_create_block.ssp-ch-edit input[type=text],
+#rm_ch_create_block.ssp-ch-edit textarea,
+#rm_ch_create_block.ssp-ch-edit select { max-width: 100%; box-sizing: border-box; }
+
+/* 选卡器：头像墙 */
+.ssp-ch-modes { gap: 4px; }
+.ssp-ch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.ssp-ch-card {
+    display: flex; flex-direction: column; gap: 3px; cursor: pointer;
+    padding: 5px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .12);
+    background: rgba(255, 255, 255, .04); min-width: 0;
+}
+.ssp-ch-card:hover { border-color: rgba(255, 255, 255, .4); background: rgba(255, 255, 255, .1); }
+.ssp-ch-card.on { border-color: var(--ssp-accent, #b06cf0); box-shadow: 0 0 0 1px var(--ssp-accent, #b06cf0) inset; }
+.ssp-ch-av {
+    width: 100%; aspect-ratio: 3 / 4; border-radius: 6px; overflow: hidden;
+    background: rgba(0, 0, 0, .3); display: flex; align-items: center; justify-content: center;
+}
+.ssp-ch-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ssp-ch-av i { opacity: .35; font-size: 20px; }
+.ssp-ch-meta { min-width: 0; }
+.ssp-ch-meta b { display: block; font-size: 11.5px; font-weight: 600; line-height: 1.35;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssp-ch-tags { display: block; font-size: 10px; opacity: .55; line-height: 1.4;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssp-ch-fav { color: var(--golden, #ffd76a); font-size: 9px; }
+/* 页签条：当前页签的名字（手机上一眼知道自己在哪一页） */
+.ssp-orb-tabs .ssp-tab-now { margin-left: auto; font-size: 10.5px; opacity: .55; white-space: nowrap; }
+
 /* ============ 调试（鼠鼠口袋里的最后一个页签，不再是独立窗口） ============
    ⚠️ 历史：以前 #ssp_dbg 是 position:fixed 的独立窗口，靠 JS 照着口袋内容区的矩形摆，
       手机上那个矩形常超出视口 → 窗口跑到屏幕外、按钮也点不到（用户反馈
@@ -1060,3 +1270,242 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 #ssp_dbg .ssp-pbtn:hover { border-color: rgba(255, 255, 255, .75) !important; background: rgba(255, 255, 255, .14); }
 #ssp_dbg .ssp-pbtn.primary { border-color: rgba(120, 200, 255, .75) !important; background: rgba(70, 140, 220, .3); }
 #ssp_dbg .ssp-pbtn.danger { border-color: rgba(255, 130, 130, .75) !important; background: rgba(200, 70, 70, .24); }
+﻿
+/* ==========================================================================
+   写卡工作台（v1.31.50 重做）· 自设计面板 + pin 掉的原生框子
+   --------------------------------------------------------------------------
+   设计：工具面板（高密度 / 发丝分割线 / 块状 hover / 明确网格 / 组头分行）/ 少圆角
+   配色：**跟随酒馆主题**（用户明确要"跟随主题"）—— 全部指向主题变量，换美化自动跟
+   圆角：容器 4 / 控件 3（用户要求"少圆角"）
+   ⚠️ 原生框子用 [data-ssp-ch-pin="1"] 藏起来，但**元素一直留在酒馆的文档结构里** ——
+      保存链路（FormData / $('#id').val()）全靠这一点，见 index.js 文件头三条底线。
+   ========================================================================== */
+#ssp_orb_panel {
+    --ch-ink: var(--SmartThemeBodyColor, #e8e8ec);
+    --ch-bg: var(--SmartThemeBlurTintColor, #0f0f11);
+    --ch-line: var(--SmartThemeBorderColor, rgba(255, 255, 255, .12));
+    --ch-accent: var(--SmartThemeEmColor, #4aa8ff);
+    --ch-2: color-mix(in srgb, var(--ch-ink) 5%, var(--ch-bg));
+    --ch-3: color-mix(in srgb, var(--ch-ink) 8%, var(--ch-bg));
+    --ch-ink-2: color-mix(in srgb, var(--ch-ink) 72%, var(--ch-bg));
+    --ch-ink-3: color-mix(in srgb, var(--ch-ink) 48%, var(--ch-bg));
+    --ch-acc-2: color-mix(in srgb, var(--ch-accent) 18%, var(--ch-bg));
+    --ch-acc-3: color-mix(in srgb, var(--ch-accent) 30%, var(--ch-bg));
+    --ch-accent-deep: color-mix(in srgb, var(--ch-accent) 85%, var(--ch-ink));
+    --r-box: 4px; --r-ctl: 3px;
+}
+
+/* ---------- 分页栏（分段控件） ----------
+   ⚠️ 这里的圆角都写成 #ssp_orb_panel .ssp-xxx：主题里有一条:n      :not(#chat, #chat *, .avatar, .avatar *) { border-radius: var(--Radius) !important }（当前主题 .Base_D），:n      它带 !important 且 :not() 取最内层选择器的特异性 → 只写 .ssp-ch-xxx{border-radius:!important} **压不过它**:n      （实测计算值恒为 0px）。加面板 id 前缀（ID 特异性）才稳。同样问题也发生在 border/padding 上，:n      所以下面凡是「外框 + 圆角」的规则都带上了 id 前缀。 */
+#ssp_orb_panel .ssp-ch-tabs {
+    display: flex; flex-wrap: wrap; margin: 0 0 6px;
+    border: 1px solid var(--ch-line); border-radius: var(--r-ctl) !important; overflow: hidden;
+}
+.ssp-ch-tab {
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap;
+    padding: 6px 11px; border-radius: 0 !important; font-size: 11.5px;
+    color: var(--ch-ink-3); background: var(--ch-2); border-right: 1px solid var(--ch-line);
+}
+.ssp-ch-tab:last-child { border-right: 0; }
+.ssp-ch-tab:hover { color: var(--ch-ink); background: var(--ch-3); }
+.ssp-ch-tab.on { color: var(--ch-ink); background: var(--ch-acc-2); box-shadow: inset 0 -2px 0 var(--ch-accent); }
+.ssp-ch-pane { display: none; }
+.ssp-ch-pane.on { display: block; }
+
+/* ---------- 保存条（吸顶） ---------- */
+#ssp_orb_panel .ssp-ch-draft {
+    position: sticky; top: -8px; z-index: 4;
+    display: flex; align-items: center; gap: 5px; flex-wrap: nowrap;
+    margin: 0 0 6px; padding: 5px 7px; overflow: hidden;
+    border: 1px solid var(--ch-line); border-radius: var(--r-box) !important;
+    background: var(--ch-3);
+}
+#ssp_orb_panel .ssp-ch-draft .ssp-sp { flex: 1 1 auto; min-width: 6px; }
+#ssp_orb_panel .ssp-ch-total { font-size: 10px; color: var(--ch-ink-3); white-space: nowrap; }
+.ssp-ch-say { font-size: 10.5px; color: var(--ch-ink-3); }
+.ssp-ch-say.ok { color: var(--ch-accent-deep); }
+.ssp-ch-say.warn { color: #ffb066; }
+.ssp-ch-draft [data-chfav].on { color: #f0c05a !important; border-color: #f0c05a !important; }
+/* 保存条上我们自己的「保存」按钮 */
+#ssp_orb_panel [data-chsave] { padding: 5px 12px !important; font-size: 12.5px !important; }
+
+/* ---------- 「…更多」展开的那排 ----------
+   图标**全是我们自己画的**，点下去用 chNative() 转发给酒馆原生的按钮。
+   （以前是把原生按钮搬进来 —— 会变孤儿，用户看到"找不到酒馆的按钮"，已彻底改掉。） */
+#ssp_orb_panel .ssp-ch-toolsbar {
+    display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    margin: 0 0 6px; padding: 5px 7px; min-width: 0;
+    border: 1px solid var(--ch-line); border-radius: var(--r-box) !important; background: var(--ch-2);
+}
+#ssp_orb_panel .ssp-ch-toolsbar[hidden] { display: none !important; }
+#ssp_orb_panel [data-chmore].on { color: var(--ch-ink) !important; background: var(--ch-acc-2) !important; border-color: var(--ch-accent-deep) !important; }
+#ssp_orb_panel .ssp-pbtn.danger { color: #ff9aa6 !important; border-color: rgba(255, 120, 140, .6) !important; }
+
+/* ---------- 组框 + 字段行（"工具面板"的骨架） ---------- */
+#ssp_orb_panel .ssp-ch-vgroup {
+    border: 1px solid var(--ch-line); border-radius: var(--r-box) !important;
+    margin-bottom: 8px; overflow: hidden; background: var(--ch-2);
+}
+.ssp-ch-vghead {
+    display: flex; align-items: center; gap: 6px; padding: 5px 9px;
+    background: var(--ch-3); border-bottom: 1px solid var(--ch-line);
+    font-size: 10.5px; letter-spacing: .04em; color: var(--ch-ink-2);
+}
+.ssp-ch-vghead i { font-size: 10px; opacity: .75; color: var(--ch-accent); }
+.ssp-ch-vgbody { display: flex; flex-direction: column; }
+.ssp-ch-vrow {
+    display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px;
+    padding: 6px 9px; min-width: 0;
+}
+.ssp-ch-vrow + .ssp-ch-vrow { border-top: 1px solid var(--ch-line); }
+.ssp-ch-vrow > * { min-width: 0; }
+.ssp-ch-vrow.wide { grid-template-columns: 1fr; gap: 3px; }
+.ssp-ch-vlab {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 4px;
+    font-size: 11.5px; color: var(--ch-ink-2); padding-top: 7px; min-width: 0;
+}
+.ssp-ch-vrow.wide .ssp-ch-vlab { padding-top: 0; font-size: 11px; color: var(--ch-ink-3); }
+.ssp-ch-vlab > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ssp-ch-cnt { font-style: normal; font-size: 9.5px; color: var(--ch-ink-3); opacity: .8; }
+.ssp-ch-vbody { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ssp-ch-hint { font-size: 10.5px; color: var(--ch-ink-3); line-height: 1.5; }
+
+/* 控件：去掉自己的皮，悬停/聚焦才显形（"工具面板"的克制） */
+#ssp_orb_panel .ssp-ch-inp {
+    width: 100%; box-sizing: border-box; min-width: 0; display: block;
+    color: var(--ch-ink) !important; background: transparent !important;
+    border: 1px solid transparent !important; border-radius: var(--r-ctl) !important;
+    padding: 6px 8px !important; font-size: 12.5px !important; line-height: 1.55;
+    font-family: inherit; resize: vertical; outline: none;
+    transition: background .12s, border-color .12s;
+    box-shadow: none !important;
+}
+select.ssp-ch-inp { cursor: pointer; padding-right: 6px !important; }
+.ssp-ch-inp:hover { background: var(--ch-bg) !important; border-color: var(--ch-line) !important; }
+.ssp-ch-inp:focus { background: var(--ch-bg) !important; border-color: var(--ch-accent-deep) !important; }
+.ssp-ch-inp::placeholder { color: var(--ch-ink-3) !important; opacity: .75; }
+.ssp-ch-mini { font-size: 10.5px !important; padding: 3px 8px !important; }
+/* 各字段的合适高度（要写很多字的给足） */
+.ssp-ch-vrow[data-chrow="desc"] .ssp-ch-inp { min-height: 230px; }
+.ssp-ch-vrow[data-chrow="first"] .ssp-ch-inp { min-height: 240px; }
+.ssp-ch-vrow[data-chrow="example"] .ssp-ch-inp { min-height: 200px; }
+.ssp-ch-vrow[data-chrow="notes"] .ssp-ch-inp { min-height: 132px; }
+#ssp_orb_panel .ssp-ch-vrow[data-chrow="persona"] .ssp-ch-inp,
+#ssp_orb_panel .ssp-ch-vrow[data-chrow="scenario"] .ssp-ch-inp { min-height: 96px; }
+#ssp_orb_panel .ssp-ch-vrow[data-chrow="phi"] .ssp-ch-inp,
+#ssp_orb_panel .ssp-ch-vrow[data-chrow="system"] .ssp-ch-inp { min-height: 96px; }
+.ssp-ch-vrow[data-chrow="dpp"] .ssp-ch-inp { min-height: 88px; }
+.ssp-ch-vrow[data-chrow="tags"] .ssp-ch-inp { min-height: 44px; }
+.ssp-ch-vrow[data-chrow="name"] .ssp-ch-inp { font-size: 15px !important; font-weight: 600; }
+
+/* ---------- 头像行 ---------- */
+.ssp-ch-avrow { display: flex !important; align-items: flex-start; gap: 10px; padding: 8px 9px; }
+#ssp_orb_panel .ssp-ch-av { width: 64px; height: 64px; flex: none; border: 1px solid var(--ch-line); border-radius: var(--r-box) !important; overflow: hidden; display: flex; align-items: center; justify-content: center; background: var(--ch-3); }
+/* ⚠️ 头像图必须写死尺寸 + !important：
+   桌面截图实测主题的 `.avatar img` 等全局规则会把原生 `#avatar_load_preview`
+   撑到 400px 宽，把后面的字段全挤出可视区（"面板里只剩一张大头像"）。 */
+#ssp_orb_panel .ssp-ch-av img,
+#ssp_orb_panel .ssp-ch-av #avatar_load_preview {
+    width: 100% !important; height: 100% !important; max-width: 64px !important; max-height: 64px !important;
+    object-fit: cover !important; display: block !important; border-radius: 0 !important; margin: 0 !important;
+}
+#ssp_orb_panel .ssp-ch-av i { color: var(--ch-ink-3); font-size: 20px; }
+.ssp-ch-avbox { min-width: 0; display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; }
+.ssp-ch-avlab { font-size: 11.5px; color: var(--ch-ink-2); }
+.ssp-ch-avbtns { display: flex; flex-wrap: wrap; gap: 5px; }
+/* 原生的 label/file 留在原地不动（我们点我们自己的「换头像」按钮去转发），
+   所以这个空盒子只是个占位，永远为空 */
+.ssp-ch-avtrig { display: none !important; }
+
+/* ---------- 世界书那行 ---------- */
+.ssp-ch-special { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ssp-ch-sv { font-size: 11.5px; color: var(--ch-ink-3); }
+.ssp-ch-sv.on { color: var(--ch-ink); }
+.ssp-ch-nativebar { display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 0 2px; border-top: 1px solid var(--ch-line); margin-top: 2px; }
+.ssp-ch-ovl { margin-top: 6px; }
+.ssp-ch-ovl[hidden] { display: none !important; }
+.ssp-ch-ovl > * { max-height: 62vh; overflow: auto; }
+
+/* ---------- 顶栏 ---------- */
+.ssp-ch-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.ssp-ch-now { font-size: 11.5px; color: var(--ch-ink-3); }
+.ssp-ch-now b { color: var(--ch-ink-2); font-weight: 600; }
+
+/* ---------- 原生框子：藏着但**留在文档里**（保存链路全靠这一点） ----------
+   ⚠️ 用 display:none !important 藏它，但**不搬家、不脱链**：
+      元素还在文档里，FormData 与 $('#id').val() 照常拿到值。 */
+[data-ssp-ch-pin="1"] { display: none !important; }
+
+/* ---------- 选卡：列表视图（一条一行，能排序 / 分组） ----------
+   用户要的：「角色卡…能不能做成列表样式的，可以排序，可以分组」。
+   手机上列表比头像墙省地方得多，而且上下箭头比拖拽稳（拖拽在滚动容器里很难用）。 */
+#ssp_orb_panel .ssp-ch-cardrow { display: flex; align-items: center; gap: 6px; padding: 4px 6px; min-width: 0; }
+#ssp_orb_panel .ssp-ch-grow.on { border-color: var(--ch-accent-deep); box-shadow: inset 2px 0 0 var(--ch-accent); }
+#ssp_orb_panel .ssp-ch-cav {
+    flex: none; width: 30px; height: 30px; overflow: hidden; cursor: pointer;
+    border: 1px solid var(--ch-line); border-radius: var(--r-ctl) !important;
+    display: flex; align-items: center; justify-content: center; background: var(--ch-3);
+}
+#ssp_orb_panel .ssp-ch-cav img { width: 100% !important; height: 100% !important; max-width: 30px !important; max-height: 30px !important; object-fit: cover !important; display: block !important; border-radius: 0 !important; }
+#ssp_orb_panel .ssp-ch-cav i { font-size: 13px; color: var(--ch-ink-3); }
+#ssp_orb_panel .ssp-ch-cname {
+    flex: 1 1 auto; min-width: 0; cursor: pointer; font-size: 12px; color: var(--ch-ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#ssp_orb_panel .ssp-ch-cname b { font-weight: 600; }
+#ssp_orb_panel .ssp-ch-ggedit { display: flex; flex-direction: column; gap: 4px; padding: 0 6px 7px 42px; }
+#ssp_orb_panel .ssp-ch-ggedit .ssp-ch-grow2 { grid-template-columns: 34px minmax(0, 1fr); }
+
+/* ---------- 备选开场白：列表（可排序 / 可分组） ----------
+   为什么不用拖拽：用户手机上用（拖拽在滚动容器里很难用），上下箭头按钮更稳。
+   分组信息存在每条的 `{text, group}` 里（未分组的保持纯字符串），见 index.js。 */
+#ssp_orb_panel .ssp-ch-greets { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+#ssp_orb_panel .ssp-ch-gbar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
+#ssp_orb_panel .ssp-ch-chip {
+    font-size: 10.5px; padding: 2px 8px; cursor: pointer; color: var(--ch-ink-3);
+    border: 1px solid var(--ch-line); border-radius: 10px !important; background: var(--ch-2);
+}
+#ssp_orb_panel .ssp-ch-chip:hover { color: var(--ch-ink); background: var(--ch-3); }
+#ssp_orb_panel .ssp-ch-chip.on { color: var(--ch-ink); background: var(--ch-acc-2); border-color: var(--ch-accent-deep); }
+#ssp_orb_panel .ssp-ch-glist { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+#ssp_orb_panel .ssp-ch-grow { border: 1px solid var(--ch-line); border-radius: var(--r-box) !important; background: var(--ch-2); overflow: hidden; }
+#ssp_orb_panel .ssp-ch-grow.open { border-color: var(--ch-accent-deep); }
+#ssp_orb_panel .ssp-ch-ghead2 {
+    display: flex; align-items: center; gap: 6px; padding: 5px 7px; cursor: pointer; min-width: 0;
+}
+#ssp_orb_panel .ssp-ch-ghead2:hover { background: var(--ch-3); }
+#ssp_orb_panel .ssp-ch-gidx {
+    flex: none; width: 18px; height: 18px; line-height: 18px; text-align: center; font-size: 10px;
+    color: var(--ch-ink-3); border: 1px solid var(--ch-line); border-radius: 3px !important;
+}
+#ssp_orb_panel .ssp-ch-gtxt {
+    flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: var(--ch-ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#ssp_orb_panel .ssp-ch-dim { color: var(--ch-ink-3); font-style: normal; }
+#ssp_orb_panel .ssp-ch-gtag {
+    flex: none; font-size: 10px; padding: 1px 6px; color: var(--ch-ink-2);
+    border: 1px solid var(--ch-line); border-radius: 9px !important; background: var(--ch-3);
+}
+#ssp_orb_panel .ssp-ch-gops { flex: none; display: flex; align-items: center; gap: 3px; }
+#ssp_orb_panel .ssp-ch-icon { width: 22px !important; height: 22px !important; padding: 0 !important; justify-content: center !important; }
+#ssp_orb_panel .ssp-ch-gbody2 { display: flex; flex-direction: column; gap: 4px; padding: 0 7px 7px; }
+#ssp_orb_panel .ssp-ch-gbody2 .ssp-ch-inp { min-height: 150px; }
+#ssp_orb_panel .ssp-ch-grow2 { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 6px; }
+#ssp_orb_panel .ssp-ch-grow2 > span { font-size: 11px; color: var(--ch-ink-3); }
+#ssp_orb_panel .ssp-ch-grow2 .ssp-ch-inp { min-height: 0 !important; padding: 4px 7px !important; }
+#ssp_orb_panel .ssp-ch-empty { font-size: 11px; color: var(--ch-ink-3); padding: 6px 2px; line-height: 1.6; }
+
+/* ---------- 手机：标签栏收窄、保存条不再吸顶（屏本来就小） ---------- */
+@media (max-width: 560px), (pointer: coarse) {
+    .ssp-ch-vrow { grid-template-columns: 78px minmax(0, 1fr); gap: 6px; padding: 6px 8px; }
+    .ssp-ch-vlab { font-size: 11px; }
+    .ssp-ch-tab { padding: 6px 9px; }
+    .ssp-ch-draft { position: static; }
+    .ssp-ch-vrow[data-chrow="desc"] .ssp-ch-inp { min-height: 190px; }
+    .ssp-ch-vrow[data-chrow="first"] .ssp-ch-inp { min-height: 200px; }
+}
+@media (max-width: 380px) {
+    .ssp-ch-vrow { grid-template-columns: 1fr; }
+    .ssp-ch-vlab { padding-top: 0; }
+}

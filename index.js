@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 鼠鼠面板工坊 ShuShu Panel —— v0.3
  * ---------------------------------------------------------------------------
  * 把酒馆「角色管理面板」做成可装配的模块：
@@ -3713,6 +3713,7 @@ function restoreAll() {
     newEls.clear();
     restoreDetailHeader();                       // 角色详情页版头也还原
     restoreCardStyle();                          // 角色卡样式 + 高清头像也一起撤掉
+    try { orbEditorUnmount(); } catch (e) { }    // 借来的写卡块还家（关扩展时）
     setSortMode(false);                          // 退出拖拽排序模式
     modEls.forEach(rec => rec.root.remove());
     modEls.clear();
@@ -4488,7 +4489,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.45';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.53';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5204,7 +5205,9 @@ const ORB_CAT_ALL = '__all__';
 var orbEdge = { right: 18, bottom: 96 };   // 球离右边/下边的距离（贴边靠它）
 var orbOpenNow = false;
 var orbEditing = null;
-var orbTab = 'notes';       // 当前模块页（模块容器：以后加功能只加标签页）
+var orbTab = 'pick';         // 当前模块页（模块容器：以后加功能只加标签页）
+/* ⚠️ 默认停在「选卡」：写卡/管卡是口袋现在的主线入口（用户要求把制作和写卡搬进来）。
+   以前默认是番外，加页签后用户打开球会看到"不是自己刚加的那个"，容易以为没生效。 */
 var orbBinding = null;      // 正在给哪个面具选绑定角色（null = 不在绑定模式）
 var orbPersonaEdit = null;  // 正在编辑哪个面具（null = 不在编辑模式）
 var orbPSearch = '';        // 面具页的搜索词（角色卡名 / 面具名 / 描述）
@@ -8355,10 +8358,1499 @@ function orbInsert(text) {
     return true;
 }
 
+/* ============================ 写卡（把酒馆的写卡块搬进口袋）============================
+   用户诉求：「在角色管理面板写卡太麻烦」→ 把**制作/写卡**搬进鼠鼠口袋（其余不动）。
+   做法：把酒馆自己的 **`#rm_ch_create_block`**（`<form id="form_create">` 整块，159 行）
+   临时搬进「写卡」页签，关掉面板/切走页签再**原地还家**。
+   为什么能这么干（核过酒馆源码，不是猜）：
+     · 保存完全按 id 取值：`script.js:9695 new FormData($('#form_create').get(0))`，
+       字段全是 `#character_name_pole` / `#description_textarea` … → **搬走不影响保存**
+     · 酒馆只有**一行**代码依赖它在右侧抽屉里：`script.js:8799`
+       `switchMenu && selectRightMenuWithAnimation('rm_ch_create_block')` → 我们把它拦成"进口袋"
+     · `#advanced_div`（高级编辑）里的字段是**运行时注入**的，跟着块走，不用管
+   风险与对策：
+     · 酒馆想把块收回去时，我们的选择器只认"它在不在我们这儿"，不再动它 → 不会把它搬丢
+     · 面板关掉 / 切页签 / 扩展关闭 → 一律还家（`orbEditorUnmount`）
+   ========================================================================== */
+/* ============================ 写卡：自设计「写卡工作台」（v1.31.50 重做）============================
+   用户原话：「我的意思是保留接口用来连接酒馆原生功能，面板单独设计，怎么方便怎么来」。
+   所以这一版把上一版（v1.31.46~49 那套"把酒馆原生 DOM 搬进分页"）**整个删掉**，改成两件事：
+
+   ① **面板自己设计**：字段由我们自己画（VAULT_SCHEMA 一张表），不再搬酒馆的容器/标题/抽屉。
+      好处是上一版那些坑一次性消失：重画把字段带进坟墓、flex 基准宽度把作者注释挤成 88px、
+      分页与直排两套样式打架、摘 id 找原生元素的骚操作……
+   ② **只留一层接口**：原生控件全部留在 `#form_create` / `#character_popup` 里不动，
+      用 pin 样式藏起来（元素还在文档里 → FormData 拿得到、`$('#id').val()` 读得到、
+      酒馆的回填写得进），我们只做三件事：
+        · 开卡 **pull**：把我的输入框按原生元素的值填上（值以文档里那份为准）
+        · 保存前 **push**：把我的输入框写回原生元素（酒馆随后照旧 `new FormData()` 提交）
+        · 原生按钮 **触发**：头像 / 标签 / 备选开场白 / 世界书 / 提示词覆盖 → 点酒馆自己那颗
+
+   ⚠️ 三条不许动的底线（改之前先读 README 的"写卡"章节）：
+   1) `#description_textarea` 这些元素**必须留在文档里** —— 酒馆是 `new FormData($('#form_create')[0])`
+      + `$('#description_textarea').val()` 直接读 DOM；拿掉或脱链就等于把卡写一半。
+   2) push 必须发生在酒馆的 submit 处理**之前** → 监听 `document` 捕获阶段的 `submit`，
+      捕获永远跑在 jQuery 的委托（`$('#form_create').on('submit', …)`）前面。
+   3) 我的按钮**不能**冒充提交控件：`#create_button` 是 `type=submit`，它一定留在原生表单里，
+      我们只在外面 `click()` 它；我们自己绝不放 submit 按钮。
+   ========================================================================== */
+
+const VAULT_PIN = 'ssp-ch-native';
+/** 酒馆那两个容器的 id（**接口**，永不能改）：
+    · `rm_ch_create_block` = 写卡块（`#rm_ch_create_block`，"新建/编辑角色"那一整块）
+    · `character_popup`    = 高级定义弹窗（里面装着提示词覆盖、深度提示词、话痨度、示例对话…）
+    ⚠️ 之前这两个常量在我重写这一段时**被弄丢了**（只剩引用、没有声明）→ `getElementById(undefined的常量)`
+       会抛 ReferenceError，被各处 try/catch 吞掉 → 表现是"pin 完全没生效"+"原生界面状态怪怪的"。
+       这类"常量丢了"的 bug 很难从现象上看出来，所以**常量声明都集中放这里**。 */
+const CH_EDIT_ID = 'rm_ch_create_block';
+const CH_POPUP_ID = 'character_popup';
+
+/* 字段表：
+   id   = 酒馆原生元素 id（**接口**，永不能改）
+   k    = 我们自己的控件键（pull/push 靠它找控件）
+   mode = textarea | input | number | select | special
+   hint = 行下面的小灰字 */
+const VAULT_SCHEMA = [
+    { id: 'character_name_pole', k: 'name', label: '卡名', mode: 'input', ph: '这张卡叫什么（必填）' },
+
+    { id: 'creator_notes_textarea', k: 'notes', label: '作者注释', group: 'notes', mode: 'textarea', rows: 6, ph: '写卡人自己看的说明／给用户的使用提示' },
+    { id: 'creator_textarea', k: 'creator', label: '作者', group: 'notes', mode: 'input', ph: '你的名字 / 联系方式' },
+    { id: 'character_version_textarea', k: 'ver', label: '版本', group: 'notes', mode: 'input', ph: '1.0' },
+    { id: 'tags_textarea', k: 'tags', label: '标签', group: 'notes', mode: 'textarea', rows: 2, ph: '逗号分隔，如：日常, 治愈' },
+    { id: 'character_world', k: 'world', label: '世界书', group: 'notes', mode: 'special', ph: '未绑定' },
+
+    { id: 'description_textarea', k: 'desc', label: '角色描述', group: 'persona', mode: 'textarea', rows: 11, ph: '外貌、身份、性格、经历、说话习惯……（给 AI 看的核心设定）' },
+    { id: 'personality_textarea', k: 'persona', label: '性格摘要', group: 'persona', mode: 'textarea', rows: 5, ph: '一句话人设（很多卡留空也不用）' },
+    { id: 'scenario_pole', k: 'scenario', label: '场景', group: 'persona', mode: 'textarea', rows: 5, ph: '故事发生在哪、现在什么状况' },
+
+    { id: 'firstmessage_textarea', k: 'first', label: '开场白', group: 'dialog', mode: 'textarea', rows: 12, ph: '角色说的第一句话，会直接开一场新聊天' },
+    { id: 'mes_example_textarea', k: 'example', label: '对话示例', group: 'dialog', mode: 'textarea', rows: 10, ph: '示例对话用 <START> 分隔（酒馆的写法）' },
+
+    { id: 'system_prompt_textarea', k: 'system', label: '主提示词覆盖', group: 'adv', mode: 'textarea', rows: 5, hint: '留空＝用全局主提示词' },
+    { id: 'post_history_instructions_textarea', k: 'phi', label: '历史后指令', group: 'adv', mode: 'textarea', rows: 5, hint: '插在对话历史之后，优先级很高' },
+    { id: 'depth_prompt_prompt', k: 'dpp', label: '深度提示词', group: 'adv', mode: 'textarea', rows: 4 },
+    { id: 'depth_prompt_depth', k: 'dpd', label: '深度', group: 'adv', mode: 'number', min: 0, max: 9999 },
+    { id: 'depth_prompt_role', k: 'dpr', label: '角色', group: 'adv', mode: 'select' },
+    { id: 'talkativeness_slider', k: 'talk', label: '话痨度', group: 'adv', mode: 'select' },
+];
+
+/* 我们自己的分页：按"写卡时先想什么"排，不按酒馆的字段顺序 */
+const CH_TABS = [
+    { id: 'persona', name: '人设', icon: 'fa-user-pen' },
+    { id: 'dialog', name: '对话', icon: 'fa-comments' },
+    { id: 'notes', name: '卡信息', icon: 'fa-circle-info' },
+    { id: 'adv', name: '高级', icon: 'fa-sliders' },
+];
+let chTab = 'persona';
+
+/** 分组标题（组头那行） */
+const VAULT_GROUPS = {
+    base: ['这张卡是谁', 'fa-id-card'],
+    notes: ['作者注释 · 卡列表里显示的那段简介', 'fa-comment-dots'],
+    persona: ['人设 · 给 AI 看的内容', 'fa-user-pen'],
+    dialog: ['对话 · 开场白与示例', 'fa-comments'],
+    adv: ['Prompt 覆盖 · 高级', 'fa-sliders'],
+};
+
+/** 分页 → 这张表里要显示哪些字段 */
+function chTabFields(tab) {
+    const pick = (g) => VAULT_SCHEMA.filter(f => (f.group || 'base') === g);
+    if (tab === 'persona') return pick('base').concat(pick('persona'));
+    if (tab === 'dialog') return pick('dialog');
+    if (tab === 'notes') return pick('notes');
+    return pick('adv');
+}
+/** 一个字段属于哪张表（原生 input 派发回来时用得上） */
+function chFldById(id) { return VAULT_SCHEMA.find(f => f.id === id) || null; }
+
+/* ---------------- 接口层①②：pull / push ---------------- */
+
+/** 值从**文档里那份**读（`getElementById`，不是我们手里的缓存引用） */
+function chVal(id) { const el = document.getElementById(id); return el ? el.value : ''; }
+
+/** 把文档里那份值抄回我的控件（**不动 chDirty 记账**）。
+    ⚠️ 切页签会重画分页 → 新控件是空的，必须抄回来，否则"切走再切回，字没了"（e2e 抓到）。
+       值以**原生元素**为准：用户的每一次输入都已经同步过去了（见 chBindNativeOnce）。 */
+function chSetMine() {
+    let n = 0;
+    VAULT_SCHEMA.forEach(f => {
+        if (f.mode === 'special') return;
+        const el = document.getElementById(f.id);
+        const mine = chMine(f.k);
+        if (!el || !mine) return;
+        const v = String(el.value == null ? '' : el.value);
+        if (mine.value !== v) mine.value = v;
+        n += 1;
+    });
+    try { chCount(); } catch (e) { }
+    return n;
+}
+
+/** pull：原生 → 我的控件（开卡/切卡/新建时调） */
+function chPull(quiet) {
+    chCache = {};
+    let n = 0;
+    VAULT_SCHEMA.forEach(f => {
+        const el = document.getElementById(f.id);
+        if (!el) return;
+        chCache[f.id] = String(el.value == null ? '' : el.value);
+    });
+    n = chSetMine();
+    try { chFillSelects(); } catch (e) { }                // 话痨度 / 深度角色两个下拉的选项
+    try { chRefreshSpecial(); } catch (e) { }
+    try { chRefreshAvatars(); } catch (e) { }
+    try { chCount(); } catch (e) { }
+    try { chRefreshHead(); } catch (e) { }
+    try { chSyncFav(); } catch (e) { }
+    chDirty = {};
+    if (!quiet) chSay('已读取这张卡的内容');
+    return n;
+}
+
+/** push：我的控件 → 原生（保存前调）。
+    ⚠️ 只在"用户动过"时才写（chDirty 记账），绝不把空值盖到原生上
+       —— 否则没写过字的字段会被清空，那是**改坏卡**。 */
+function chPush(quiet) {
+    if (chPushing) return 0;
+    chPushing = true;
+    let n = 0;
+    try {
+        VAULT_SCHEMA.forEach(f => {
+            if (!(f.id in chDirty)) return;               // 没动过就不碰
+            const mine = chMine(f.k);
+            if (!mine) return;
+            const el = document.getElementById(f.id);
+            if (!el) return;
+            const v = (mine.value == null) ? '' : String(mine.value);
+            if (el.value !== v) {
+                el.value = v;
+                /* ⚠️ 派发要用 bubbles:false：冒泡到 document 会被我们自己的 onNative
+                   抓住再抄回我的框（值一样所以不炸，但白跑一圈） */
+                try { el.dispatchEvent(new Event('input', { bubbles: false })); } catch (e) { }
+                try { el.dispatchEvent(new Event('change', { bubbles: false })); } catch (e) { }
+            }
+            n += 1;
+        });
+        /* 备选开场白：不在上面那 16 个字段里，单独记一笔（它改的是活数组，见 chGreetSave） */
+        if (chGreetDirty) { try { chGreetPush(); } catch (e) { } n += 1; }
+    } finally { chPushing = false; }
+    /* 标签：原生表单收的是 `#tags_textarea`（我们那张），但卡列表里的 ★／筛选栏读的是
+       `#tagList` 里的标签节点 → 顺手同步一份显示 */
+    try { if ('tags_textarea' in chDirty) chSyncTagChips(); } catch (e) { }
+    if (!quiet && n) chSay('已把 ' + n + ' 处改动写回酒馆');
+    return n;
+}
+
+/** 标签 chips 同步（只做显示层，不碰酒馆的 tag map 逻辑） */
+function chSyncTagChips() {
+    const host = document.getElementById('tagList');
+    if (!host) return false;
+    const raw = chVal('tags_textarea');
+    const parts = String(raw || '').split(',').map(s => s.trim()).filter(Boolean);
+    host.innerHTML = parts.map(t => '<div class="tag">' + esc(t) + '</div>').join('');
+    return true;
+}
+
+/* ---------------- 我的控件 ---------------- */
+function chMine(k) { return document.querySelector('#ssp_orb_panel [data-chk="' + k + '"]'); }
+
+/** 控件渲染：一律带 data-chk（pull/push 都靠它找），data-chid 记原生 id */
+function chFldHTML(f) {
+    const a = [
+        'data-chk="' + f.k + '"',
+        'data-chid="' + f.id + '"',
+        'placeholder="' + esc(f.ph || '') + '"',
+        'autocomplete="off"',
+        'spellcheck="false"',
+    ].join(' ');
+    if (f.mode === 'textarea') return '<textarea class="ssp-ch-inp" rows="' + (f.rows || 5) + '" ' + a + '></textarea>';
+    if (f.mode === 'number') return '<input class="ssp-ch-inp" type="number" min="' + (f.min == null ? 0 : f.min) + '" max="' + (f.max == null ? 9999 : f.max) + '" ' + a + '>';
+    if (f.mode === 'select') return '<select class="ssp-ch-inp" ' + a + '></select>';
+    if (f.mode === 'special') {
+        return '<div class="ssp-ch-special">'
+            + '<span class="ssp-ch-sv" data-chsv="' + f.k + '">未绑定</span>'
+            + '<span class="ssp-pbtn ssp-ch-mini" data-choverlay="1" title="打开酒馆自己的世界书选择器"><i class="fa-solid fa-book-atlas"></i> 选择世界书</span>'
+            + '<span class="ssp-pbtn ssp-ch-mini" data-choverlay="2" title="打开酒馆自己的额外世界书（charLore）"><i class="fa-solid fa-layer-group"></i> 额外</span>'
+            + '</div>';
+    }
+    return '<input class="ssp-ch-inp" type="text" ' + a + '>';
+}
+
+function chRowHTML(f) {
+    const wide = (f.mode === 'textarea') || (f.mode === 'special');
+    const tail = (f.id === 'tags_textarea')
+        ? '<datalist id="ssp_ch_tags_pool"></datalist>'
+        + '<div class="ssp-ch-hint">标签用**逗号**分隔。写过的标签会被记下来，下次点输入框就有候选。</div>'
+        : (f.id === 'firstmessage_textarea' ? '<div data-chgreetslot="1"></div>' : '');
+    return '<div class="ssp-ch-vrow' + (wide ? ' wide' : '') + '" data-chrow="' + f.k + '">'
+        + '<div class="ssp-ch-vlab"><span>' + esc(f.label) + '</span>'
+        + (f.mode === 'textarea' ? '<i class="ssp-ch-cnt" data-chcnt="' + f.k + '"></i>' : '')
+        + '</div>'
+        + '<div class="ssp-ch-vbody">' + chFldHTML(f) + tail
+        + (f.hint ? '<div class="ssp-ch-hint">' + f.hint + '</div>' : '')
+        + '</div></div>';
+}
+
+/** 分页内容：按分组搭"组框 + 行"（对话页不留组头，省一行的位置） */
+function chGroupsHTML(tab) {
+    const fs = chTabFields(tab);
+    const groups = [];
+    fs.forEach(f => {
+        const g = f.group || 'base';
+        let it = groups.find(x => x.g === g);
+        if (!it) { it = { g: g, fs: [] }; groups.push(it); }
+        it.fs.push(f);
+    });
+    return groups.map(it => {
+        const meta = VAULT_GROUPS[it.g];
+        const ghead = (tab === 'dialog' && it.g === 'dialog')
+            ? ''
+            : '<div class="ssp-ch-vghead"><i class="fa-solid ' + ((meta && meta[1]) || 'fa-circle') + '"></i>'
+            + esc((meta && meta[0]) || '字段') + '</div>';
+        /* 人设页最上面那格是头像（触发酒馆原生的选图 + 裁剪） */
+        const avrow = (it.g === 'base') ? chAvatarRowHTML() : '';
+        return '<div class="ssp-ch-vgroup" data-chg="' + it.g + '">' + ghead
+            + '<div class="ssp-ch-vgbody">' + avrow + it.fs.map(chRowHTML).join('') + '</div></div>';
+    }).join('');
+}
+
+/** 头像行：预览 + 我们的按钮（转发到酒馆原生控件）+ 被藏起来的原生 label/file（接口层③） */
+function chAvatarRowHTML() {
+    return '<div class="ssp-ch-vrow ssp-ch-avrow wide" data-chavrow="1">'
+        + '<div class="ssp-ch-av" data-chavprev="1"><i class="fa-solid fa-user"></i></div>'
+        + '<div class="ssp-ch-avbox">'
+        + '<div class="ssp-ch-avlab">头像</div>'
+        + '<div class="ssp-ch-avbtns">'
+        + '<span class="ssp-pbtn ssp-ch-mini" data-chavbtn="1"><i class="fa-solid fa-image"></i> 换头像</span>'
+        + '<span class="ssp-ch-avtrig" data-chavtrig="1"></span>'
+        + '</div>'
+        + '<div class="ssp-ch-hint">点「换头像」走的是酒馆自己的选图与裁剪（png / jpg；webp 酒馆会自己转）</div>'
+        + '</div></div>';
+}
+
+/** 切页签：**只重画分页内容**，标题栏 / 保存条 / 原生那排按钮一律不动
+    ⚠️ 这是上一版最大的教训 —— 整块重画会把原生控件带进坟墓（我们会重挂，但原生那排的
+       事件与状态不好恢复），所以能只换分页就只换分页。 */
+function chSyncTabUI() {
+    const panel = document.getElementById('ssp_orb_panel');
+    if (!panel) return false;
+    panel.querySelectorAll('[data-orb-cftab]').forEach(b => b.classList.toggle('on', b.dataset.orbCftab === chTab));
+    panel.querySelectorAll('[data-orb-cfpane]').forEach(p => p.classList.toggle('on', p.dataset.orbCfpane === chTab));
+    return true;
+}
+function chPanesLoad(force) {
+    const panel = document.getElementById('ssp_orb_panel');
+    if (!panel) return false;
+    panel.querySelectorAll('[data-orb-cfpane]').forEach(p => {
+        const t = p.dataset.orbCfpane;
+        if (force || !p.firstElementChild) p.innerHTML = chGroupsHTML(t);
+    });
+    chSyncTabUI();
+    /* ⚠️ 分页是重画出来的 → 控件都是空的，必须把值抄回来（切走再切回不能丢字） */
+    try { chSetMine(); } catch (e) { }
+    try { chRefreshAvatars(); } catch (e) { }
+    try { chFillSelects(); } catch (e) { }
+    try { chCount(); } catch (e) { }
+    /* 备选开场白：把"列表"挂进开场白那一行下面的槽里（分页内容里只放了个占位 div） */
+    try {
+        panel.querySelectorAll('[data-chgreetslot]').forEach(slot => {
+            if (slot.firstElementChild) return;
+            const box = document.createElement('div');
+            box.className = 'ssp-ch-greets';
+            box.setAttribute('data-chgreets', '1');
+            slot.appendChild(box);
+        });
+        chGreetRender();
+    } catch (e) { }
+    try { chTagsDatalist(); } catch (e) { }
+    return true;
+}
+/** 骨架即将被换掉：先 push + 回收原生浮层，并记下"重画后要重挂写卡页" */
+let chPanesLoadedTab = false;
+function chUnmountFrameSoft() {
+    if (orbTab !== 'editor') return false;
+    try { chPush(true); } catch (e) { }
+    try { chOverlayClose(); } catch (e) { }
+    chPanesLoadedTab = true;
+    return true;
+}
+/** 面板关掉时调（bindOrb 里用它）：彻底放开 pin 与浮层 */
+function chDirtyReset() { chDirty = {}; chGreetDirty = false; return true; }
+/** 保存成功后清记账：这些改动已经进卡了，不该再拿去 push */
+function chPanesClear() { chDirty = {}; chGreetDirty = false; return true; }
+
+/* 写卡页签的两个"一次性"标记：骨架铺好了 / 值读进来了。
+   ⚠️ 必须在**重画前**先记下来（重画时 DOM 还是旧的那一份），见 renderOrbPanel。 */
+let chSkelOk = false;
+let chPulledOnce = false;
+
+/* ---------------- 备选开场白：自设计的**列表**（可排序 / 可分组） ----------------
+   数据在哪（核过 script.js）：
+     · 编辑已有卡：`characters[chid].data.alternate_greetings`（**活对象**，数组）
+     · 新建卡：`create_save.alternate_greetings`
+   保存时（script.js:9815 / 9724）酒馆会 `formData.delete('alternate_greetings')`，
+   再从这个数组一条条 append → 所以我们只管改这个数组，然后调 `chSave()` 提交就行。
+   ⚠️⚠️ **这个数组只吃字符串**（血泪教训）：
+        我先试过把一条变成 `{ text, group }` 对象 —— 数组里确实是对象（e2e 里 typeof 是 object），
+        但**服务端把它强转成字符串存了**（`String({})` → 卡的 JSON 里出现 `"[object Object]"`，
+        原文直接丢了）。所以分组信息**必须塞进字符串本身**。
+   做法：分组时把内容写成 `[分组名]正文`（marker 在最前，分组名里不能有 `[]` 和换行）。
+        · 不加前缀 = 未分组，看起来就是普通字符串 → 第三方客户端读到的还是干净原文；
+        · marker 是我们自己认的，酒馆只当普通文本（原生那个备选开场白框里会看到 `[日常]你好`，
+          反而在原生界面里也看得出分组，不算坏事）。 */
+const CH_GREET_MARK = /^\[([^\]\r\n]{1,24})\]\s?/;      // `[分组]正文`
+let chGreetOpen = -1;          // 正在展开编辑的是第几条
+let chGreetPick = '';          // 分组筛选：'' = 全部
+let chGreetDirty = false;      // 备选开场白改过没有（它不在 chDirty 那套记账里）
+
+function chCreateSave() { try { return (getContext() || {}).create_save || null; } catch (e) { return null; } }
+function chCreating() {
+    const f = document.getElementById('form_create');
+    return !!(f && String(f.getAttribute('actiontype') || '') === 'createcharacter');
+}
+/** 当前角色的活数组（拿不到就返回 null，不抛） */
+function chGreetArr() {
+    try {
+        if (chCreating()) {
+            const cs = chCreateSave();
+            if (!cs) return null;
+            if (!Array.isArray(cs.alternate_greetings)) cs.alternate_greetings = [];
+            return cs.alternate_greetings;
+        }
+        const ctx = getContext() || {};
+        const ch = (ctx.characters || [])[ctx.characterId];
+        if (!ch) return null;
+        if (!ch.data) ch.data = {};
+        if (!Array.isArray(ch.data.alternate_greetings)) ch.data.alternate_greetings = [];
+        return ch.data.alternate_greetings;
+    } catch (e) { return null; }
+}
+/** 原始串（带 marker 的那份，提交给酒馆的就是它） */
+function chGreetRaw(g) { return (typeof g === 'string') ? g : String((g && (g.text || g)) || ''); }
+/** 去掉 marker 的正文 */
+function chGreetText(g) { return chGreetRaw(g).replace(CH_GREET_MARK, ''); }
+/** marker 里的分组名（没有就空串） */
+function chGreetGroup(g) {
+    const m = CH_GREET_MARK.exec(chGreetRaw(g));
+    return m ? String(m[1]).trim() : '';
+}
+/** 按「分组 + 正文」拼回一条（分组空 → 不带 marker，纯正文） */
+function chGreetPack(text, group) {
+    const gp = String(group || '').trim().replace(/[\[\]\r\n]/g, '');
+    const tx = String(text == null ? '' : text);
+    return gp ? ('[' + gp + ']' + tx) : tx;
+}
+function chGreetSetText(i, text) {
+    const a = chGreetArr(); if (!a || !(i in a)) return false;
+    a[i] = chGreetPack(text, chGreetGroup(a[i]));
+    return true;
+}
+function chGreetSetGroup(i, grp) {
+    const a = chGreetArr(); if (!a || !(i in a)) return false;
+    a[i] = chGreetPack(chGreetText(a[i]), grp);
+    return true;
+}
+function chGreetMove(i, dir) {
+    const a = chGreetArr(); if (!a) return false;
+    const j = i + dir;
+    if (i < 0 || j < 0 || i >= a.length || j >= a.length) return false;
+    const t = a[i]; a[i] = a[j]; a[j] = t;
+    chGreetOpen = j;
+    return chGreetSave();
+}
+function chGreetDel(i) {
+    const a = chGreetArr(); if (!a || !(i in a)) return false;
+    a.splice(i, 1);
+    if (chGreetOpen >= a.length) chGreetOpen = -1;
+    return chGreetSave();
+}
+function chGreetAdd() {
+    const a = chGreetArr();
+    if (!a) { toast('拿不到这张卡的备选开场白（先在酒馆里打开一次它）', 'warning'); return false; }
+    a.push('');
+    chGreetOpen = a.length - 1;
+    chGreetPick = '';
+    return chGreetSave();
+}
+/** 分组名清单（按出现顺序，去重） */
+function chGreetGroups() {
+    const a = chGreetArr() || [];
+    const out = [];
+    a.forEach(g => { const k = chGreetGroup(g); if (k && out.indexOf(k) < 0) out.push(k); });
+    return out;
+}
+/** 数组改了之后：立刻落回"要提交的那份" + 重画列表 + 同步字数。
+    ⚠️ 备选开场白的改动**不在 VAULT_SCHEMA 里**（不是那 16 个输入框），
+       所以 `chDirty` 那套记账抓不到它 —— 必须自己记 `chGreetDirty`，
+       否则"只改了开场白就点保存"会一个字都不提交（e2e 抓到过）。 */
+function chGreetSave() {
+    chGreetDirty = true;
+    try { chGreetPush(); } catch (e) { }
+    chGreetRender();   // 整块重画：分组 chip / datalist / 预览 都要跟着变
+    try { chCount(); } catch (e) { }
+    return true;
+}
+/** 把"备选开场白"同步进原生表单：给 `#tags_textarea` 式的原生字段一个即时反馈不值得，
+    真正要保证的是**提交时一定带上**（chSave 会读活数组）。这里只把原生的那个模板节点标个计数，
+    方便调试与 e2e 观察。 */
+function chGreetPush() {
+    try {
+        const tpl = document.querySelector('#alternate_greetings_template .alternate_greetings_list');
+        const a = chGreetArr() || [];
+        if (tpl) tpl.dataset.sspCount = String(a.length);
+    } catch (e) { }
+    return true;
+}
+function chGreetPreview(t) {
+    /* 传进来的是原始串，先剥掉 [分组] 前缀再预览 */
+    const s = String(t || '').replace(/\s+/g, ' ').trim();
+    return s ? esc(s.slice(0, 46)) : '<i class="ssp-ch-dim">（还没写内容）</i>';
+}
+function chGreetRowsHTML() {
+    const a = chGreetArr() || [];
+    const show = a.map((g, i) => ({ g: g, i: i })).filter(x => !chGreetPick || chGreetGroup(x.g) === chGreetPick);
+    if (!show.length) {
+        return '<div class="ssp-ch-empty">' + (a.length
+            ? '这个分组下没有开场白（点上面的「全部」看其它）'
+            : '还没有备选开场白：点「加一条」开始写（新聊天时它们会变成开场白的左右滑动）') + '</div>';
+    }
+    return show.map(x => {
+        const g = x.g, i = x.i;
+        const grp = chGreetGroup(g);
+        const open = (chGreetOpen === i);
+        return '<div class="ssp-ch-grow' + (open ? ' open' : '') + '" data-chgrow="' + i + '">'
+            + '<div class="ssp-ch-ghead2" data-chgtoggle="' + i + '">'
+            + '<span class="ssp-ch-gidx">' + (i + 1) + '</span>'
+            + '<span class="ssp-ch-gtxt">' + chGreetPreview(chGreetText(g)) + '</span>'
+            + (grp ? '<span class="ssp-ch-gtag">' + esc(grp) + '</span>' : '')
+            + '<span class="ssp-ch-gops">'
+            + '<span class="ssp-pbtn ssp-ch-mini ssp-ch-icon" data-chgup="' + i + '" title="上移"><i class="fa-solid fa-chevron-up"></i></span>'
+            + '<span class="ssp-pbtn ssp-ch-mini ssp-ch-icon" data-chgdown="' + i + '" title="下移"><i class="fa-solid fa-chevron-down"></i></span>'
+            + '<span class="ssp-pbtn ssp-ch-mini ssp-ch-icon" data-chgdel="' + i + '" title="删掉这条"><i class="fa-solid fa-trash"></i></span>'
+            + '</span></div>'
+            + (open
+                ? '<div class="ssp-ch-gbody2">'
+                + '<textarea class="ssp-ch-inp" rows="9" data-chgtext="' + i + '" placeholder="这条开场白的内容（新聊天时作为开场白的备选滑动）">' + esc(chGreetText(g)) + '</textarea>'
+                + '<label class="ssp-ch-grow2"><span>分组</span>'
+                + '<input class="ssp-ch-inp" type="text" list="ssp_ch_ggroups" data-chggroup="' + i + '" value="' + esc(grp) + '" placeholder="（留空＝未分组）如：日常 / 黑化 / 支线">'
+                + '</label></div>'
+                : '')
+            + '</div>';
+    }).join('');
+}
+/** 只更新"筛选条 + 候选清单"（**不碰行列表**）——
+    改分组时用这个：行列表一重画，用户正在输入的那一格就被销毁、焦点会掉（体验很糟）。 */
+function chGreetChipsRender() {
+    const host = document.querySelector('#ssp_orb_panel [data-chgreets]');
+    if (!host) return false;
+    const groups = chGreetGroups();
+    const bar = host.querySelector('.ssp-ch-gbar');
+    if (bar) {
+        bar.innerHTML = ['<span class="ssp-ch-chip' + (chGreetPick ? '' : ' on') + '" data-chgpick="">全部</span>']
+            .concat(groups.map(k => '<span class="ssp-ch-chip' + (chGreetPick === k ? ' on' : '') + '" data-chgpick="' + esc(k) + '">' + esc(k) + '</span>'))
+            .join('') + '<span class="ssp-sp"></span>'
+            + '<span class="ssp-pbtn ssp-ch-mini" data-chgadd="1"><i class="fa-solid fa-plus"></i> 加一条</span>';
+    }
+    const dl = document.getElementById('ssp_ch_ggroups');
+    if (dl) dl.innerHTML = groups.map(k => '<option value="' + esc(k) + '"></option>').join('');
+    return true;
+}
+/** 只重画行列表（筛选栏 / datalist 不动，这样改分组时**不会打断正在输入的那一格**） */
+function chGreetRowsRender() {
+    const host = document.querySelector('#ssp_orb_panel [data-chgreets]');
+    if (!host) return false;
+    const row = host.querySelector('.ssp-ch-glist');
+    if (row) row.innerHTML = chGreetRowsHTML();
+    return true;
+}
+function chGreetRender() {
+    const host = document.querySelector('#ssp_orb_panel [data-chgreets]');
+    if (!host) return false;
+    const groups = chGreetGroups();
+    const chips = ['<span class="ssp-ch-chip' + (chGreetPick ? '' : ' on') + '" data-chgpick="">全部</span>']
+        .concat(groups.map(k => '<span class="ssp-ch-chip' + (chGreetPick === k ? ' on' : '') + '" data-chgpick="' + esc(k) + '">' + esc(k) + '</span>'))
+        .join('');
+    host.innerHTML = ''
+        + '<datalist id="ssp_ch_ggroups">' + groups.map(k => '<option value="' + esc(k) + '"></option>').join('') + '</datalist>'
+        + '<div class="ssp-ch-gbar">' + chips
+        + '<span class="ssp-sp"></span>'
+        + '<span class="ssp-pbtn ssp-ch-mini" data-chgadd="1"><i class="fa-solid fa-plus"></i> 加一条</span>'
+        + '</div>'
+        + '<div class="ssp-ch-glist">' + chGreetRowsHTML() + '</div>';
+    return true;
+}
+
+/** 备选开场白那一行（放在「对话」分页、开场白下面） */
+function chGreetRowHTML() {
+    const a = chGreetArr() || [];
+    return '<div class="ssp-ch-vrow wide" data-chgreetrow="1">'
+        + '<div class="ssp-ch-vlab"><span>备选开场白</span>'
+        + '<i class="ssp-ch-cnt">' + (a.length ? (a.length + ' 条') : '') + '</i></div>'
+        + '<div class="ssp-ch-vbody"><div class="ssp-ch-greets" data-chgreets="1"></div></div></div>';
+}
+
+/* ---------------- 标签：自己画的输入框 + 酒馆现成标签的自动补全 ----------------
+   为什么要自己画：原生那个「标签补全」在口袋里点不到实处（`.tag_controls` 那一坨
+   是给酒馆自己的布局准备的）。这里做成：逗号分隔的输入框 + `<datalist>` 自动补全，
+   候选＝酒馆里已有的标签（`ctx.tags`）∪ 我们见过并记下来的标签。 */
+function chTagPool() {
+    const set = [];
+    try {
+        const tags = (getContext() || {}).tags;
+        if (Array.isArray(tags)) tags.forEach(t => { if (t && t.name) set.push(String(t.name)); });
+    } catch (e) { }
+    try {
+        const mine = getSettings().sspTagPool;
+        if (Array.isArray(mine)) mine.forEach(t => { if (t && set.indexOf(String(t)) < 0) set.push(String(t)); });
+    } catch (e) { }
+    return set.slice(0, 500);
+}
+/** 把当前标签池记下来（酒馆的 ctx.tags 有时还没加载） */
+function chTagsRecollect() {
+    try {
+        const s = getSettings();
+        if (!Array.isArray(s.sspTagPool)) s.sspTagPool = [];
+        String(chVal('tags_textarea') || '').split(',').map(x => x.trim()).filter(Boolean).forEach(t => {
+            if (s.sspTagPool.indexOf(t) < 0) s.sspTagPool.push(t);
+        });
+        if (s.sspTagPool.length > 300) s.sspTagPool = s.sspTagPool.slice(-300);
+        save();
+    } catch (e) { }
+    return true;
+}
+/** 标签的候选清单（贴到 datalist 上） */
+function chTagsDatalist() {
+    const host = document.getElementById('ssp_ch_tags_pool');
+    if (!host) return false;
+    const pool = chTagPool();
+    const sig = pool.join(',');
+    if (host.dataset.chsig === sig) return true;
+    host.dataset.chsig = sig;
+    host.innerHTML = pool.map(t => '<option value="' + esc(t) + '"></option>').join('');
+    return true;
+}
+
+
+/** 写卡页签的 HTML。只**首次**铺一次骨架（切页签只重画分页内容，见 chPanesRender） */
+function orbEditorHTML() {
+    const form = document.getElementById('form_create');
+    const act = form ? String(form.getAttribute('actiontype') || '') : '';
+    const editing = (act === 'editcharacter');
+    const tabs = CH_TABS.map(t => '<span class="ssp-ch-tab' + (t.id === chTab ? ' on' : '') + '" data-orb-cftab="' + t.id + '">'
+        + '<i class="fa-solid ' + t.icon + '"></i>' + esc(t.name) + '</span>').join('');
+    const panes = CH_TABS.map(t => '<div class="ssp-ch-pane' + (t.id === chTab ? ' on' : '')
+        + ' ssp-ch-pane-' + t.id + '" data-orb-cfpane="' + t.id + '">' + chGroupsHTML(t.id) + '</div>').join('');
+    return ''
+        /* 顶栏：新建 / 打开原生列表 / 现在在写哪张卡 */
+        + '<div class="ssp-ch-bar">'
+        + '<span class="ssp-pbtn primary" data-orb-chnew="1"><i class="fa-solid fa-user-plus"></i> 新建空白卡</span>'
+        + '<span class="ssp-pbtn" data-orb-chtolist="1" title="管卡 / 导入 / 标签 / 分页在酒馆原生列表里"><i class="fa-solid fa-list-ul"></i> 打开卡列表</span>'
+        + '<span class="ssp-ch-now" data-chnow="1"></span>'
+        + '</div>'
+        + '<div class="ssp-ch-tabs">' + tabs + '</div>'
+        /* 保存条：只有「保存」「★」「字数」「…更多」。
+           ⚠️ **原生按钮一颗都不搬进来**（踩过，见下面「更多操作」的注释）。 */
+        + '<div class="ssp-ch-draft" id="ssp_vault_savebar">'
+        + '<span class="ssp-pbtn primary" data-chsave="1"><i class="fa-solid fa-floppy-disk"></i><span data-chsavelabel="1">保存</span></span>'
+        + '<span class="ssp-pbtn ssp-ch-mini" data-chfav="1" title="收藏 / 取消收藏（转发给酒馆那颗 ★）"><i class="fa-solid fa-star"></i></span>'
+        + '<span class="ssp-sp"></span>'
+        + '<span class="ssp-ch-say" data-chsay="1"></span>'
+        + '<span class="ssp-ch-total" data-chtotal="1"></span>'
+        + '<span class="ssp-pbtn ssp-ch-mini" data-chmore="1" title="更多操作（转发给酒馆原生的那几颗按钮）"><i class="fa-solid fa-ellipsis"></i></span>'
+        + '</div>'
+        /* 「更多操作」：图标全是**我们自己画的**，点下去用 chNative() 转发给酒馆原生的按钮。
+           ⚠️ 为什么不把原生按钮搬进来（真踩过，用户看到"找不到酒馆的按钮/星星不见了"）：
+              酒馆会重建写卡块与按钮容器；我们搬走的按钮，在"面板重画 + 原来那个家已经脱链"
+              的那一刻会变成**孤儿**（不在文档里）→ 之后再点就是"找不到"。
+              **不搬 = 这一整类 bug 消失**：原生按钮永远待在酒馆自己的位置上（被 CSS 藏起来），
+              我们只是"隔空点它"。 */
+        + '<div class="ssp-ch-toolsbar" data-chmorebox="1" hidden>'
+        + '<span class="ssp-pbtn ssp-ch-mini" data-chavbtn="1" title="走酒馆自己的选图与裁剪"><i class="fa-solid fa-image"></i> 换头像</span>'
+        + '<span class="ssp-pbtn ssp-ch-mini" data-chnative="advanced_div" title="酒馆原生的高级定义面板"><i class="fa-solid fa-book"></i> 高级定义</span>'
+        + '<span class="ssp-pbtn ssp-ch-mini" data-chnative="world_button" title="酒馆原生的角色世界书"><i class="fa-solid fa-globe"></i> 世界书</span>'
+        + '<span class="ssp-pbtn ssp-ch-mini" data-chnative="open_alternate_greetings" title="酒馆原生的备选开场白面板（我们自己的列表在上面）"><i class="fa-solid fa-comment-medical"></i> 原生开场白</span>'
+        + '<span class="ssp-pbtn ssp-ch-mini" data-chnative="char_connections_button" title="酒馆原生的「连接的面具」"><i class="fa-solid fa-face-smile"></i> 面具连接</span>'
+        + '<span class="ssp-pbtn ssp-ch-mini" data-chnative="dupe_button" title="复制这张卡"><i class="fa-solid fa-clone"></i> 复制</span>'
+        + '<span class="ssp-pbtn ssp-ch-mini" data-chnative="export_button" title="导出并下载"><i class="fa-solid fa-file-export"></i> 导出</span>'
+        + '<span class="ssp-pbtn ssp-ch-mini danger" data-chnative="delete_button" title="删掉这张卡"><i class="fa-solid fa-skull"></i> 删除</span>'
+        + '</div>'
+        + panes
+        /* 原生浮层（世界书选择器 / 额外世界书）用的时候搬进来挂这儿 */
+        + '<div class="ssp-ch-ovl" id="ssp_vault_overlay" hidden></div>';
+}
+
+/* ---------------- 头像（原生 file 选择器 + 原生裁剪留在酒馆那边） ---------------- */
+function chAvatarSrc() {
+    try {
+        const c = (orbCardsList() || [])[(getContext() || {}).characterId];
+        if (c && c.avatar && c.avatar !== 'none') return '/characters/' + encodeURIComponent(c.avatar);
+    } catch (e) { }
+    return '';
+}
+/** 头像预览：优先用酒馆自己刚设好的预览图（用户挑的新图就是它），否则用当前卡的头像 */
+function chRefreshAvatars() {
+    const host = document.querySelector('#ssp_orb_panel [data-chavprev]');
+    if (!host) return false;
+    const form = document.getElementById('form_create');
+    const act = form ? String(form.getAttribute('actiontype') || '') : '';
+    const pick = document.getElementById('avatar_load_preview');
+    let src = '';
+    if (pick && pick.getAttribute) {
+        const s = String(pick.getAttribute('src') || '');
+        const isDefault = /(^|\/)img\/|default_.*\.png$|ai4\.png$/i.test(s);
+        if (s && !isDefault) src = s;                 // 用户刚挑的图 → 就是它
+    }
+    if (!src && act === 'editcharacter') src = chAvatarSrc();
+    host.innerHTML = src
+        ? '<img src="' + esc(src) + '" alt="avatar">'
+        : '<i class="fa-solid fa-user"></i>';
+    host.classList.toggle('on', !!src);
+    return true;
+}
+
+/* ---------------- 世界书那行：显示当前绑定 ---------------- */
+function chWorldInfoLabel() {
+    const v = chVal('character_world');
+    if (!v) return { text: '未绑定', cls: '' };
+    let extra = '';
+    try {
+        const names = orbWbCharNames(v);
+        if (names && names.length) extra = ' ＋' + names.length + ' 个额外世界书';
+    } catch (e) { }
+    return { text: v + extra, cls: ' on' };
+}
+function chRefreshSpecial() {
+    const sp = document.querySelector('#ssp_orb_panel [data-chsv="world"]');
+    if (!sp) return false;
+    const w = chWorldInfoLabel();
+    sp.textContent = w.text;
+    sp.className = 'ssp-ch-sv' + w.cls;
+    return true;
+}
+
+/* ---------------- 话痨度 / 深度角色：跟着原生控件的选项走 ---------------- */
+function chFillSelects() {
+    [['talkativeness_slider', 'talk'], ['depth_prompt_role', 'dpr']].forEach(([nid, k]) => {
+        const nat = document.getElementById(nid);
+        const mine = chMine(k);
+        if (!nat || !mine) return;
+        /* 原生那个是 range 或 select：把选项抄过来（range 就做成一串离散档位） */
+        const opts = [];
+        if (nat.tagName === 'SELECT') {
+            Array.prototype.forEach.call(nat.options, o => opts.push([o.value, o.textContent || o.value]));
+        } else {
+            const min = Number(nat.min || 0), max = Number(nat.max || 1), step = Number(nat.step || .05);
+            for (let v = min; v <= max + 1e-9; v += step) {
+                const val = (Math.round(v * 1000) / 1000);
+                opts.push([String(val), (val * 100).toFixed(0) + '%' + (Math.abs(val - .5) < 1e-9 ? '（默认）' : '')]);
+            }
+        }
+        const cur = String(nat.value == null ? '' : nat.value);
+        const sig = opts.map(o => o[0]).join(',') + '|' + cur;
+        if (mine.dataset.chsig === sig) {
+            if (mine.value !== cur) mine.value = cur;
+            return;                                   // 没变就不重画（别打断用户）
+        }
+        mine.dataset.chsig = sig;
+        mine.innerHTML = opts.map(o => '<option value="' + esc(o[0]) + '"' + (o[0] === cur ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
+        if (cur) mine.value = cur;
+    });
+    return true;
+}
+
+/* ---------------- 字数 ---------------- */
+function chCount() {
+    let total = 0;
+    document.querySelectorAll('#ssp_orb_panel [data-chk]').forEach(el => {
+        const f = chFldById(el.dataset.chid || '');
+        if (!f || f.mode === 'special') return;
+        const n = String(el.value || '').length;
+        total += n;
+        const c = document.querySelector('#ssp_orb_panel [data-chcnt="' + f.k + '"]');
+        if (c) c.textContent = n ? String(n) : '';
+    });
+    const tot = document.querySelector('#ssp_orb_panel [data-chtotal]');
+    if (tot) tot.textContent = total ? ('共 ' + total + ' 字') : '';
+    return total;
+}
+
+/* ---------------- 原生浮层：搬进来用（可逆，关掉还回原位） ---------------- */
+let chOvl = null;            // { key, host, home:{parent,next}, el }
+const CH_OVERLAYS = {
+    1: ['#WorldInfo', '世界书'],
+    2: ['#world_popup', '额外世界书'],
+};
+
+/** 钉住/放开一个原生元素（钉住 = 藏但留在文档里；放开 = 还原）。
+    ⚠️ **实测过的三层坑**（别退回成"只写 data 属性"）：
+      ① 光靠 CSS 属性选择器 `[data-ssp-ch-pin="1"]{display:none!important}` 挡不住
+         酒馆自己的 `#rm_ch_create_block{display:block!important}`（它特异性更高）；
+      ② 改写成内联 `style="display:none!important"` 也挡不住 —— 酒馆切右侧抽屉时是
+         **jQuery 的 show()**，它写 `style="display:block!important"`，同权重下**后写的赢**，
+         于是块又冒出来盖在面板上（elementFromPoint 命中的就是它，手机实测）；
+      ③ 结论：用一张**注入的样式表**，选择器带 `#id`（ID 特异性压过 `#rm_ch_create_block`），
+         并且把内联样式**接管**掉（不要跟 jQuery 比谁后写）。
+       放开时把样式表整张移除 + 还原原有的内联值。 */
+const CH_PIN_STYLE_ID = 'ssp_ch_pin_style';
+/** ⚠️ **绝不藏 `#rm_ch_create_block` / `#form_create`**。
+    用户实测反馈：「怎么我酒馆原生的角色卡界面什么都没有了」——
+    把整个写卡块藏起来等于把**酒馆自己的角色编辑界面弄没了**，那不是"看不见的接口"，
+    而是用户随时会去用的一等公民界面。
+    我们只在**面板开着的时候**、按需藏掉两个**浮层**：
+      · `#character_popup`（高级定义）—— 面板里的「高级定义」按钮会把它搬进面板当字段宿主，
+        搬家前那一下不能让它先在外面闪出来；
+      · `#WorldInfo` / `#world_popup`（世界书选择器）—— 同理，由 `chOverlay()` 搬进面板。
+    面板一关就整张样式表撤掉 → 酒馆那边永远是原样。 */
+const CH_PIN_SEL = '#character_popup, #WorldInfo, #world_popup, #avatar_controls, #avatar_div_div, #rm_button_back';
+function chPinSheet(on) {
+    try {
+        let st = document.getElementById(CH_PIN_STYLE_ID);
+        if (on) {
+            if (!st) {
+                st = document.createElement('style');
+                st.id = CH_PIN_STYLE_ID;
+                /* ⚠️ 特异性要 2 个 ID、而且**必须写在目标元素自己身上**：
+                      `#avatar_controls:not(#__ssp_never)` —— `:not(#__ssp_never)` 永远成立，
+                      于是等价于 `#avatar_controls`，但特异性是 2 个 ID，压得过酒馆自己的
+                      `#xxx{display:block!important}`（1 个 ID）。
+                      踩过的两个写法（都错）：
+                        · 写成 `.ssp-ch-xxx{...!important}` → 特异性不够（1 个 class），被酒馆压掉；
+                        · 写成 `#ssp_orb_panel:not(#__x)#avatar_controls` → 这是**复合选择器**，
+                          要求**同一个元素**同时有这两个 id，永远匹配不到 → 等于什么都没藏（实测才发现）。 */
+                st.textContent = CH_PIN_SEL.split(',').map(s => s.trim() + ':not(#__ssp_never)').join(',')
+                    + '{ display: none !important; }';
+                (document.head || document.documentElement).appendChild(st);
+            }
+        } else if (st) {
+            st.remove();
+        }
+    } catch (e) { return false; }
+    return true;
+}
+/** 钉住/放开一个原生元素。
+    ⚠️ 现在**只写 data 属性**（样式表按需注入/整张撤掉）——
+       绝不碰元素的内联 style，免得给酒馆留下 `style="display:none"` 的残渣。 */
+function chPin(el, on) {
+    if (!el) return false;
+    try {
+        if (on) {
+            if (el.dataset.sspChPin !== '1') el.dataset.sspChPin = '1';
+            chPinSheet(true);
+        } else {
+            if (el.dataset.sspChPin !== undefined) delete el.dataset.sspChPin;
+            if (!document.querySelector('[data-ssp-ch-pin]')) chPinSheet(false);
+        }
+    } catch (e) { return false; }
+    return true;
+}
+/** 开某个原生浮层：搬进我们的宿主，关掉时还回原位 */
+function chOverlay(which) {
+    const key = String(which);
+    const cfg = CH_OVERLAYS[key];
+    if (!cfg) return false;
+    if (chOvl && chOvl.key === key) { chOverlayClose(); return true; }   // 再点一下＝收起
+    chOverlayClose();
+    const el = document.querySelector(cfg[0]);
+    if (!el) { toast('找不到酒馆的「' + cfg[1] + '」面板（先把世界书按钮点开一次）', 'warning'); return false; }
+    const host = document.getElementById('ssp_vault_overlay');
+    if (!host) return false;
+    chOvl = { key: key, host: host, el: el, home: { parent: el.parentElement, next: el.nextElementSibling } };
+    try {
+        host.hidden = false;
+        host.innerHTML = '';
+        host.appendChild(el);                       // 搬（可逆）
+        chPin(el, true);                            // 搬进来的时候才钉（关掉 chOverlayClose 会放开）
+    } catch (e) { chOvl = null; return false; }
+    return true;
+}
+function chOverlayClose() {
+    if (!chOvl) return false;
+    const rec = chOvl;
+    chOvl = null;
+    try { chPin(rec.el, false); } catch (e) { }      // 搬进来的浮层要**放开**（别留着坏状态）
+    try {
+        const home = rec.home;
+        if (rec.el && home && home.parent && home.parent.isConnected !== false) {
+            if (home.next && home.next.parentElement === home.parent) home.parent.insertBefore(rec.el, home.next);
+            else home.parent.appendChild(rec.el);
+        }
+    } catch (e) { }
+    try { if (rec.host) { rec.host.hidden = true; rec.host.innerHTML = ''; } } catch (e) { }
+    try { chRefreshSpecial(); } catch (e) { }
+    return true;
+}
+
+/* ---------------- 保存条 / 按钮 ---------------- */
+function chSay(txt, kind) {
+    const el = document.querySelector('#ssp_orb_panel [data-chsay]');
+    if (!el) return false;
+    el.textContent = txt || '';
+    el.className = 'ssp-ch-say' + (kind ? ' ' + kind : '');
+    if (txt) {
+        try {
+            clearTimeout(chSay.t);
+            chSay.t = setTimeout(() => { try { el.textContent = ''; } catch (e) { } }, 2600);
+        } catch (e) { }
+    }
+    return true;
+}
+/** 收藏状态：以**酒馆原生那颗按钮**为准。
+    ⚠️ 别看 `#fav_checkbox` 的 `value` 属性 —— 酒馆是 `$('#fav_checkbox').prop('checked', state)`
+       改的是 **property**（`value` 属性一直是初始的空串，读它永远是"没收藏"）。
+       可靠的两个信号：`#favorite_button` 上的 `fav_on` class、以及 checkbox 的 `.checked`。 */
+function chSyncFav() {
+    const btn = document.querySelector('#ssp_orb_panel [data-chfav]');
+    if (!btn) return false;
+    let on = false;
+    try {
+        const fb = document.getElementById('favorite_button');
+        const cb = document.getElementById('fav_checkbox');
+        on = !!(fb && fb.classList && fb.classList.contains('fav_on'))
+            || !!(cb && cb.checked === true);
+    } catch (e) { }
+    btn.classList.toggle('on', on);
+    return on;
+}
+/** 原生按钮转发：`data-chnative="<id 或选择器>"` 一律点酒馆那颗。
+    ⚠️ 有些原生入口**没有 id、只有 class**（`#open_alternate_greetings` 根本不存在，
+       那是 `.open_alternate_greetings`；`#tag_controls` 同样不存在，是 `.tag_controls`）——
+       实测就是这里弹的"找不到酒馆的按钮"。所以找不到 id 时**退回选择器查找**。 */
+function chNative(idOrSel) {
+    if (!idOrSel) return false;
+    const el = chNativeEl(idOrSel);
+    if (!el) { toast('找不到酒馆的按钮 / 面板：' + idOrSel, 'warning'); return false; }
+    try { el.click(); } catch (e) { toast('触发失败：' + (e && e.message), 'warning'); return false; }
+    setTimeout(() => {
+        try { chRefreshSpecial(); } catch (e) { }
+        try { chRefreshAvatars(); } catch (e) { }
+        try { chSyncFav(); } catch (e) { }
+        try { chFillSelects(); } catch (e) { }
+    }, 260);
+    return true;
+}
+/** 找原生元素：按 id → **按 class** → 按选择器。
+    ⚠️ 这里踩过两次：
+       · 酒馆有些入口**只有 class 没有 id**（`.open_alternate_greetings` / `.tag_controls`），
+         只查 id 会弹"找不到"；
+       · 但把裸词直接丢给 `querySelector` 也不对 —— `querySelector('open_alternate_greetings')`
+         是拿它当**标签名**查，永远找不到。所以裸词必须试 `.名字`。 */
+function chNativeEl(idOrSel) {
+    try {
+        const s = String(idOrSel);
+        if (/^[A-Za-z_][\w-]*$/.test(s)) {
+            const byId = document.getElementById(s);
+            if (byId) return byId;
+            const byCls = document.querySelector('.' + s);      // 只有 class 的入口
+            if (byCls) return byCls;
+            const byTag = document.querySelector(s);
+            if (byTag) return byTag;
+            return null;
+        }
+        return document.querySelector(s) || null;
+    } catch (e) { return null; }
+}
+
+/** 保存条初始化：骨架已经是新的（按钮写在 orbEditorHTML 里），这里只把状态对齐 */
+function chSavebarInit() {
+    const bar = document.getElementById('ssp_vault_savebar');
+    if (!bar) return false;
+    try { chSyncFav(); } catch (e) { }
+    try { chCount(); } catch (e) { }
+    return true;
+}
+/** 收藏状态（给"★"上色用） */
+function chIsFav() {
+    try {
+        const c = (orbCardsList() || [])[(getContext() || {}).characterId];
+        if (c && (c.fav === true || c.fav === 'true')) return true;
+    } catch (e) { }
+    try { return String((getSettings() || {}).orbFavOn) === '1'; } catch (e) { }
+    return false;
+}
+/** 一次性归位：早期版本把原生按钮/头像控件搬进过面板，升级后要放回酒馆原位。
+    只处理"还在我们面板里"的元素（没搬过就什么都不做）。 */
+function chUnstickNatives() {
+    const ids = ['favorite_button', 'advanced_div', 'world_button', 'char_connections_button', 'dupe_button',
+        'create_button', 'create_button_label', 'delete_button', 'export_button', 'avatar_div_div', 'add_avatar_button'];
+    const home = () => document.getElementById(CH_EDIT_ID) || document.getElementById('form_create') || document.body;
+    const panel = document.getElementById('ssp_orb_panel');
+    if (!panel) return false;
+    let n = 0;
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (!panel.contains(el)) return;
+        if (id === 'avatar_div_div' || id === 'add_avatar_button') {
+            const box = document.getElementById('avatar_div');
+            if (box) { try { box.appendChild(el); n += 1; } catch (e) { } }
+            return;
+        }
+        const host = home();
+        if (host && !host.contains(el)) { try { host.appendChild(el); n += 1; } catch (e) { } }
+    });
+    return n > 0;
+}
+/** 点「保存/创建」：走酒馆自己的提交链（先 push，再**提交原生表单**）
+    ⚠️ 不能用 `#create_button.click()` —— 实测它会**静默失败**：
+       `#create_button` 是 `<input type=submit>`，但酒馆把它包在 `<label for="create_button">` 里，
+       而我们的保存条所在的 `#rm_ch_create_block` 并不在 `<form id="form_create">` 内部
+       → 它已经**不是表单所有者**了，点它不会触发 submit。
+       e2e 实测：点击后 `/api/characters/edit` 一个请求都没发，卡数据原封不动（"保存了但没存上"）。
+       所以改成自己派发 submit：会被酒馆的 jQuery 处理器接住（`$('#form_create').on('submit')`），
+       而且 cancelable（没被 preventDefault 时默认动作本来也会提交表单）。 */
+function chSave() {
+    const form = document.getElementById('form_create');
+    if (!form) { toast('找不到酒馆的写卡表单', 'warning'); return false; }
+    /* 非静默：告诉用户"改动写回去了几处"（静默时用户会怀疑到底存没存） */
+    let n = 0;
+    try { n = chPush(false); } catch (e) { }
+    try { chSyncTagChips(); } catch (e) { }
+    try { chTagsRecollect(); } catch (e) { }        // 把用过的标签记进补全池
+    let ok = false;
+    try {
+        ok = form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: false }));
+    } catch (e) { ok = false; }
+    if (!ok) {
+        /* 兜底：万一有谁 preventDefault 了，就直接调酒馆自己的保存函数 */
+        try {
+            const ctx = getContext() || {};
+            if (typeof ctx.createOrEditCharacter === 'function') { ctx.createOrEditCharacter({}); ok = true; }
+            else if (ctx.model && typeof ctx.model.createOrEditCharacter === 'function') { ctx.model.createOrEditCharacter({}); ok = true; }
+        } catch (e) { }
+    }
+    if (!ok) { toast('提交失败：酒馆没接住表单提交', 'warning'); return false; }
+    chSay(n ? ('已把 ' + n + ' 处改动写回酒馆，正在保存…') : '没有要写的改动，直接保存…', 'ok');
+    /* 保存是异步的（还要处理头像格式）→ 稍后再刷状态文字 + 清记账 */
+    setTimeout(() => { try { chRefreshHead(); } catch (e) { } }, 900);
+    setTimeout(() => {
+        try { chRefreshHead(); } catch (e) { }
+        try { chRefreshAvatars(); } catch (e) { }
+        try { chRefreshSpecial(); } catch (e) { }
+        try { chPanesClear(); } catch (e) { }        // 已进卡，不该再 push 一遍
+    }, 2600);
+    return true;
+}
+/** 顶栏"正在写：XX"（只刷文字，不重画） */
+function chRefreshHead() {
+    const el = document.querySelector('#ssp_orb_panel [data-chnow]');
+    if (!el) return false;
+    const form = document.getElementById('form_create');
+    const act = form ? String(form.getAttribute('actiontype') || '') : '';
+    const editing = (act === 'editcharacter');
+    const nm = chVal('character_name_pole');
+    el.innerHTML = editing ? ('正在写：<b>' + esc(nm || '(未命名)') + '</b>') : '新卡（还没保存）';
+    return true;
+}
+
+/* ---------------- 原生 → 我的：酒馆自己改了字段时跟着刷 ---------------- */
+let chBindOnce = false;
+let chPushing = false;          // 正在 push：这期间原生派发的事件不理会
+let chDirty = {};               // 被用户改过的原生 id（push 只看这些）
+let chCache = {};               // 上次 pull 时原生元素的值（原生自己变了才回填我的框）
+
+function chBindNativeOnce() {
+    if (chBindOnce) return true;
+    /* ⚠️ 事件挂在**面板**上（不是写卡页的分页上）—— 它管的不只是那 16 个字段：
+       选卡页的"分组"输入框、备选开场白列表的正文/分组，都靠这里的事件委托。
+       原来只在"进过写卡页"时才绑 → **直接进选卡页改分组完全没反应**（e2e 抓到）。
+       所以改成由 bindOrb 在挂载时就绑，不依赖有没有进过写卡页；这里保留重试。 */
+    const g = document.getElementById('ssp_orb_panel');
+    if (!g) return false;
+    chBindOnce = true;
+    try {
+        /* 我的输入 → 立刻写回原生（这样即使酒馆用"读 DOM"的方式取值也不会读到旧的） */
+        const onMine = (ev) => {
+            /* ---- 选卡页：卡的分组输入框（只认 change＝敲完/失焦，免得每敲一个字就重画列表） ---- */
+            const ci = ev.target && ev.target.closest ? ev.target.closest('[data-ccardgrpin]') : null;
+            if (ci) {
+                if (ev.type === 'change') {
+                    chCardSetGroup(ci.dataset.ccardgrpin, ci.value);
+                    chCardEdit = '';
+                    try { renderOrbPanel(); } catch (e) { }
+                }
+                return;
+            }
+            const el = ev.target && ev.target.closest ? ev.target.closest('[data-chk]') : null;
+            /* ---- 备选开场白列表里的两格（它们不在 VAULT_SCHEMA 里，单独接） ---- */
+            if (!el) {
+                const gt2 = ev.target && ev.target.closest ? ev.target.closest('[data-chgtext]') : null;
+                if (gt2) { chGreetSetText(Number(gt2.dataset.chgtext), gt2.value); chGreetDirty = true; return; }
+                const gg = ev.target && ev.target.closest ? ev.target.closest('[data-chggroup]') : null;
+                if (gg) {
+                    chGreetSetGroup(Number(gg.dataset.chggroup), gg.value);
+                    chGreetDirty = true;
+                    chGreetRowsRender();                          // 只换行列表：不打断这一格的输入
+                    chGreetChipsRender();                         // 刷新筛选条与候选
+                    return;
+                }
+                return;
+            }
+            const id = el.dataset.chid;
+            if (id) chDirty[id] = 1;
+            if (id) {
+                const nat = document.getElementById(id);
+                if (nat) {
+                    const v = String(el.value == null ? '' : el.value);
+                    if (nat.value !== v) {
+                        chPushing = true;
+                        try { nat.value = v; } catch (e) { }
+                        chPushing = false;
+                    }
+                }
+            }
+            if (el.dataset.chk === 'tags') { try { chSyncTagChips(); } catch (e) { } }
+            try { chCount(); } catch (e) { }
+            if (id === 'character_name_pole') { try { chRefreshHead(); } catch (e) { } }
+        };
+        g.addEventListener('input', onMine, true);
+        g.addEventListener('change', onMine, true);
+        /* 原生 → 我的：酒馆回填（切卡 / 新建 / 导入 / 选头像 / 点高级定义）时把值抄回来。
+           ⚠️ 只在**原生那侧的值真的变了**才抄，否则会把用户正在打的字盖掉。 */
+        const onNative = (ev) => {
+            if (chPushing) return;
+            const el = ev.target;
+            if (!el || !el.id) return;
+            const f = chFldById(el.id);
+            if (f) {
+                const v = String(el.value == null ? '' : el.value);
+                if (chCache[el.id] === v) return;
+                chCache[el.id] = v;
+                const mine = chMine(f.k);
+                if (mine && mine.value !== v) mine.value = v;
+                try { chCount(); } catch (e) { }
+                if (el.id === 'character_name_pole') { try { chRefreshHead(); } catch (e) { } }
+            } else if (el.id === 'character_world') {
+                try { chRefreshSpecial(); } catch (e) { }
+            } else if (el.id === 'avatar_load_preview') {
+                try { chRefreshAvatars(); } catch (e) { }
+            } else if (el.id === 'fav_checkbox') {
+                try { chSyncFav(); } catch (e) { }
+            }
+        };
+        document.addEventListener('input', onNative, true);
+        document.addEventListener('change', onNative, true);
+        /* ⚠️ 保存前的最后一道保险：捕获阶段一定早于 jQuery 的委托处理
+           （`$('#form_create').on('submit', …)`），见文件头第 2 条 */
+        document.addEventListener('submit', (ev) => {
+            const t = ev.target;
+            if (t && t.id === 'form_create') { try { chPush(true); } catch (e) { } }
+        }, true);
+        document.addEventListener('click', (ev) => {
+            const t = ev.target && ev.target.closest ? ev.target.closest('#create_button, #create_button_label') : null;
+            if (t) { try { chPush(true); } catch (e) { } }
+        }, true);
+        return true;
+    } catch (e) {
+        try { sspPushErr('vault-bind', e && e.message); } catch (e2) { }
+        return false;
+    }
+}
+
+/* ---------------- 原生框子：藏着但留在文档里 ----------------
+   ⚠️ **一个原生元素都不搬**（v1.31.52 的硬规矩）。
+
+   历史教训（值得留在这，别再犯）：
+     v1.31.50~51 我们把酒馆那排小按钮（收藏/高级/世界书/导出/复制/删除）和头像控件
+     **搬进**面板的保存条里。结果用户看到的是：
+       · 「找不到酒馆的按钮：favorite_button」——点了没反应；
+       · 过一会儿 ★ 直接不见了。
+     原因是**酒馆会重建写卡块和它的按钮容器**：我们搬走的那几颗，在"面板重画 + 原来那个家
+     已经脱链"的那一刻就成了孤儿（不在文档里）。再往后 getId 拿到的是尸体，点了当然"找不到"。
+
+   现在的做法（简单而且不会坏）：
+     · 原生按钮**待在酒馆自己的位置上**，我们只用一张注入的样式表把它们**藏起来**（位置不动、关系不断）；
+     · 面板里的图标全是**我们自己画的**，点下去用 chNative(id) **隔空点**那颗原生按钮；
+     · 于是"孤儿"这个 bug 类别彻底不存在了。
+
+   藏哪些：见 CH_PIN_SEL。放开：面板一关整张样式表撤掉（原生立刻原样可见）。
+   ------------------------------------------------------------------ */
+
+/** 开写卡页：把**两个浮层**藏掉（高级定义 / 世界书选择器），并把常用的原生按钮搬进工具条。
+    ⚠️ **绝不藏 `#rm_ch_create_block` / `#form_create`** —— 那等于把酒馆自己的角色编辑界面
+       弄没了（用户实测反馈过："我酒馆原生的角色卡界面什么都没有了"）。
+       我们只在面板里显示自己的界面，原生那份原样留在酒馆的右侧抽屉里，随时能用。
+    ⚠️ 还要能"自愈"：酒馆会在多个流程里重画/换父容器，那排按钮可能是新节点。 */
+function chMountFrame() {
+    try {
+        /* ⚠️ 先判"现在到底该不该钉"：面板开着 **且** 停在写卡页。
+           少了这一条会出这个坑：面板关了之后，观察者/轮询还在跑，又把 `#character_popup` 钉回去
+           → 酒馆自己的「高级定义」就永远打不开了（用户会看到"原生界面没了"）。 */
+        if (!orbOpenNow || orbTab !== 'editor') { try { chUnmountFrame(); } catch (e) { } return false; }
+        /* 只藏**高级定义弹窗** `#character_popup`：它本来就是 `position:absolute; display:none` 的浮层，
+           我们把它搬进面板里当字段宿主，所以要保证它不在原地冒出来。
+           ⚠️ 世界书那两个（`#WorldInfo` / `#world_popup`）**不在这里常驻钉**：
+              它们由 chOverlay() 在"用户真的要选世界书"时按需搬进面板、关掉就还回去；
+              常驻钉住会让它们在外面的状态变得莫名其妙（实测：关面板后还 pin 着）。 */
+        chPin(document.getElementById(CH_POPUP_ID), true);
+        /* 写卡块**永远不该**出现在我们的面板里（这一版不搬 DOM；出现了就是哪里漏了） */
+        const block = document.getElementById(CH_EDIT_ID);
+        if (block && block.closest && block.closest('#ssp_orb_panel')) {
+            try { chUnstickNatives(); } catch (e) { }
+        }
+        /* ⚠️ 这里以前会把"头像控件 / 原生那排小按钮"搬进面板 —— **已经全部取消**。
+           原因：酒馆会重建写卡块与按钮容器，搬走的东西在"面板重画 + 原家已脱链"时会变成孤儿，
+           用户看到的就是"找不到酒馆的按钮 / 星星不见了"。
+           现在原生按钮**一样都不搬**，只靠上面的 pin 样式表把它们藏起来（位置不动、关系不断），
+           我们的按钮用 chNative() 隔空点它们。 */
+        return true;
+    } catch (e) { return false; }
+}
+/** 关写卡页 / 关面板：放开隐藏 + 把借走的按钮还回去。
+    ⚠️ 这一趟必须**真的把 pin 全放开**：`#character_popup` 被我们钉住＝**酒馆原生的「高级定义」打不开了**
+       （用户会看到"原生的界面没了"）。所以除了逐个放，末尾还有一次**兜底全清**。 */
+function chUnmountFrame() {
+    try { chOverlayClose(); } catch (e) { }
+    /* 离开写卡页先把改动落回原生，免得"看着改了其实没进表单" */
+    try { chPush(true); } catch (e) { }
+    try {
+        document.querySelectorAll('[data-ssp-ch-pin]').forEach(el => { try { chPin(el, false); } catch (e) { } });
+    } catch (e) { }
+    try { chPinSheet(false); } catch (e) { }        // 兜底：整张样式表撤掉
+    try {
+        document.querySelectorAll('[data-ssp-ch-pin]').forEach(el => { try { delete el.dataset.sspChPin; } catch (e) { } });
+    } catch (e) { }
+    /* 不再有"搬回去"这一步（我们不搬任何原生元素了）。
+       但**旧版本可能已经把按钮搬走过** → 这里做一次一次性归位，防止升级后按钮卡在面板里。 */
+    try { chUnstickNatives(); } catch (e) { }
+    return true;
+}
+
+/** 酒馆的世界书选择器是**点开才插进 DOM** 的 → 挂着观察，插进来就钉掉（用我们自己的浮层看）。
+    顺带治一个实测到的"自己会冒出来"：酒馆**打开右侧抽屉**（`#right-nav-panel.openDrawer`）
+    时会用 `.right_menu` 的显示规则把 `#rm_ch_create_block` 弄回 display:block，
+    而那条规则不是内联样式 → 我们的 pin 挡不住它，写卡块会盖在我们的面板上（手机实测：
+    `elementFromPoint` 命中的是它）。所以抽屉一开就**补钉一次**（幂等、很便宜）。 */
+let chObs = null;
+function chBindOverlayWatch() {
+    if (chObs || !window.MutationObserver) return false;
+    try {
+        chObs = new MutationObserver(() => {
+            /* ⚠️ **必须防抖**：这个观察挂在 body 的 subtree + class/style 上，
+               而 chMountFrame 本身会动 DOM（搬按钮、设 data 属性）→ 不防抖就会自己喂自己，
+               实测直接把页面卡死（e2e 3 分钟不返回）。 */
+            if (chObs.t) return;
+            chObs.t = setTimeout(() => {
+                chObs.t = 0;
+                try {
+                    chMountFrame();                 // 内部会自己判断"该不该钉"
+                } catch (e) { }
+            }, 150);
+        });
+        chObs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+        /* 兜底轮询：MutationObserver 有时机漏网（实测"切走再切回来"这一趟就漏）。
+           很便宜（就是几个 getElementById + 读写一个 data 属性），只在写卡页开着时跑。 */
+        if (!chObs.timer) {
+            chObs.timer = setInterval(() => {
+                try {
+                    if (orbOpenNow && orbTab === 'editor') chMountFrame();
+                } catch (e) { }
+            }, 700);
+        }
+        return true;
+    } catch (e) { return false; }
+}
+
+/* ============================ 选卡（找一张卡出来写 / 管）============================
+   为什么不把整块 `#rm_characters_block` 搬进来（想过，结论是别搬）：
+     · 那块不只是列表 —— 搜索框、标签筛选条、分页、批量编辑、新建/导入/URL导入这一排按钮
+       **全在里面**，工坊 BUTTONS 表 22 个按钮有 14 个的选择器落在它上面；整块搬走 =
+       把工坊的"使用态"一起搬走，而工坊工作台（.ssp_box）又挂在它顶部的 #charListFixedTop 里，
+       两个浮层同时开必然互相打架。
+     · 分页 / 标签筛选 / 拖拽排序深度依赖酒馆自己的代码（printCharacters 重画那个容器、
+       CHARACTER_FILTER_SELECTOR 填标签）→ 在口袋里重画一份 = 第二套渲染器，酒馆一更新就得修两遍。
+   所以这里只做**只读的选卡器**：搜索 + 头像墙 + 点一下＝打开它去写卡。重管理仍然回原生列表。
+   ========================================================================== */
+var orbPickSearch = '';          // 选卡器的搜索词（纯内存，不落设置 —— 跟其它页签的搜索一致）
+let orbPickMode = 'recent';      // recent（最近写过/用过）| all（全部）| fav（收藏）
+let orbPickView = 'list';        // list（一条一行，能排序 / 分组）| grid（头像墙）
+let orbPickGroup = '';           // 分组筛选：'' = 全部；'__none__' = 未分组
+let chCardEdit = '';             // 正在改分组的那张卡（头像文件名；'' = 没有）
+
+/* ---------------- 卡分组（存扩展设置里，**不动用户的卡文件**） ----------------
+   为什么不像开场白那样写进卡里：卡没有"自定义分组"这个字段，塞进去等于污染卡数据；
+   而分组本来就是"我这台机器上怎么摆"，放设置里最合适。
+   设置键：`sspCardGroups` = { 头像文件名: 组名 }。 */
+function chCardGroups() {
+    try {
+        const s = getSettings();
+        if (!s.sspCardGroups || typeof s.sspCardGroups !== 'object') s.sspCardGroups = {};
+        return s.sspCardGroups;
+    } catch (e) { return {}; }
+}
+function chCardGroupOf(c) {
+    const av = c && c.avatar;
+    if (!av) return '';
+    return String(chCardGroups()[av] || '').trim();
+}
+function chCardSetGroup(avatar, grp) {
+    try {
+        const av = String(avatar || '').trim();
+        if (!av) return false;                       // ⚠️ 空头像名绝不写（会把所有卡挤到同一个空键上）
+        const m = chCardGroups();
+        delete m[''];                                // 顺手清掉早期踩坑留下的空键
+        const g = String(grp || '').trim();
+        if (g) m[av] = g; else delete m[av];
+        save();
+    } catch (e) { return false; }
+    return true;
+}
+/** 用过的分组名（去重、按出现顺序） */
+function chCardGroupNames() {
+    const m = chCardGroups();
+    const out = [];
+    Object.keys(m).forEach(k => { const v = String(m[k] || '').trim(); if (v && out.indexOf(v) < 0) out.push(v); });
+    return out;
+}
+/** 分组筛选：'__none__' 表示"未分组" */
+function chCardInPick(c) {
+    if (!orbPickGroup) return true;
+    const g = chCardGroupOf(c);
+    return orbPickGroup === '__none__' ? !g : g === orbPickGroup;
+}
+/** 上移/下移一张卡：动的是 `cardOrder`（扩展自己的顺序表；工坊的"手动排序"也写这个）。
+    `list` = 当前屏幕上这个顺序（可能被筛过），交换要落到**完整顺序表**里。 */
+function chCardMove(avatar, dir, list) {
+    try {
+        const s = getSettings();
+        const idx = (list || []).findIndex(c => c.avatar === avatar);
+        if (idx < 0) return false;
+        const nb = list[idx + dir];
+        if (!nb) return false;
+        const order = Array.isArray(s.cardOrder) ? s.cardOrder.slice() : [];
+        orbRecentCards().map(c => c.avatar).forEach(a => { if (order.indexOf(a) < 0) order.push(a); });
+        const i = order.indexOf(avatar), j = order.indexOf(nb.avatar);
+        if (i < 0 || j < 0) return false;
+        const t = order[i]; order[i] = order[j]; order[j] = t;
+        s.cardOrder = order;
+        save();
+        try { applyCardOrder(); } catch (e) { }          // 让酒馆原生列表也跟着这个顺序
+        chPickSave();
+        return true;
+    } catch (e) { return false; }
+}
+/** 选卡页改动后重画（保留滚动位置由 renderOrbPanel 负责） */
+function chPickSave() {
+    try { renderOrbPanel(); } catch (e) { return false; }
+    return true;
+}
+/** 当前屏幕上那张列表（跟 orbPickHTML 里的筛选口径**必须一致**，否则上移下移会跳错邻居）。
+    有了它，chCardMove 才知道"上一条"是谁。 */
+function chPickCurList() {
+    const all = orbCardsList();
+    const q = orbPickSearch.trim().toLowerCase();
+    let list = (orbPickMode === 'fav')
+        ? all.filter(c => c.fav === true || c.fav === 'true')
+        : (orbPickMode === 'all' ? all : orbRecentCards());
+    if (q) {
+        list = list.filter(c => (String(c.name).toLowerCase().indexOf(q) >= 0)
+            || orbCardTags(c).some(t => String(t).toLowerCase().indexOf(q) >= 0));
+    }
+    return list.filter(chCardInPick);
+}
+
+function orbCardsList() {
+    try {
+        const cs = (getContext() || {}).characters;
+        return Array.isArray(cs) ? cs.filter(c => c && c.name) : [];
+    } catch (e) { return []; }
+}
+/** 头像地址：酒馆静态路径 /characters/<文件>（扩展里「数据」页也是这么拿的） */
+function orbCardAvatarUrl(c) {
+    if (!c || !c.avatar || c.avatar === 'none') return '';
+    if (/^(data:|https?:|blob:)/i.test(c.avatar)) return c.avatar;
+    return '/characters/' + encodeURIComponent(c.avatar);
+}
+function orbCardTags(c) {
+    const t = c && c.data && c.data.tags;
+    return Array.isArray(t) ? t.filter(Boolean).slice(0, 3) : [];
+}
+/** 最近写过/用过的顺序：先看扩展自己的顺序表，再看酒馆的 date_last_chat */
+function orbRecentCards() {
+    const all = orbCardsList();
+    const s = getSettings();
+    const order = Array.isArray(s.cardOrder) ? s.cardOrder : [];
+    const rank = new Map();
+    order.forEach((a, i) => { if (!rank.has(a)) rank.set(a, i); });
+    return all.slice().sort((a, b) => {
+        const ra = rank.has(a.avatar) ? rank.get(a.avatar) : 1e9;
+        const rb = rank.has(b.avatar) ? rank.get(b.avatar) : 1e9;
+        if (ra !== rb) return ra - rb;
+        return Number(b.date_last_chat || 0) - Number(a.date_last_chat || 0);
+    });
+}
+
+/** 头像墙那一格（原来的样子，保留给"墙"视图） */
+function orbCardRowHTML(c) {
+    const url = orbCardAvatarUrl(c);
+    const tags = orbCardTags(c);
+    const fav = c.fav === true || c.fav === 'true';
+    const editing = (() => {
+        const id = (getContext() || {}).characterId;
+        const cur = orbCardsList()[id];
+        return !!(cur && cur.avatar === c.avatar);
+    })();
+    return '<div class="ssp-ch-card' + (editing ? ' on' : '') + '" data-orb-chpick="' + esc(c.avatar || c.name) + '">'
+        + '<div class="ssp-ch-av">' + (url ? '<img src="' + esc(url) + '" loading="lazy" decoding="async" alt="">' : '<i class="fa-solid fa-user"></i>') + '</div>'
+        + '<div class="ssp-ch-meta"><b>' + esc(c.name) + (fav ? ' <i class="fa-solid fa-star ssp-ch-fav"></i>' : '') + '</b>'
+        + (tags.length ? '<span class="ssp-ch-tags">' + tags.map(t => esc(t)).join(' · ') + '</span>' : '')
+        + '</div></div>';
+}
+
+/** 列表视图的一行：头像 + 名字 + 分组 + 排序/分组按钮 —— 手机上这行比头像墙省地方得多。
+    ⚠️ 行的 key（`data-chcard` / `data-ccard*`）必须是 **`c.avatar`**，不能是 `c.avatar || c.name`：
+       头像缺省时用名字当 key，会让"分组"这类**按头像存的数据**全部落到同一个空键上
+       （实测：把所有卡的组名都写成同一个值，读回来全空）。名字只用来显示。 */
+function orbCardListRowHTML(c) {
+    const url = orbCardAvatarUrl(c);
+    const fav = c.fav === true || c.fav === 'true';
+    const grp = chCardGroupOf(c);
+    const editing = (() => {
+        const id = (getContext() || {}).characterId;
+        const cur = orbCardsList()[id];
+        return !!(cur && cur.avatar === c.avatar);
+    })();
+    const av = esc(String(c.avatar || ''));
+    return '<div class="ssp-ch-grow' + (editing ? ' on' : '') + '" data-chcard="' + av + '">'
+        + '<div class="ssp-ch-cardrow">'
+        + '<span class="ssp-ch-cav" data-orb-chpick="' + av + '">'
+        + (url ? '<img src="' + esc(url) + '" loading="lazy" decoding="async" alt="">' : '<i class="fa-solid fa-user"></i>')
+        + '</span>'
+        + '<span class="ssp-ch-cname" data-orb-chpick="' + av + '"><b>' + esc(c.name) + '</b>'
+        + (fav ? ' <i class="fa-solid fa-star ssp-ch-fav"></i>' : '') + '</span>'
+        + (grp ? '<span class="ssp-ch-gtag">' + esc(grp) + '</span>' : '')
+        + '<span class="ssp-ch-gops">'
+        + '<span class="ssp-pbtn ssp-ch-mini ssp-ch-icon" data-ccardup="' + av + '" title="上移"><i class="fa-solid fa-chevron-up"></i></span>'
+        + '<span class="ssp-pbtn ssp-ch-mini ssp-ch-icon" data-ccarddown="' + av + '" title="下移"><i class="fa-solid fa-chevron-down"></i></span>'
+        + '<span class="ssp-pbtn ssp-ch-mini ssp-ch-icon" data-ccardgrp="' + av + '" title="设置分组"><i class="fa-solid fa-folder"></i></span>'
+        + '</span></div></div>';
+}
+
+/** 点「分组」图标后，行下面长出来的输入框 */
+function orbCardGroupEditorHTML(avatar, c) {
+    const grp = chCardGroupOf(c);
+    const names = chCardGroupNames();
+    return '<div class="ssp-ch-ggedit"><datalist id="ssp_ch_cgroups">'
+        + names.map(n => '<option value="' + esc(n) + '"></option>').join('')
+        + '</datalist>'
+        + '<label class="ssp-ch-grow2"><span>分组</span>'
+        + '<input class="ssp-inp" type="text" list="ssp_ch_cgroups" data-ccardgrpin="' + esc(avatar) + '"'
+        + ' value="' + esc(grp) + '" placeholder="（留空＝未分组）如：剧情 / 工具 / 测试">'
+        + '</label>'
+        + '<div class="ssp-ch-hint">分组只是这台机器上的摆放方式，不写进卡文件（换机器不会跟着走）。</div>'
+        + '</div>';
+}
+
+function orbPickHTML() {
+    const all = orbCardsList();
+    const q = orbPickSearch.trim().toLowerCase();
+    let list = (orbPickMode === 'fav')
+        ? all.filter(c => c.fav === true || c.fav === 'true')
+        : (orbPickMode === 'all' ? all : orbRecentCards());
+    if (q) {
+        list = list.filter(c => (String(c.name).toLowerCase().indexOf(q) >= 0)
+            || orbCardTags(c).some(t => String(t).toLowerCase().indexOf(q) >= 0));
+    }
+    const total = list.length;
+    list = list.filter(chCardInPick);
+    const groups = chCardGroupNames();
+    const ungrouped = (orbPickMode === 'all' ? all : orbRecentCards()).filter(c => !chCardGroupOf(c)).length;
+    const chips = ['<span class="ssp-ch-chip' + (orbPickGroup ? '' : ' on') + '" data-ccardpick="">全部</span>']
+        .concat(groups.map(g => '<span class="ssp-ch-chip' + (orbPickGroup === g ? ' on' : '') + '" data-ccardpick="' + esc(g) + '">' + esc(g) + '</span>'))
+        .concat(ungrouped ? ['<span class="ssp-ch-chip' + (orbPickGroup === '__none__' ? ' on' : '') + '" data-ccardpick="__none__">未分组</span>'] : [])
+        .join('');
+    const head = '<div class="ssp-orb-pfilter">'
+        + '<input class="ssp-inp" type="text" data-orb-picksearch="1" placeholder="搜角色名 / 标签" value="' + esc(orbPickSearch) + '">'
+        + (orbPickSearch ? '<span class="ssp-pbtn" data-orb-pickclear="1">清除</span>' : '')
+        + '</div>'
+        + '<div class="ssp-orb-pfilter ssp-ch-modes">'
+        + '<span class="ssp-pbtn' + (orbPickMode === 'recent' ? ' primary' : '') + '" data-orb-pickmode="recent">最近</span>'
+        + '<span class="ssp-pbtn' + (orbPickMode === 'fav' ? ' primary' : '') + '" data-orb-pickmode="fav">收藏</span>'
+        + '<span class="ssp-pbtn' + (orbPickMode === 'all' ? ' primary' : '') + '" data-orb-pickmode="all">全部</span>'
+        + '<span class="ssp-sp"></span>'
+        + '<span class="ssp-pbtn' + (orbPickView === 'list' ? ' primary' : '') + '" data-ccardview="list" title="一条一行：能排序、能分组"><i class="fa-solid fa-list"></i></span>'
+        + '<span class="ssp-pbtn' + (orbPickView === 'grid' ? ' primary' : '') + '" data-ccardview="grid" title="头像墙：一屏看最多张"><i class="fa-solid fa-table-cells"></i></span>'
+        + '<span class="ssp-pbtn" data-orb-chtolist="1" title="管卡 / 导入 / 标签 / 分页仍然在酒馆原生列表里"><i class="fa-solid fa-list-ul"></i> 打开角色列表</span>'
+        + '</div>'
+        + (groups.length || ungrouped ? '<div class="ssp-ch-gbar">' + chips + '</div>' : '')
+        + '<div class="ssp-orb-pcount">' + (q || orbPickGroup ? '筛出 ' : '共 ') + list.length + (total !== list.length ? (' / ' + total) : '') + ' / ' + all.length + ' 张卡'
+        + (orbPickView === 'list' ? ' · 用 ↑↓ 调顺序' : '') + '</div>';
+    if (!list.length) {
+        return head + '<div class="ssp-orb-empty">没有匹配的卡。'
+            + (q ? '换个词试试。' : (orbPickGroup ? '这个分组下还没有卡（点「全部」看其它）' : '（这里是空的 —— 收藏夹为空？还是还没有角色卡？）')) + '</div>';
+    }
+    if (orbPickView === 'grid') {
+        return head + '<div class="ssp-ch-grid">' + list.map(orbCardRowHTML).join('') + '</div>';
+    }
+    return head + '<div class="ssp-ch-glist">' + list.map(c => (orbCardListRowHTML(c)
+        + (chCardEdit === c.avatar ? orbCardGroupEditorHTML(c.avatar, c) : ''))).join('') + '</div>';
+}
+
+/** 点一张卡：走酒馆**自己的选角 API**（`ctx.selectCharacterById`，export 出来的公开方法）。
+    ⚠️ 这里绝对不要用"点原生 .character_select 元素"那条路：
+       实测那样做时酒馆的选卡流程会**把 #rm_ch_create_block（含整个 form）从 DOM 摘掉重建**
+       （点卡 600ms 后 `document.getElementById('rm_ch_create_block')` 就是 null 了），
+       我们再 append 就挂到了脱链的孤儿节点上。走 API 则不会碰那块。
+    ⚠️ switchMenu 必须传 false —— 传 true 时酒馆会去调
+       `selectRightMenuWithAnimation('rm_ch_create_block')`，那是"在右侧抽屉里显示"，
+       会把用户的右侧面板菜单切走（我们只想在口袋里写卡）。 */
+function orbCardOpen(avatar) {
+    try {
+        const all = orbCardsList();
+        let chid = -1;
+        for (let i = 0; i < all.length; i++) { if (all[i] && all[i].avatar === avatar) { chid = i; break; } }
+        if (chid < 0) { toast('没找到这张卡（列表可能还没加载）', 'warning'); return false; }
+        const ctx = getContext() || {};
+        if (typeof ctx.selectCharacterById !== 'function') { toast('酒馆没导出选角接口，先在酒馆里切到它', 'warning'); return false; }
+        Promise.resolve(ctx.selectCharacterById(chid, { switchMenu: false })).catch(() => { });
+        return true;
+    } catch (e) { toast('打开失败：' + (e && e.message), 'warning'); return false; }
+}
+
+/** 打开写卡页签（不再"搬块"：块留在原地被 pin 样式藏住，我们只画自己的面板） */
+function orbEditorOpen() {
+    orbTab = 'editor';
+    orbEditing = null;
+    if (!orbOpenNow) { try { openOrb(); } catch (e) { } }
+    try { renderOrbPanel(); } catch (e) { }              // ← 里面会 chMountFrame + chPull
+    try {
+        const box = document.getElementById(VAULT_BOX);
+        if (box && box.scrollIntoView) box.scrollIntoView({ block: 'start' });
+    } catch (e) { }
+    return true;
+}
+/** 兼容旧接口：这一版不需要"晚点再搬"了，留着是为了测试与旧调用不炸 */
+function orbEditorMountSoon() { try { chMountFrame(); } catch (e) { } return true; }
+function orbEditorMount() { return chMountFrame(); }
+function orbEditorUnmount() { return chUnmountFrame(); }
+
+/** 新建空白卡：走原生的 `#rm_button_create`（它会设 createcharacter 并把原生字段清成 create_save） */
+function orbCardNew() {
+    try {
+        const btn = query('#rm_button_create');
+        if (btn) { btn.click(); }
+        else { toast('找不到「新建角色」按钮（可能被工坊搬到别处了）', 'warning'); return false; }
+        /* 原生新建会把原生字段清成 create_save 的值 → 等它落定再把值 pull 回我们的面板 */
+        setTimeout(() => { try { chPull(true); } catch (e) { } }, 260);
+        setTimeout(() => { try { orbEditorOpen(); } catch (e) { } }, 360);
+        setTimeout(() => { try { chPull(true); } catch (e) { } }, 620);
+        return true;
+    } catch (e) { toast('新建失败：' + (e && e.message), 'warning'); return false; }
+}
+function orbOpenNativeList() {
+    try {
+        const btn = query('#rm_button_characters');
+        if (btn) { btn.click(); toast('已打开酒馆原生的角色列表（在右侧）', 'info'); return true; }
+    } catch (e) { }
+    toast('找不到角色列表按钮', 'warning');
+    return false;
+}
+
 /** 面板里的模块表 —— 以后加功能往这里加一项
     ⚠️ 调试是**最后一个**页签：加在末尾，前面 9 个页签的顺序和位置一个都不动
        （用户要求"按钮位置不变"）。 */
 const ORB_MODULES = [
+    { id: 'pick', name: '选卡', icon: 'fa-images', render: () => orbPickHTML() },
+    { id: 'editor', name: '写卡', icon: 'fa-pen-to-square', render: () => orbEditorHTML() },
     { id: 'notes', name: '番外', icon: 'fa-feather-pointed', render: () => orbNotesHTML() },
     { id: 'persona', name: '面具', icon: 'fa-masks-theater', render: () => orbPersonaHTML() },
     { id: 'preset', name: '预设', icon: 'fa-sliders', render: () => orbPresetHTML() },
@@ -9798,9 +11290,11 @@ function orbPanelHTML() {
     const e = orbEditing;
     const cur = orbModule(orbTab) || ORB_MODULES[0];
     const tabs = ORB_MODULES.map(m => '<span class="ssp-orb-tab' + (m.id === cur.id ? ' on' : ' off')
-        + '" data-orb-tab="' + m.id + '"><i class="fa-solid ' + m.icon + '"></i>' + esc(m.name) + '</span>').join('');
+        + '" data-orb-tab="' + m.id + '" title="' + esc(m.name) + '"><i class="fa-solid ' + m.icon + '"></i>' + esc(m.name) + '</span>').join('')
+        /* 当前页签的名字放最右：手机上页签一多、换行后容易找不到自己在哪一页 */
+        + '<span class="ssp-tab-now">' + esc(cur.name) + '</span>';
     return '<div class="ssp-orb-head"><span class="ssp-orb-logo"></span>'
-        + '<div class="ssp-orb-title"><b>鼠鼠口袋</b><small>悬浮球 · ' + ORB_MODULES.length + ' 个模块</small></div>'
+        + '<div class="ssp-orb-title"><b>鼠鼠口袋</b><small>' + esc(cur.name) + ' · ' + ORB_MODULES.length + ' 个模块</small></div>'
         + '<span class="ssp-pbtn" data-orb-dbgopen="1" title="调试（脚本测试 / 一键诊断 / 抓元素）→ 见最后那个「调试」页签"><i class="fa-solid fa-code"></i></span>'
         + '<span class="ssp-pbtn" data-orb-retract="1" title="收回悬浮球（之后从酒馆「扩展」列表里的鼠鼠面板再打开）"><i class="fa-solid fa-eye-slash"></i></span>'
         + '<span class="ssp-pbtn" data-orb-close="1"><i class="fa-solid fa-xmark"></i></span></div>'
@@ -9827,11 +11321,27 @@ function renderOrbPanel() {
     if (!panel) return false;
     const oldBody = panel.querySelector('.ssp-orb-body');
     const keepTop = oldBody ? oldBody.scrollTop : 0;
+    /* ⚠️ 重画 = 把整个 .ssp-orb-body 换掉。写卡页签里现在**没有借来的 DOM 了**
+       （原生框子一直待在酒馆放它们的位置，只是被 pin 样式藏住），所以
+       重画只会换掉我们自己的骨架 → 记一下"上一帧有没有骨架"，重画后重挂 + 重读。 */
+    try { chUnmountFrameSoft(); } catch (e) { }
     panel.innerHTML = orbPanelHTML();
     const newBody = panel.querySelector('.ssp-orb-body');
     if (newBody) {
         const max = Math.max(0, (newBody.scrollHeight || 0) - (newBody.clientHeight || 0));
         newBody.scrollTop = Math.min(keepTop, max);
+    }
+    /* 写卡页签：重画后收拾骨架（第一次铺分页内容 / 重挂被换掉的原生框子 / 读一次值） */
+    if (orbTab === 'editor') {
+        try { chMountFrame(); } catch (e) { }
+        try { chSavebarInit(); } catch (e) { }
+        try { chPanesLoad(chPanesLoadedTab); } catch (e) { }
+        try { chBindNativeOnce(); } catch (e) { }
+        try { chBindOverlayWatch(); } catch (e) { }
+        if (!chPulledOnce) { chPulledOnce = true; try { chPull(true); } catch (e) { } }
+    } else {
+        chPanesLoadedTab = false;
+        chPulledOnce = false;
     }
     refreshOrbBadge();
     /* 「调试」页签：重画后把脚本内容 / 输出补回去（HTML 里只放了输出，文本框是空的） */
@@ -9865,6 +11375,9 @@ function closeOrb() {
     const root = document.getElementById('ssp_orb_root');
     if (root && root.classList) root.classList.remove('on');
     orbOpenNow = false; orbEditing = null;
+    /* 写卡块是借来的：关面板就还家（不然酒馆的右侧面板里会少一块） */
+    try { orbEditorUnmount(); } catch (e) { }
+    try { orbDbgPickOff(); } catch (e) { }
     return true;
 }
 
@@ -10378,6 +11891,20 @@ function bindOrb() {
         orbThemePreview(orbThemeDraft);
     });
 
+    /* 「选卡」页签搜索：只重画列表那一块，不重画面板（免得输入框失焦） */
+    document.addEventListener('input', ev => {
+        const el = ev.target;
+        if (!el || !el.dataset || el.dataset.orbPicksearch === undefined) return;
+        orbPickSearch = String(el.value || '');
+        const panel = document.getElementById('ssp_orb_panel');
+        if (!panel) return;
+        const body = panel.querySelector('.ssp-orb-body');
+        if (!body) return;
+        const keep = body.scrollTop;
+        body.innerHTML = orbPickHTML();
+        body.scrollTop = keep;
+    });
+
     /* 「调试」页签的脚本框：只存内容，**绝不重画面板**（重画会丢焦点和光标位置） */
     document.addEventListener('input', ev => {
         const el = ev.target;
@@ -10513,6 +12040,109 @@ function bindOrb() {
         /* 收回悬浮球：按钮就在面板里（用户要求做在球自己里面） */
         /* 顶栏：调试窗（大部分人用不到，所以做在收回按钮旁边的小图标） */
         if (t.closest('[data-orb-dbgopen]')) { orbDbgOpenWin(); return; }
+        /* ---- 「选卡」页签 ---- */
+        {
+            /* 卡的列表/墙视图切换、分组筛选、上下移、改分组 */
+            const cv = t.closest('[data-ccardview]');
+            if (cv) { orbPickView = cv.dataset.ccardview || 'list'; chCardEdit = ''; renderOrbPanel(); return; }
+            const cp = t.closest('[data-ccardpick]');
+            if (cp) { orbPickGroup = cp.dataset.ccardpick || ''; chCardEdit = ''; renderOrbPanel(); return; }
+            const cu = t.closest('[data-ccardup]');
+            if (cu) { chCardMove(cu.dataset.ccardup, -1, chPickCurList()); return; }
+            const cd = t.closest('[data-ccarddown]');
+            if (cd) { chCardMove(cd.dataset.ccarddown, 1, chPickCurList()); return; }
+            const cg = t.closest('[data-ccardgrp]');
+            if (cg) {
+                const av = cg.dataset.ccardgrp;
+                chCardEdit = (chCardEdit === av) ? '' : av;
+                renderOrbPanel();
+                return;
+            }
+        }
+        if (t.closest('[data-chsave]')) { chSave(); return; }
+        if (t.closest('[data-chfav]')) { chNative('favorite_button'); return; }
+        if (t.closest('[data-chadv]')) { chNative('advanced_div'); return; }
+        /* 「…更多」：展开/收起那一排我们自己的图标按钮（原生按钮一颗都不搬） */
+        {
+            const mb = t.closest('[data-chmore]');
+            if (mb) {
+                const box = document.querySelector('#ssp_orb_panel [data-chmorebox]');
+                if (box) {
+                    box.hidden = !box.hidden;
+                    mb.classList.toggle('on', !box.hidden);
+                }
+                return;
+            }
+        }
+        /* 「备选开场白」那一行右上角的「原生面板」小按钮（兼容旧的 data-choverlay 用法） */
+        if (t.closest('[data-chgreetnative]')) { chNative('open_alternate_greetings'); return; }
+        /* ---- 「备选开场白」列表：加 / 上移下移 / 删 / 分组筛选 / 展开 ---- */
+        {
+            if (t.closest('[data-chgadd]')) { chGreetAdd(); return; }
+            const gp = t.closest('[data-chgpick]');
+            if (gp) { chGreetPick = gp.dataset.chgpick || ''; chGreetOpen = -1; chGreetRender(); return; }
+            const gu = t.closest('[data-chgup]');
+            if (gu) { chGreetMove(Number(gu.dataset.chgup), -1); return; }
+            const gd = t.closest('[data-chgdown]');
+            if (gd) { chGreetMove(Number(gd.dataset.chgdown), 1); return; }
+            const gx = t.closest('[data-chgdel]');
+            if (gx) { chGreetDel(Number(gx.dataset.chgdel)); return; }
+            const gt = t.closest('[data-chgtoggle]');
+            if (gt) {
+                if (t.closest('[data-chgup],[data-chgdown],[data-chgdel]')) return;   // 别把操作当展开
+                const i = Number(gt.dataset.chgtoggle);
+                chGreetOpen = (chGreetOpen === i) ? -1 : i;
+                chGreetRender();
+                return;
+            }
+        }
+        {
+            const ov = t.closest('[data-choverlay]');
+            if (ov) { chOverlay(ov.dataset.choverlay); return; }
+            const nv = t.closest('[data-chnative]');
+            if (nv) { chNative(nv.dataset.chnative); return; }
+            const av = t.closest('[data-chavbtn]');
+            if (av) {
+                /* 头像：**不自己实现文件选择**，去点酒馆自己的 file 控件 ——
+                   格式转换、裁剪、预览、上传那条链一个字都不用改（见文件头"接口层③"）。
+                   ⚠️ 优先点 **file input 本身**：`#avatar_div_div`（那个 label）现在被我们
+                      CSS 藏起来了，点一个 display:none 的 label 在部分浏览器里不会弹选择框；
+                      而在同一个用户手势里对 file input 调 .click() 是标准做法。 */
+                const inp = document.getElementById('add_avatar_button');
+                const lab = document.getElementById('avatar_div_div');
+                if (inp && inp.click) { try { inp.click(); } catch (e) { } }
+                else if (lab && lab.click) { try { lab.click(); } catch (e) { } }
+                else toast('找不到酒馆的头像控件', 'warning');
+                return;
+            }
+        }
+        if (t.closest('[data-orb-chnew]')) { orbCardNew(); return; }
+        if (t.closest('[data-orb-chtolist]')) { orbOpenNativeList(); return; }
+        if (t.closest('[data-orb-pickclear]')) { orbPickSearch = ''; renderOrbPanel(); return; }
+        {
+            const pm = t.closest('[data-orb-pickmode]');
+            if (pm) { orbPickMode = pm.dataset.orbPickmode || 'recent'; renderOrbPanel(); return; }
+            const pc = t.closest('[data-orb-chpick]');
+            if (pc) {
+                orbCardOpen(pc.dataset.orbChpick);
+                /* ⚠️ 顺序很重要：先切到写卡页签（#ssp_editor_box 才会存在），再轮询把块搬进来。
+                   还要按"酒馆自己点卡会重建写卡块"的实测行为等一会儿（见 orbCardOpen 注释）。 */
+                setTimeout(() => { try { orbEditorOpen(); } catch (e) { } }, 350);
+                orbEditorMountSoon(24);
+                return;
+            }
+        }
+        /* ---- 「写卡」页签里的分页切换 ---- */
+        {
+            const ct = t.closest('[data-orb-cftab]');
+            if (ct) {
+                /* 离开这一页前先把改动落回原生（页签之间来回切不该丢字） */
+                try { chPush(true); } catch (e) { }
+                chTab = ct.dataset.orbCftab || 'persona';
+                chPanesLoad(true);               // 只重画分页内容：标题栏 / 保存条 / 原生那排都不动
+                return;
+            }
+        }
         /* ---- 「调试」页签里的按钮（以前是独立窗口自己接监听；现在是页签，走面板委托）---- */
         if (t.closest('[data-ssp-dbgclose]')) { orbDbgClose(); return; }
         if (t.closest('[data-ssp-dbgclear]')) { orbDbgClear(); return; }
@@ -10944,11 +12574,15 @@ function bindOrb() {
         /* 模块标签页 */
         const tabEl = t.closest('[data-orb-tab]');
         if (tabEl) {
-            orbTab = tabEl.dataset.orbTab || 'notes'; orbEditing = null;
+            const nextTab = tabEl.dataset.orbTab || 'notes';
+            /* 离开「写卡」时先把写卡块还家，再重画（不然它会被 innerHTML 一起清掉 → 酒馆就再也找不到它了） */
+            if (orbTab === 'editor' && nextTab !== 'editor') { try { orbEditorUnmount(); } catch (e) { } }
+            orbTab = nextTab; orbEditing = null;
             orbWbBinding = null;
             orbWbCloseEntries(true);
             renderOrbPanel();
-            if (orbTab === 'chat') orbChatsFetch();            // 存档页：打开就拉一次列表
+            /* 回到「写卡」页签：把块再搬进来 */
+            if (orbTab === 'editor') { setTimeout(() => { try { orbEditorMountSoon(28); } catch (e) { } }, 40); }            if (orbTab === 'chat') orbChatsFetch();            // 存档页：打开就拉一次列表
             if (orbTab === 'bg') { try { orbBgSyncChar(true); } catch (e) { } orbBgFetch(); } // 背景页：打开就对齐 + 拉列表
             if (orbTab === 'world') orbWorldRefresh();         // 世界书页：顺手刷一次清单
             if (orbTab === 'dlc') orbDlcEnsure();              // DLC 页：按需拉那本书的条目
@@ -11125,6 +12759,24 @@ function bindOrb() {
 
     document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && orbOpenNow) closeOrb(); });
 
+    /* 口袋开着时点**酒馆原生**的「新建角色」：也走"口袋写卡"这条路。
+       ⚠️ 为什么必须单独接一下：原生流程只把表单设成 createcharacter 并把块留在右侧面板
+          （`select_rm_create` 不显示写卡块），不经过我们的页签；
+          而工坊可能把那颗按钮搬到别处，所以用**捕获阶段 + id 判定**，不依赖选择器位置。 */
+    if (!bindOrb.nativeCreateBound) {
+        bindOrb.nativeCreateBound = true;
+        document.addEventListener('click', ev => {
+            const t = ev.target;
+            if (!t || !t.closest) return;
+            if (!t.closest('#rm_button_create')) return;
+            if (!orbOpenNow) return;                  // 口袋没开就别抢，让酒馆自己走
+            try {
+                globalThis.setTimeout(() => { try { orbEditorOpen(); } catch (e) { } }, 300);
+                orbEditorMountSoon(28);
+            } catch (e) { }
+        }, true);
+    }
+
     /* ⚠️ 窗口大小变化时，按「离边距离」重算位置 ——
        这就是用户要的"窗口缩小，球跟着贴边走"。以前存绝对像素，一缩窗口球就脱边/跑出屏幕。 */
     if (!bindOrb.resizeBound) {
@@ -11170,6 +12822,16 @@ function init() {
     registerThinkDisplayHook();                                  // 思维链收纳：显示层兜底（流式半截标签也不上屏）
     registerThinkEvents();                                       // 思维链收纳：生成结束/收到消息/换聊天时收纳
     if (getSettings().orbOn !== false) { mountOrb(); bindOrb(); }
+    /* 面板一挂上就绑事件委托（含选卡页的分组框、开场白列表），别等到进写卡页才绑 */
+    try {
+        let bt = 0;
+        const bindLater = () => {
+            if (chBindNativeOnce()) return;
+            if (bt++ > 20) return;
+            globalThis.setTimeout?.(bindLater, 300);
+        };
+        bindLater();
+    } catch (e) { }
     bindHdAvatars();
     bindPocketMenuEntry();                                            // 「鼠鼠口袋」入口挂进扩展程序展开栏
 
@@ -11286,6 +12948,23 @@ if (globalThis.__SSP_TEST__) {
         get orbWbLastKey() { return orbWbLastKey; }, set orbWbLastKey(v) { orbWbLastKey = v; },
         mountSettingsPanel, openSettingsPanel, closeSettingsPanel, panelOpen, settingsPanelHTML, bindSettings, refreshCardSection, trimListCreatorNotes,
         sspIntegrityProbe, sspHookErrors, sspPushErr, SSP_ERR_LOG, SSP_ERR_KEEP, sspBoxOf,
+        orbEditorOpen, orbEditorMount, orbEditorUnmount, orbEditorMountSoon, orbCardOpen, orbCardNew, orbOpenNativeList,
+        CH_TABS, get chTab() { return chTab; }, set chTab(v) { chTab = v; },
+        VAULT_SCHEMA, VAULT_GROUPS, chFldById, chTabFields, chGroupsHTML, chRowHTML, chFldHTML, chAvatarRowHTML,
+        chPull, chPush, chSave, chVal, chMine, chSetMine, chDirtyReset, chPanesClear, chSyncTagChips, chCount, chPanesLoad,
+        chMountFrame, chUnmountFrame, chOverlay, chOverlayClose, chNative, chRefreshAvatars,
+        chRefreshSpecial, chFillSelects, chRefreshHead, chSyncFav, chSay, chSavebarInit,
+        chGreetArr, chGreetAdd, chGreetDel, chGreetMove, chGreetRender, chGreetRowsRender, chGreetChipsRender,
+        chGreetSetGroup, chGreetSetText, chGreetGroups, chGreetText, chGreetGroup,
+        chTagPool, chTagsRecollect, chTagsDatalist, chNativeEl, chPinSheet,
+        get chGreetOpen() { return chGreetOpen; }, set chGreetOpen(v) { chGreetOpen = v; },
+        get chGreetPick() { return chGreetPick; }, set chGreetPick(v) { chGreetPick = v; },
+        get chDirty() { return chDirty; }, get chTabNow() { return chTab; },
+        orbPickHTML, orbCardsList, orbCardAvatarUrl, orbRecentCards, orbCardListRowHTML, orbCardGroupEditorHTML,
+        chCardGroupOf, chCardSetGroup, chCardGroupNames, chCardMove, chCardInPick, chPickCurList,
+        get orbPickView() { return orbPickView; }, set orbPickView(v) { orbPickView = v; },
+        get orbPickGroup() { return orbPickGroup; }, set orbPickGroup(v) { orbPickGroup = v; },
+        get chCardEdit() { return chCardEdit; }, set chCardEdit(v) { chCardEdit = v; },
         get boxOpen() { return boxOpen; }, set boxOpen(v) { boxOpen = v; },
         get renaming() { return renaming; }, set renaming(v) { renaming = v; },
         get drag() { return drag; }, set drag(v) { drag = v; },
