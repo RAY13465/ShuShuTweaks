@@ -241,6 +241,14 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
       别跟它撞名（撞了会把圆点顶出轨道，就是"开关错位"） */
 .ssp-cardsec { margin-top: 10px; padding-top: 6px; border-top: 1px dashed rgba(255, 255, 255, .16); }
 .ssp-cardsec[hidden] { display: none; }
+/* ⚠️ 「旋钮」那一堆在选了「原版」时收起，但**样式下拉框永远不收起**
+   （以前整段一起 hidden → 用户选完原版就再也找不到下拉、换不回来了，实测报过） */
+.ssp-cardsec .ssp-cardknobs[hidden] { display: none !important; }
+.ssp-cardsec .ssp-cnote {
+    margin: 2px 0 6px; padding: 6px 8px; font-size: 11px; line-height: 1.6;
+    border-left: 2px solid var(--ssp-accent, rgba(255, 255, 255, .5));
+    background: var(--ssp-fill2, rgba(255, 255, 255, .05)); opacity: .9;
+}
 .ssp-crow { display: flex; align-items: center; gap: 8px; margin: 4px 0; min-width: 0; }
 .ssp-crow.wide { flex-wrap: wrap; }
 .ssp-clabel { flex: 0 0 62px; font-size: 11.5px; opacity: .78; }
@@ -507,14 +515,19 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
         行高其实是被标签撑的；不折行 + 让滑块吃掉剩余宽度，行回落到 ~30px
      ③ 分区标题可折叠（省的是"翻到这一块"的距离，不是动排布）
    ⚠️ 以后别再加 grid 两列 —— 试过，用户明确说"双排好难调整"。 */
-@media (max-width: 560px), (pointer: coarse) {
-    #ssp_panel .ssp-cardsec > .ssp-crow { min-height: 34px; margin: 1px 0; padding: 2px 0; gap: 8px; }
-    #ssp_panel .ssp-cardsec .ssp-clabel { flex: 0 0 auto; font-size: 12px; white-space: nowrap; }
-    #ssp_panel .ssp-cardsec .ssp-crange { flex: 1 1 auto; width: auto; min-width: 60px; }
-    #ssp_panel .ssp-cardsec .ssp-cinput, #ssp_panel .ssp-cardsec select.ssp-cinput { min-width: 0; }
-    #ssp_panel .ssp-cardsec .ssp-ccheck { font-size: 11px; gap: 4px; }
-    #ssp_panel .ssp-cardsec .ssp-cval { min-width: 30px; font-size: 11px; }
-}
+/* ---------- 角色卡样式：行的通用规则（**不放在媒体查询里**） ----------
+   ⚠️ 这一组以前写在下面的手机媒体查询里，结果**桌面端全都不生效**：
+      桌面上标签会折行（"角色卡样式" 占两行 → 行变高），滑块也没有最小宽度。
+      （单列布局 e2e 一直在报"标签折行"，根因就是这个——不是没写，是写在了只有手机才命中的块里。）
+   行的选择器用**后代**（不是 `>`）：v1.31.54 起旋钮行被包进了 .ssp-cardknobs。 */
+#ssp_panel .ssp-cardsec .ssp-crow { min-height: 34px; margin: 1px 0; padding: 2px 0; gap: 8px; }
+#ssp_panel .ssp-cardsec .ssp-cardknobs { display: block; }
+#ssp_panel .ssp-cardsec .ssp-cardknobs[hidden] { display: none !important; }
+#ssp_panel .ssp-cardsec .ssp-clabel { flex: 0 0 auto; font-size: 12px; white-space: nowrap; }
+#ssp_panel .ssp-cardsec .ssp-crange { flex: 1 1 auto; width: auto; min-width: 60px; }
+#ssp_panel .ssp-cardsec .ssp-cinput, #ssp_panel .ssp-cardsec select.ssp-cinput { min-width: 0; }
+#ssp_panel .ssp-cardsec .ssp-ccheck { font-size: 11px; gap: 4px; }
+#ssp_panel .ssp-cardsec .ssp-cval { min-width: 30px; font-size: 11px; }
 
 /* ==========================================================================
    顶部「收藏 / 热插拔」那排头像（#CharListButtonAndHotSwaps 里的 .hotswap）

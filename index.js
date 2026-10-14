@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 鼠鼠面板工坊 ShuShu Panel —— v0.3
  * ---------------------------------------------------------------------------
  * 把酒馆「角色管理面板」做成可装配的模块：
@@ -3136,7 +3136,14 @@ function saveCardOrder() {
     const s = cardOrderSettings();
     const visible = cardEls().map(cardAvatarOf).filter(Boolean);
     const seen = new Set(visible);
-    s.cardOrder = visible.concat(s.cardOrder.filter(a => !seen.has(a)));
+    /* ⚠️ 顺手清掉"指向已经不存在的角色"的僵尸条目：删过卡之后旧名字会一直留在顺序表里
+       （实测堆过 5 条），不会显示错，但越攒越多、排查时看不懂。 */
+    let alive = null;
+    try {
+        const ctx = getContext() || {};
+        if (Array.isArray(ctx.characters)) alive = new Set(ctx.characters.map(c => c && c.avatar).filter(Boolean));
+    } catch (e) { }
+    s.cardOrder = visible.concat(s.cardOrder.filter(a => !seen.has(a) && (!alive || alive.has(a))));
     save();
     return s.cardOrder.length;
 }
@@ -4489,7 +4496,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.53';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.54';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4612,6 +4619,19 @@ function sspIntegrityProbe() {
         collapsed.forEach(sec => sec.classList.remove('ssp-folded'));
         const afterTop = cardSecEl.getBoundingClientRect().top;
         detail.角色卡样式可视性 = { 折叠前top: Math.round(beforeTop), 折叠后top: Math.round(afterTop), 折叠后一屏可见行数: visRows, 行总数: crowN, 面板体可视高: (query('#ssp_panel .ssp-p-body') || {}).clientHeight || 0 };
+        /* ⚠️ 用户实测过的坑：选「原版（不改动）」之后，那一整块连同**下拉框自己**被 hidden →
+           用户再也找不到下拉、换不回任何样式。这里把"下拉必须一直可见"变成机器可查的一条。 */
+        try {
+            const selEl = query('#ssp_cardslot [data-ssp-card-style]');
+            const secVis = !!(cardSecEl && cardSecEl.getClientRects().length);
+            const selVis = !!(selEl && selEl.getClientRects().length);
+            const styleNow = cardStyleSettings().style;
+            sspCk(L, cks, '样式下拉框「选原版后还在」', !!selEl && (selVis || styleNow !== 'none'),
+                !selEl ? '★ 找不到 #ssp_cardslot [data-ssp-card-style] —— 没法换样式'
+                    : (selVis ? ('可见，当前 ' + styleNow) : ('★ 下拉框不可见（当前样式 ' + styleNow + '）—— 用户换不回来了！')));
+            if (secVis) { /* 整段在就行，不用再断言 */ }
+        } catch (e) { }
+
         sspCk(L, cks, '角色卡样式「看得见」', beforeTop < globalThis.innerHeight,
             beforeTop < globalThis.innerHeight
                 ? ('起始位置 top=' + Math.round(beforeTop) + '（视口高 ' + globalThis.innerHeight + '），折叠上面那些分区后能看见 ' + visRows + '/' + crowN + ' 行')
@@ -4992,8 +5012,18 @@ function cardDrawerHTML() {
         `<input class="ssp-crange" type="range" data-ssp-card-knob="${key}" min="${min}" max="${max}" step="${step}" value="${c[key]}">
          <b class="ssp-cval" data-ssp-card-out="${key}">${c[key]}${unit}</b>`);
     const check = (key, label) => `<label class="ssp-ccheck"><input type="checkbox" data-ssp-card-check="${key}" ${c[key] ? 'checked' : ''}><span>${label}</span></label>`;
-    return `<div class="ssp-cardsec"${on ? '' : ' hidden'}>
+    /* ⚠️⚠️ 这一整块的 hidden **绝对不能包住那个样式下拉框**。
+       以前的写法是 `<div class="ssp-cardsec"${on ? '' : ' hidden'}>` —— 整段一起收，于是：
+         · 用户在下拉里选了第一项「原版（不改动）」→ 整段（含下拉自己）被 hidden → **那块直接消失**；
+         · 每次重画面板都按"当前样式是不是 none"重算 → 永远 hidden →
+           **用户再也找不到那个下拉，换不回任何样式**。
+           （用户实测：「点击角色卡样式里的第一个也就是原版选项，就会直接消失」，
+             以及最早的「恢复原版后角色卡样式那块消失」。）
+       现在的结构：**下拉永远在**；只有下面那堆"旋钮"跟着 hidden，并给一句说明告诉用户怎么换回来。 */
+    return `<div class="ssp-cardsec">
         ${row('角色卡样式', '<select class="text_pole ssp-cinput" data-ssp-card-style="1">' + opts + '</select>')}
+        ${on ? '' : '<div class="ssp-note ssp-cnote">现在用的是 <b>原版（不改动）</b>：角色卡完全按酒馆本来的样子显示。想恢复魔改，就在上面这个下拉里再选一个样式（9 种都在里面）。</div>'}
+        <div class="ssp-cardknobs"${on ? '' : ' hidden'}>
         ${row('高清头像', '<label class="ssp-ccheck"><input type="checkbox" data-ssp-card-check="hd" ' + (c.hd ? 'checked' : '') + '><span>换成原图（酒馆缩略图只有 96×144，铺满整行会糊）</span></label>', true)}
         ${/* ⚠️ 这几行是手机上的"床头开关"：必须排在最前面看得见（见函数头注释） */''}
         ${slider('h', '卡片高度', 40, 420, 1, 'px')}
@@ -5012,9 +5042,10 @@ function cardDrawerHTML() {
             <span class="ssp-creset menu_button" data-ssp-card-color="songBg" data-ssp-color-reset="1">默认紫</span>`, true)}
         ${row('显示什么', `<div class="ssp-csws">${check('showDesc', '简介')}${check('showTags', '标签')}${check('showVer', '版本号')}${check('showStar', '收藏标记')}</div>`, true)}
         ${row('学生证', `<input class="text_pole ssp-cinput" data-ssp-card-text="school" value="${esc(c.school)}" placeholder="校名">
-            <input class="text_pole ssp-cyear" data-ssp-card-text="year" value="${esc(c.year)}" placeholder="年份">
+            <input type="text" class="text_pole ssp-cyear" data-ssp-card-text="year" value="${esc(c.year)}" placeholder="年份">
             <select class="text_pole ssp-cyear" data-ssp-card-select="idTheme" title="证件配色">${Object.keys(CARD_ID_THEMES)
             .map(k => `<option value="${k}"${c.idTheme === k ? ' selected' : ''}>${CARD_ID_THEMES[k].name}</option>`).join('')}</select>`, true)}
+        </div>
         <div class="ssp-note" style="opacity:.6">9 种样式的完整预览在 <b>角色卡美化-原型.html</b> 里；
         ▦ 网格模式会被接管成两列封面墙。</div>
         <div class="ssp-crow"><span class="ssp-clabel">对不上图？</span>
@@ -12854,7 +12885,7 @@ const started = init();
 if (globalThis.__SSP_TEST__) {
     globalThis.__SSP_TEST_API = {
         MODULE_NAME, BUTTONS, ZONES, ZONE_IDS, MOUNT_ID, BOX_ID, TOGGLE_ID, ZONE_PREFIX, ALIGNS, ALIGN_CSS, SCHEMA_VERSION,
-        defaultLayout, getSettings, apply, restoreAll, reclaim,
+        defaultLayout, getSettings, apply, restoreAll, reclaim, save,
         ensureMount, ensureZoneEls, ensureModuleEls, placeModules, renderMount,
         putButton, toggleRow, setLayers, setAlign, addModule, delModule, renameModule,
         moveModule, moveModuleToOtherZone, locateButton, zoneOfModule, currentLayout, normalizeLayout,
