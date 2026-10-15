@@ -4441,7 +4441,7 @@ function bindSettings(root) {
             }
             /* ---- 快捷按钮托盘 ---- */
             if (t.dataset.sspQbon !== undefined) { quickBarSettings().on = Boolean(t.checked); save(); qbMount(); return; }
-            if (t.dataset.sspQbalign) { quickBarSettings().align = t.value; save(); qbPlace(); return; }
+            if (t.dataset.sspQbanchor) { quickBarSettings().anchor = t.value; save(); qbPlace(); return; }
             if (t.dataset.sspQblabel !== undefined) { quickBarSettings().showLabel = Boolean(t.checked); save(); qbMount(); return; }
             if (t.dataset.sspQbbtn) { quickBarSettings().btns[t.dataset.sspQbbtn] = Boolean(t.checked); save(); qbMount(); return; }
             if (t.dataset.sspQbnum) { quickBarSettings()[t.dataset.sspQbnum] = Number(t.value); save(); qbMount(); return; }
@@ -4506,7 +4506,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.56';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.57';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4659,7 +4659,8 @@ function sspIntegrityProbe() {
                 sspCk(L, cks, '快捷按钮托盘', !!qel && (vis || panelOn),
                     !qel ? '★ 托盘不在（设置里开着但没建起来）'
                         : (panelOn && !vis ? ('按钮 ' + qbList().length + ' 个；设置面板开着时被它盖住是正常的，关掉面板就会回来')
-                            : ('按钮 ' + qbList().length + ' 个，' + (above ? '位置在输入框上方 ✓' : '★ 不在输入框上方（可能在别的页面或被挡住了）'))));
+                            : ('按钮 ' + qbList().length + ' 个 · 挂在「' + (QB_ANCHOR_NAME[q.anchor] || q.anchor) + '」，'
+                            + (above ? '位置在输入区上方 ✓' : '★ 不在输入区上方（可能在别的页面或被挡住了）'))));
             } else { sspCk(L, cks, '快捷按钮托盘', true, '设置里关着（跳过）'); }
         } catch (e) { }
         sspCk(L, cks, '角色卡样式「看得见」', beforeTop < globalThis.innerHeight,
@@ -4892,10 +4893,8 @@ function settingsPanelHTML() {
 const q0 = quickBarSettings();
 const secQuick = sec('fa-wand-magic-sparkles', '快捷按钮托盘', [
     frow('显示托盘', '浮在输入框上方的一小条（只在聊天页显示）', fsw('data-ssp-qbon="1"', q0.on !== false)),
-    frow('贴哪边', '靠左 / 居中 / 靠右', `<select class="ssp-inp" data-ssp-qbalign="1">
-        <option value="left"${q0.align === 'left' ? ' selected' : ''}>靠左</option>
-        <option value="center"${q0.align === 'center' ? ' selected' : ''}>居中</option>
-        <option value="right"${q0.align === 'right' ? ' selected' : ''}>靠右</option>
+    frow('挂在哪', '默认「发送按钮上方」——跟着发送键走，聊天栏居中/靠右都不会飘到别处', `<select class="ssp-inp" data-ssp-qbanchor="1">
+        ${QB_ANCHORS.map(k => '<option value="' + k + '"' + (q0.anchor === k ? ' selected' : '') + '>' + esc(QB_ANCHOR_NAME[k]) + '</option>').join('')}
     </select>`),
     frow('按钮大小', '手机上太小会点不准', `<input class="ssp-crange" type="range" data-ssp-qbnum="size" min="24" max="56" step="1" value="${q0.size}">
         <b class="ssp-cval" data-ssp-qbout="size">${q0.size}px</b>`),
@@ -9667,13 +9666,30 @@ const QUICK_BUTTONS = [
     },
 ];
 
+/** 可选的锚点（顺序就是下拉里的顺序） */
+const QB_ANCHORS = ['send', 'form-right', 'form-center', 'form-left', 'viewport-right'];
+const QB_ANCHOR_NAME = {
+    'send': '发送按钮上方（跟着发送键）',
+    'form-right': '输入框上方 · 靠右',
+    'form-center': '输入框上方 · 居中',
+    'form-left': '输入框上方 · 靠左',
+    'viewport-right': '贴浏览器右下角',
+};
+
 /** 托盘设置（归一化，读的时候顺手补默认值） */
 function quickBarSettings() {
     const s = getSettings();
     if (!s.quickBar || typeof s.quickBar !== 'object') s.quickBar = {};
     const q = s.quickBar;
     if (typeof q.on !== 'boolean') q.on = true;
-    if (['left', 'center', 'right'].indexOf(q.align) < 0) q.align = 'right';
+    /* 锚点：托盘横向挂在哪
+         · 'send'           = 右对齐**发送按钮**（默认，用户要的：跟着发送键走，不会飘到跟输入区无关的地方）
+         · 'form-right' / 'form-center' / 'form-left' = 对齐输入框的右/中/左
+         · 'viewport-right' = 老的"贴浏览器右下角"
+       ⚠️ 老版本存的是 q.align（left/center/right）——这里**直接弃用**：用户明确说"默认改成发送按钮"。
+          想回旧位置，在新下拉里选一下即可（位置都还在）。 */
+    if (QB_ANCHORS.indexOf(q.anchor) < 0) q.anchor = 'send';
+    if (q.align !== undefined) delete q.align;
     if (typeof q.size !== 'number' || !isFinite(q.size)) q.size = 34;
     if (typeof q.radius !== 'number' || !isFinite(q.radius)) q.radius = 10;
     if (typeof q.opacity !== 'number' || !isFinite(q.opacity)) q.opacity = 0.82;
@@ -9737,16 +9753,39 @@ function qbPlace() {
         const formVisible = !!(form && form.getClientRects().length);
         if (!chatVisible) { el.style.display = 'none'; return false; }
         el.style.display = 'flex';
-        if (formVisible) {
-            const r = form.getBoundingClientRect();
-            el.style.bottom = Math.round(Math.max(0, window.innerHeight - r.top + q.offset)) + 'px';
+        /* 纵向：贴着输入区的**上沿**（输入框会随字数长高，所以每次实时算）。
+           取 form 和发送按钮里更靠上的那个 → 保证既不盖输入框、也不盖发送键。 */
+        const but = document.getElementById('send_but');
+        const butVisible = !!(but && but.getClientRects().length);
+        const fr = formVisible ? form.getBoundingClientRect() : null;
+        const br = butVisible ? but.getBoundingClientRect() : null;
+        const topY = (fr && br) ? Math.min(fr.top, br.top) : (fr ? fr.top : (br ? br.top : null));
+        if (topY !== null) {
+            el.style.bottom = Math.round(Math.max(0, window.innerHeight - topY + q.offset)) + 'px';
         } else {
             el.style.bottom = Math.round(q.offset + 60) + 'px';    // 兜底：找不到输入框时别贴死底部
         }
-        const a = q.align;
-        if (a === 'left') { el.style.left = '10px'; el.style.right = 'auto'; el.style.transform = 'none'; }
-        else if (a === 'center') { el.style.left = '50%'; el.style.right = 'auto'; el.style.transform = 'translateX(-50%)'; }
-        else { el.style.right = '10px'; el.style.left = 'auto'; el.style.transform = 'none'; }
+
+        /* 横向：按锚点算 left，最后**统一夹进视口**（避免算出负数或被右边缘截掉） */
+        const vw = window.innerWidth;
+        const w = el.offsetWidth || 84;
+        const pad = 10;
+        const anchor = q.anchor;
+        let leftX = null;
+        /* 发送按钮不可见时（没连 API 等）→ 按用户定的退到"输入框右边缘" */
+        const refRight = (anchor === 'send' && !butVisible && fr) ? fr.right
+            : (anchor === 'send' && br) ? br.right : null;
+        if (anchor === 'send') {
+            if (refRight !== null) leftX = refRight - w;              // 右对齐参照物的右边缘
+            else if (fr) leftX = fr.right - w;                        // 连输入框都没有 → 也别掉到视口边去
+        } else if (anchor === 'form-right' && fr) leftX = fr.right - w;
+        else if (anchor === 'form-center' && fr) leftX = fr.left + fr.width / 2 - w / 2;
+        else if (anchor === 'form-left' && fr) leftX = fr.left;
+        if (leftX === null) leftX = vw - w - pad;                     // 'viewport-right' 或什么都量不到时的兜底
+        leftX = Math.max(pad, Math.min(vw - w - pad, leftX));
+        el.style.left = Math.round(leftX) + 'px';
+        el.style.right = 'auto';
+        el.style.transform = 'none';
         /* ⚠️ 最后一关：**被别的面板盖住就藏起来**。
            光看"#chat 有没有盒子"不够：手机上打开右侧抽屉（角色列表）时聊天区还在、只是被盖住了，
            托盘会浮在抽屉上面显得很怪；而桌面端抽屉未必盖住输入框，那时就该继续显示。
@@ -13265,6 +13304,7 @@ if (globalThis.__SSP_TEST__) {
         chGreetSetGroup, chGreetSetText, chGreetGroups, chGreetText, chGreetGroup,
         chTagPool, chTagsRecollect, chTagsDatalist, chNativeEl, chPinSheet,
         QUICK_BUTTONS, QUICK_BAR_ID, quickBarSettings, qbList, qbHTML, qbMount, qbPlace, qbRun, qbScrollBottom, qbBind,
+        QB_ANCHORS, QB_ANCHOR_NAME,
         get chGreetOpen() { return chGreetOpen; }, set chGreetOpen(v) { chGreetOpen = v; },
         get chGreetPick() { return chGreetPick; }, set chGreetPick(v) { chGreetPick = v; },
         get chDirty() { return chDirty; }, get chTabNow() { return chTab; },
