@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 鼠鼠面板工坊 ShuShu Panel —— v0.3
  * ---------------------------------------------------------------------------
  * 把酒馆「角色管理面板」做成可装配的模块：
@@ -4496,7 +4496,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.54';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.55';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -11703,6 +11703,14 @@ function bindWbFocusWatch() {
     return true;
 }
 
+/** "刚刚有一次会改变面板显隐的点击"：用来吞掉浏览器补发的那一发**合成 click**。
+     · scope='in'  ：点球**开**面板 → 幽灵 click 落在面板里刚出现的内容上
+                    （用户报的"点一下悬浮窗 → 世界书条目被算成点了两次"）
+     · scope='out' ：点关闭/遮罩**关**面板 → 幽灵 click 落在面板下面酒馆的界面上
+    都只吞**第一发**、且有时间窗，不会影响用户真正的下一次点击。 */
+let orbGhostUntil = 0;
+let orbGhostScope = '';
+
 function bindOrb() {
     if (bindOrb.done) return false;
     bindOrb.done = true;
@@ -11787,10 +11795,33 @@ function bindOrb() {
         const el = ev.target && ev.target.closest ? ev.target.closest('#ssp_orb') : null;
         if (!el) return;
         const o = getBall(); if (!o) return;
+        /* ⚠️ 修「点一下球 → 世界书条目被算成点了两次」：
+           手机点球是"触摸"，浏览器在 pointerup 之后还会补发一次**合成 click**；
+           球是在 pointerup 里开/关面板的 → 面板瞬间出现在手指底下 →
+           那一发合成 click 就落到了**刚显示出来的面板内容**上（于是世界书条目被点了两次）。
+           按规范"取消 pointerdown 会抑制后续兼容鼠标事件"，但实测在 Chrome 里
+           **它会把后面的 pointermove 也掐掉 → 球拖不动**，所以不能用。
+           改用下面那道 **click 捕获阶段的"吞一发"**：只吞"跟这次显隐同方向"的第一发 click。 */
+        orbGhostUntil = Date.now() + 600;
+        orbGhostScope = 'in';                 // 开面板 → 吞"面板内"的第一发幽灵 click
         const r = o.getBoundingClientRect();
         dragging = true; moved = false;
         sx = ev.clientX; sy = ev.clientY; ox = r.left; oy = r.top;
         try { o.setPointerCapture(ev.pointerId); } catch (e) { }
+    }, true);
+    /* 兜底：跟着"这次点击改变了面板显隐"的那一发幽灵 click，直接吞掉（只吞一发、有时间窗）。
+       · scope='in'  → 点球开面板：吞落在**面板内**的那一发
+       · scope='out' → 点关闭/遮罩关面板：吞落在**面板外**（下面酒馆界面上）的那一发 */
+    document.addEventListener('click', ev => {
+        if (!orbGhostUntil || Date.now() > orbGhostUntil) { orbGhostUntil = 0; orbGhostScope = ''; return; }
+        const t = ev.target;
+        const inPanel = !!(t && t.closest && t.closest('#ssp_orb_root, #ssp_orb_panel'));
+        if (orbGhostScope === 'in' && !inPanel) return;      // 方向不对 → 那是用户的真点击，放行
+        if (orbGhostScope === 'out' && inPanel) return;
+        orbGhostUntil = 0; orbGhostScope = '';
+        try { ev.stopPropagation(); } catch (e) { }
+        try { ev.preventDefault(); } catch (e) { }
+        try { ev.stopImmediatePropagation(); } catch (e) { }
     }, true);
 
     document.addEventListener('pointermove', ev => {
@@ -12067,7 +12098,11 @@ function bindOrb() {
         const t = ev.target;
         if (!t || !t.closest) return;
         if (t.closest('[data-orb-pclear]')) { orbPSearch = ''; renderOrbPanel(); return; }
-        if (t.closest('[data-orb-close]')) { closeOrb(); return; }
+        if (t.closest('[data-orb-close]')) {
+            /* 关面板这一下也会带一发合成 click，落在面板**下面**的酒馆界面上 → 布 out 窗口吞掉它 */
+            orbGhostUntil = Date.now() + 450; orbGhostScope = 'out';
+            closeOrb(); return;
+        }
         /* 收回悬浮球：按钮就在面板里（用户要求做在球自己里面） */
         /* 顶栏：调试窗（大部分人用不到，所以做在收回按钮旁边的小图标） */
         if (t.closest('[data-orb-dbgopen]')) { orbDbgOpenWin(); return; }
