@@ -1469,6 +1469,61 @@ select.ssp-ch-inp { cursor: pointer; padding-right: 6px !important; }
 #ssp_orb_panel .ssp-ch-ggedit { display: flex; flex-direction: column; gap: 4px; padding: 0 6px 7px 42px; }
 #ssp_orb_panel .ssp-ch-ggedit .ssp-ch-grow2 { grid-template-columns: 34px minmax(0, 1fr); }
 
+/* ==========================================================================
+   快捷按钮托盘（浮在输入框上方）· 玻璃药丸
+   --------------------------------------------------------------------------
+   结构：一个 fixed 的 div（挂 body，不进任何面板的 DOM）→ 里面若干 .ssp-qb 图标按钮。
+   配色：跟随酒馆主题（同鼠鼠面板那套变量）；圆角 / 大小 / 透明度 / 间距都在设置面板里可调
+        （由 index.js 写到 --qb-* 上）。
+   ⚠️ 圆角必须写成 `#ssp_quickbar.ssp-qb-root`（两个 class + 1 个 id）：
+      主题里那条 `*:not(#chat, #chat *, .avatar, .avatar *) { border-radius: var(--Radius) !important }`
+      的特异性是 (1,0,0)，光写 `#ssp_quickbar` 只是打平（谁在后面谁赢）；加一个 class 才稳。
+   ========================================================================== */
+#ssp_quickbar.ssp-qb-root {
+    position: fixed;
+    z-index: 3000;                       /* 高于聊天，低于鼠鼠口袋(3100) */
+    display: flex; align-items: center; gap: var(--qb-gap, 5px);
+    padding: 4px; box-sizing: border-box;
+    border-radius: var(--qb-radius, 10px) !important;
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #12161c) 74%, transparent);
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, .14));
+    backdrop-filter: blur(8px) saturate(1.1);
+    -webkit-backdrop-filter: blur(8px) saturate(1.1);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, .3);
+    opacity: var(--qb-op, .82);
+    transition: opacity .16s ease, transform .12s ease;
+    user-select: none;
+    pointer-events: auto;
+}
+#ssp_quickbar.ssp-qb-root:hover { opacity: 1; }
+#ssp_quickbar .ssp-qb {
+    width: var(--qb-size, 34px); height: var(--qb-size, 34px); flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 5px; cursor: pointer; white-space: nowrap;
+    color: var(--SmartThemeBodyColor, #e8e8ec);
+    border-radius: calc(var(--qb-radius, 10px) - 4px) !important;
+    transition: background .12s ease, color .12s ease, transform .08s ease;
+}
+#ssp_quickbar .ssp-qb i { font-size: calc(var(--qb-size, 34px) * .4); line-height: 1; }
+#ssp_quickbar .ssp-qb b { font-size: 11px; font-weight: 500; padding-right: 6px; }
+#ssp_quickbar .ssp-qb:hover {
+    background: color-mix(in srgb, var(--SmartThemeEmColor, #4aa8ff) 24%, transparent);
+    color: var(--SmartThemeBodyColor, #fff);
+}
+#ssp_quickbar .ssp-qb:active { transform: scale(.92); }
+#ssp_quickbar .ssp-qb-empty { font-size: 11px; opacity: .7; padding: 0 8px; color: var(--SmartThemeBodyColor, #ccc); }
+@media (max-width: 560px), (pointer: coarse) {
+    /* 手机上给一点触控余量（设置里调的是图标尺寸，这里只加内边距） */
+    #ssp_quickbar.ssp-qb-root { padding: 5px; }
+}
+
+/* 设置面板里那一组"每个按钮一个开关" */
+#ssp_panel .ssp-qblist { display: flex; flex-direction: column; gap: 4px; padding: 2px 0; }
+#ssp_panel .ssp-qbrow { display: flex; align-items: flex-start; gap: 7px; }
+#ssp_panel .ssp-qbrow > span { display: flex; flex-direction: column; gap: 1px; }
+#ssp_panel .ssp-qbrow b { font-size: 12px; }
+#ssp_panel .ssp-qbrow i { font-style: normal; font-size: 11px; opacity: .62; line-height: 1.5; }
+
 /* ---------- 备选开场白：列表（可排序 / 可分组） ----------
    为什么不用拖拽：用户手机上用（拖拽在滚动容器里很难用），上下箭头按钮更稳。
    分组信息存在每条的 `{text, group}` 里（未分组的保持纯字符串），见 index.js。 */

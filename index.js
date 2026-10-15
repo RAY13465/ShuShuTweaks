@@ -3320,6 +3320,10 @@ function getSettings() {
     if (typeof s.orbOn !== 'boolean') s.orbOn = true;
     /* ⚠️ orbPos 现在是 {right,bottom}（离边距离）；老的 {x,y} 也放行一次，由 mountOrb 换算 */
     if (s.orbPos && typeof s.orbPos.right !== 'number' && typeof s.orbPos.x !== 'number') s.orbPos = null;
+    /* 快捷按钮托盘（悬浮在输入框上方）：默认开、贴右、两个按钮都开。
+       ⚠️ 具体字段的归一化写在 quickBarSettings() 里（那边还能按 QUICK_BUTTONS 补每个按钮的开关），
+          这里只保证 s.quickBar 是个对象。 */
+    if (!s.quickBar || typeof s.quickBar !== 'object') s.quickBar = {};
     if (!Array.isArray(s.notes)) s.notes = [];   // 列表里的作者注释只显示第一行
     if (typeof s.importMerge !== 'boolean') s.importMerge = true;
     if (typeof s.importSimThreshold !== 'number') s.importSimThreshold = IMPORT_SIM_DEFAULT;
@@ -4435,6 +4439,12 @@ function bindSettings(root) {
                 if (out) out.textContent = t.value + '%';
                 return;
             }
+            /* ---- 快捷按钮托盘 ---- */
+            if (t.dataset.sspQbon !== undefined) { quickBarSettings().on = Boolean(t.checked); save(); qbMount(); return; }
+            if (t.dataset.sspQbalign) { quickBarSettings().align = t.value; save(); qbPlace(); return; }
+            if (t.dataset.sspQblabel !== undefined) { quickBarSettings().showLabel = Boolean(t.checked); save(); qbMount(); return; }
+            if (t.dataset.sspQbbtn) { quickBarSettings().btns[t.dataset.sspQbbtn] = Boolean(t.checked); save(); qbMount(); return; }
+            if (t.dataset.sspQbnum) { quickBarSettings()[t.dataset.sspQbnum] = Number(t.value); save(); qbMount(); return; }
             if (t.dataset.sspOrbon !== undefined) {
             getSettings().orbOn = Boolean(t.checked); save();
             if (t.checked) { orbBuilt = false; mountOrb(); bindOrb(); refreshOrbBadge(); }
@@ -4496,7 +4506,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.55';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.56';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4632,6 +4642,26 @@ function sspIntegrityProbe() {
             if (secVis) { /* 整段在就行，不用再断言 */ }
         } catch (e) { }
 
+        /* 快捷按钮托盘：开了就得在、而且得在输入框**上方** */
+        try {
+            const q = quickBarSettings();
+            const qel = document.getElementById(QUICK_BAR_ID);
+            const form = document.getElementById('send_form');
+            if (q.on !== false) {
+                /* ⚠️ 这条检查是从**设置面板里**跑的，而设置面板是全屏浮层 —— 它会把托盘盖住，
+                   此时 qbPlace() 会（正确地）把托盘藏起来。所以"面板开着所以看不见"要算正常，
+                   否则每次检查都报一个假的 ★（踩过）。 */
+                const panelOn = !!document.querySelector('#ssp_panel_root.on');
+                const vis = !!(qel && qel.getClientRects().length);
+                const qr = vis && qel ? qel.getBoundingClientRect() : null;
+                const fr = form ? form.getBoundingClientRect() : null;
+                const above = !!(qr && fr && qr.bottom <= fr.top + 2);
+                sspCk(L, cks, '快捷按钮托盘', !!qel && (vis || panelOn),
+                    !qel ? '★ 托盘不在（设置里开着但没建起来）'
+                        : (panelOn && !vis ? ('按钮 ' + qbList().length + ' 个；设置面板开着时被它盖住是正常的，关掉面板就会回来')
+                            : ('按钮 ' + qbList().length + ' 个，' + (above ? '位置在输入框上方 ✓' : '★ 不在输入框上方（可能在别的页面或被挡住了）'))));
+            } else { sspCk(L, cks, '快捷按钮托盘', true, '设置里关着（跳过）'); }
+        } catch (e) { }
         sspCk(L, cks, '角色卡样式「看得见」', beforeTop < globalThis.innerHeight,
             beforeTop < globalThis.innerHeight
                 ? ('起始位置 top=' + Math.round(beforeTop) + '（视口高 ' + globalThis.innerHeight + '），折叠上面那些分区后能看见 ' + visRows + '/' + crowN + ' 行')
@@ -4858,7 +4888,31 @@ function settingsPanelHTML() {
     ].join(''), '认卡顺序：<b>卡里的姓名</b> → <b>人设文字重合度</b> → 文件名。认出重复会问你「更新这一张 / 另存为新角色」；'
         + '更新后会自动补回局部正则 / 收藏 / 世界书绑定 / 深度提示。认不出的新卡直接导入，不弹窗。');
 
-    /* —— 悬浮球（鼠鼠口袋）—— */
+    /* —— 快捷按钮托盘（悬浮在输入框上方）—— */
+const q0 = quickBarSettings();
+const secQuick = sec('fa-wand-magic-sparkles', '快捷按钮托盘', [
+    frow('显示托盘', '浮在输入框上方的一小条（只在聊天页显示）', fsw('data-ssp-qbon="1"', q0.on !== false)),
+    frow('贴哪边', '靠左 / 居中 / 靠右', `<select class="ssp-inp" data-ssp-qbalign="1">
+        <option value="left"${q0.align === 'left' ? ' selected' : ''}>靠左</option>
+        <option value="center"${q0.align === 'center' ? ' selected' : ''}>居中</option>
+        <option value="right"${q0.align === 'right' ? ' selected' : ''}>靠右</option>
+    </select>`),
+    frow('按钮大小', '手机上太小会点不准', `<input class="ssp-crange" type="range" data-ssp-qbnum="size" min="24" max="56" step="1" value="${q0.size}">
+        <b class="ssp-cval" data-ssp-qbout="size">${q0.size}px</b>`),
+    frow('圆角', '0＝直角，越大越圆', `<input class="ssp-crange" type="range" data-ssp-qbnum="radius" min="0" max="26" step="1" value="${q0.radius}">
+        <b class="ssp-cval" data-ssp-qbout="radius">${q0.radius}px</b>`),
+    frow('不透明度', '平时半透明，鼠标划过会变实', `<input class="ssp-crange" type="range" data-ssp-qbnum="opacity" min="20" max="100" step="1" value="${Math.round(q0.opacity * 100)}">
+        <b class="ssp-cval" data-ssp-qbout="opacity">${Math.round(q0.opacity * 100)}%</b>`),
+    frow('距输入框', '托盘和输入框之间的空隙', `<input class="ssp-crange" type="range" data-ssp-qbnum="offset" min="0" max="60" step="1" value="${q0.offset}">
+        <b class="ssp-cval" data-ssp-qbout="offset">${q0.offset}px</b>`),
+    frow('显示文字', '关掉就只留图标（更省地方）', fsw('data-ssp-qblabel="1"', !!q0.showLabel)),
+    `<div class="ssp-qblist">${QUICK_BUTTONS.map(b => '<label class="ssp-ccheck ssp-qbrow"><input type="checkbox" data-ssp-qbbtn="' + b.id + '"'
+        + (q0.btns[b.id] !== false ? ' checked' : '') + '><span><b>' + esc(b.name) + '</b>'
+        + '<i>' + esc(b.hint) + '</i></span></label>').join('')}</div>`,
+].join(''), '按钮都是**我们自己画的**：需要原生功能的一律"点酒馆那颗"（比如重新发送＝转发原生的「重新生成」），'
+    + '没有原生按键的就自己实现（比如回底＝直接滚 #chat）。以后要加按钮，往按钮表里加一行，开关会自动出现在这里。');
+
+/* —— 悬浮球（鼠鼠口袋）—— */
     const secOrb = sec('fa-circle-nodes', '悬浮球（鼠鼠口袋）', [
         frow('显示悬浮球', '右下角一颗菱形球，展开是番外库（可拖动换位置）',
             fsw('data-ssp-orbon="1"', s.orbOn !== false)),
@@ -5100,6 +5154,7 @@ function reclaim(reason) {
     if (sortMode) insertSortHint();
     if (!document.getElementById(MOUNT_ID)) ensureMount();
     if (boxOpen) renderMount();
+    qbMount();                   // 快捷按钮托盘：跟着重画重挂一次（幂等）
 }
 
 /* ==========================================================================
@@ -9581,6 +9636,182 @@ function chBindOverlayWatch() {
     } catch (e) { return false; }
 }
 
+/* 快捷按钮托盘（v1.31.56 新增）
+   用户要的：「在输入框上方做成悬浮按钮，一个是回底一个是重新发送，外观自己设计，
+             做接口连接到原生按键（回底没有原生按键可以直接做，重新发送有），
+             这几个按钮都可以随意开关」。
+   定下来的四条（用户选的）：玻璃药丸外观 / 只做这两个但**留槽** / 一直显示 / 重新发送转发原生那颗。
+
+   设计要点：
+   · **一张表驱动**（QUICK_BUTTONS）：加按钮只加一行，设置面板里的开关会自动出现；
+   · 两种类型：`native` = 转发酒馆原生那颗（点它，不另造逻辑）；`run` = 自己实现（回底就走这条）；
+   · 挂在 body 上（fixed），跟悬浮球一样**不进面板的 DOM**，所以面板重画不会把它弄没；
+   · 位置按 `#send_form` 的**实时位置**算（输入框会随字数长高），配 ResizeObserver + resize + 轮询兜底；
+   · 只在**聊天页可见**时显示（切到角色管理/API 那些页面就藏起来，不然会飘在别的东西上）。 */
+const QUICK_BAR_ID = 'ssp_quickbar';
+
+/** 按钮表：id / 名字 / 图标 / 提示 / 类型
+     - `native: '某id或选择器'` → 点酒馆原生那颗（走 chNativeEl 那套查找）
+     - `run: fn`                → 自己实现
+    默认全开（`def: false` 才会默认关）。以后加按钮往这里加一行即可。 */
+const QUICK_BUTTONS = [
+    {
+        id: 'bottom', name: '回底', icon: 'fa-arrow-down-long',
+        hint: '滚到最新一条。自己直接滚 #chat —— 不依赖酒馆那个"自动滚到底"设置（那个关掉时酒馆自带的函数会直接 return）',
+        run: () => qbScrollBottom(),
+    },
+    {
+        id: 'resend', name: '重新发送', icon: 'fa-rotate-right',
+        hint: '转发酒馆原生的「重新生成」：最后一条是 AI 就重新生成它，是你的消息就相当于再发一次',
+        native: 'option_regenerate',
+    },
+];
+
+/** 托盘设置（归一化，读的时候顺手补默认值） */
+function quickBarSettings() {
+    const s = getSettings();
+    if (!s.quickBar || typeof s.quickBar !== 'object') s.quickBar = {};
+    const q = s.quickBar;
+    if (typeof q.on !== 'boolean') q.on = true;
+    if (['left', 'center', 'right'].indexOf(q.align) < 0) q.align = 'right';
+    if (typeof q.size !== 'number' || !isFinite(q.size)) q.size = 34;
+    if (typeof q.radius !== 'number' || !isFinite(q.radius)) q.radius = 10;
+    if (typeof q.opacity !== 'number' || !isFinite(q.opacity)) q.opacity = 0.82;
+    if (typeof q.gap !== 'number' || !isFinite(q.gap)) q.gap = 5;
+    if (typeof q.offset !== 'number' || !isFinite(q.offset)) q.offset = 10;
+    if (!q.btns || typeof q.btns !== 'object') q.btns = {};
+    QUICK_BUTTONS.forEach(b => { if (typeof q.btns[b.id] !== 'boolean') q.btns[b.id] = (b.def !== false); });
+    return q;
+}
+/** 当前要显示哪几个按钮（顺序跟表一致） */
+function qbList() {
+    const q = quickBarSettings();
+    return QUICK_BUTTONS.filter(b => q.btns[b.id] !== false);
+}
+/** 托盘本体（玻璃药丸）：按钮全是我们自己画的 */
+function qbHTML() {
+    const q = quickBarSettings();
+    const list = qbList();
+    const btns = list.map(b => '<span class="ssp-qb" data-ssp-qb="' + esc(b.id) + '" title="' + esc(b.name + '：' + b.hint) + '">'
+        + '<i class="fa-solid ' + b.icon + '"></i>'
+        + (q.showLabel ? '<b>' + esc(b.name) + '</b>' : '') + '</span>').join('');
+    return btns || '<span class="ssp-qb-empty">没有开启的按钮</span>';
+}
+/** 建/更新托盘：挂在 body 上（不进面板 DOM，面板重画不会弄丢） */
+function qbMount() {
+    try {
+        const q = quickBarSettings();
+        let el = document.getElementById(QUICK_BAR_ID);
+        if (!q.on || !qbList().length) { if (el) el.remove(); return false; }
+        if (!el) {
+            el = document.createElement('div');
+            el.id = QUICK_BAR_ID;
+            el.className = 'ssp-qb-root';          // ⚠️ 两个 class 是为了压过主题那条 `*:not(#chat…)` 的圆角 !important
+            el.setAttribute('role', 'toolbar');
+            el.setAttribute('aria-label', '快捷按钮托盘');
+            document.body.appendChild(el);
+        }
+        const html = qbHTML();
+        if (el.dataset.sspQbSig !== html) { el.innerHTML = html; el.dataset.sspQbSig = html; }
+        /* 外观变量（都在设置面板里可调） */
+        el.style.setProperty('--qb-size', Math.round(q.size) + 'px');
+        el.style.setProperty('--qb-radius', Math.round(q.radius) + 'px');
+        el.style.setProperty('--qb-op', String(Math.max(0.15, Math.min(1, q.opacity))));
+        el.style.setProperty('--qb-gap', Math.round(q.gap) + 'px');
+        el.dataset.sspQbAlign = q.align;
+        qbPlace();
+        return true;
+    } catch (e) { try { sspPushErr('quickbar', e && e.message); } catch (e2) { } return false; }
+}
+/** 位置：贴着输入框**上沿**（输入框会随字数长高，所以要实时算） */
+function qbPlace() {
+    try {
+        const el = document.getElementById(QUICK_BAR_ID);
+        if (!el) return false;
+        const q = quickBarSettings();
+        const chat = document.getElementById('chat');
+        const form = document.getElementById('send_form');
+        /* 只在"聊天页真的看得见"时显示：切到角色管理 / API 那些页面时 #chat 没盒子 → 藏起来
+           （不然托盘会飘在角色列表上，很怪） */
+        const chatVisible = !!(chat && chat.getClientRects().length);
+        const formVisible = !!(form && form.getClientRects().length);
+        if (!chatVisible) { el.style.display = 'none'; return false; }
+        el.style.display = 'flex';
+        if (formVisible) {
+            const r = form.getBoundingClientRect();
+            el.style.bottom = Math.round(Math.max(0, window.innerHeight - r.top + q.offset)) + 'px';
+        } else {
+            el.style.bottom = Math.round(q.offset + 60) + 'px';    // 兜底：找不到输入框时别贴死底部
+        }
+        const a = q.align;
+        if (a === 'left') { el.style.left = '10px'; el.style.right = 'auto'; el.style.transform = 'none'; }
+        else if (a === 'center') { el.style.left = '50%'; el.style.right = 'auto'; el.style.transform = 'translateX(-50%)'; }
+        else { el.style.right = '10px'; el.style.left = 'auto'; el.style.transform = 'none'; }
+        /* ⚠️ 最后一关：**被别的面板盖住就藏起来**。
+           光看"#chat 有没有盒子"不够：手机上打开右侧抽屉（角色列表）时聊天区还在、只是被盖住了，
+           托盘会浮在抽屉上面显得很怪；而桌面端抽屉未必盖住输入框，那时就该继续显示。
+           用 elementFromPoint 在托盘中心探一下"最上层是不是我自己"，两种情况都照顾到。
+           （同一帧内先设成 flex、量完再决定，浏览器只在最后绘制，不会闪。） */
+        try {
+            const r2 = el.getBoundingClientRect();
+            const cx = Math.round(r2.left + r2.width / 2), cy = Math.round(r2.top + r2.height / 2);
+            const top = document.elementFromPoint(cx, cy);
+            const mineTop = !!(top && (top === el || el.contains(top)));
+            if (!mineTop) { el.style.display = 'none'; return false; }
+        } catch (e) { }
+        return true;
+    } catch (e) { return false; }
+}
+/** 回底：自己滚（酒馆自带的 scrollChatToBottom 在"自动滚到底"关掉时会直接 return，靠不住） */
+function qbScrollBottom() {
+    try {
+        const c = document.getElementById('chat');
+        if (!c) { toast('找不到聊天区（#chat）', 'warning'); return false; }
+        const top = c.scrollHeight;
+        try { c.scrollTo({ top: top, behavior: 'smooth' }); }
+        catch (e) { c.scrollTop = top; }
+        return true;
+    } catch (e) { return false; }
+}
+/** 跑一个按钮：native → 转发原生那颗；run → 自己实现 */
+function qbRun(id) {
+    const b = QUICK_BUTTONS.find(x => x.id === id);
+    if (!b) return false;
+    if (b.native) {
+        const el = chNativeEl(b.native);
+        if (!el) { toast('找不到酒馆的按钮：' + b.native, 'warning'); return false; }
+        try { el.click(); } catch (e) { toast('触发失败：' + (e && e.message), 'warning'); return false; }
+        return true;
+    }
+    if (typeof b.run === 'function') { try { return b.run() !== false; } catch (e) { toast('执行失败：' + (e && e.message), 'warning'); return false; } }
+    return false;
+}
+/** 绑事件（只绑一次）+ 位置跟随 */
+function qbBind() {
+    if (qbBind.done) return false;
+    qbBind.done = true;
+    document.addEventListener('click', ev => {
+        const t = ev.target;
+        const hit = t && t.closest ? t.closest('[data-ssp-qb]') : null;
+        if (!hit) return;
+        ev.stopPropagation();
+        qbRun(hit.dataset.sspQb);
+    }, true);
+    /* 位置跟随：窗口尺寸、输入框长高（ResizeObserver）、以及一个很轻的轮询兜底
+       （酒馆切页面/切聊天会换布局，事件不一定齐） */
+    globalThis.addEventListener?.('resize', () => qbPlace());
+    try {
+        if (window.ResizeObserver) {
+            const form = document.getElementById('send_form');
+            if (form) { new ResizeObserver(() => qbPlace()).observe(form); qbBind.obs = true; }
+        }
+    } catch (e) { }
+    try {
+        if (!qbBind.timer) qbBind.timer = setInterval(() => { try { qbPlace(); } catch (e) { } }, 1200);
+    } catch (e) { }
+    return true;
+}
+
 /* ============================ 选卡（找一张卡出来写 / 管）============================
    为什么不把整块 `#rm_characters_block` 搬进来（想过，结论是别搬）：
      · 那块不只是列表 —— 搜索框、标签筛选条、分页、批量编辑、新建/导入/URL导入这一排按钮
@@ -11858,6 +12089,15 @@ function bindOrb() {
     /* 面具页搜索：只换列表那一块（输入框不重画，焦点和光标都不会丢） */
     document.addEventListener('input', ev => {
         const el = ev.target;
+        if (el && el.dataset && el.dataset.sspQbnum) {
+            const k = el.dataset.sspQbnum;
+            const v = k === 'opacity' ? Number(el.value) / 100 : Number(el.value);
+            quickBarSettings()[k] = v;
+            const out = document.querySelector('[data-ssp-qbout="' + k + '"]');
+            if (out) out.textContent = (k === 'opacity' ? Math.round(Number(el.value)) + '%' : Math.round(Number(el.value)) + 'px');
+            qbMount();
+            return;
+        }
         if (!el || !el.dataset || el.dataset.orbPsearch === undefined) return;
         orbPSearch = el.value || '';
         const box = document.getElementById('ssp_orb_pfilter_list');
@@ -12888,6 +13128,7 @@ function init() {
     registerThinkDisplayHook();                                  // 思维链收纳：显示层兜底（流式半截标签也不上屏）
     registerThinkEvents();                                       // 思维链收纳：生成结束/收到消息/换聊天时收纳
     if (getSettings().orbOn !== false) { mountOrb(); bindOrb(); }
+    qbMount(); bindOrb && qbBind();      // 快捷按钮托盘：建 + 绑事件（幂等）
     /* 面板一挂上就绑事件委托（含选卡页的分组框、开场白列表），别等到进写卡页才绑 */
     try {
         let bt = 0;
@@ -13023,6 +13264,7 @@ if (globalThis.__SSP_TEST__) {
         chGreetArr, chGreetAdd, chGreetDel, chGreetMove, chGreetRender, chGreetRowsRender, chGreetChipsRender,
         chGreetSetGroup, chGreetSetText, chGreetGroups, chGreetText, chGreetGroup,
         chTagPool, chTagsRecollect, chTagsDatalist, chNativeEl, chPinSheet,
+        QUICK_BUTTONS, QUICK_BAR_ID, quickBarSettings, qbList, qbHTML, qbMount, qbPlace, qbRun, qbScrollBottom, qbBind,
         get chGreetOpen() { return chGreetOpen; }, set chGreetOpen(v) { chGreetOpen = v; },
         get chGreetPick() { return chGreetPick; }, set chGreetPick(v) { chGreetPick = v; },
         get chDirty() { return chDirty; }, get chTabNow() { return chTab; },
