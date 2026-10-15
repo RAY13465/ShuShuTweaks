@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 鼠鼠面板工坊 ShuShu Panel —— v0.3
  * ---------------------------------------------------------------------------
  * 把酒馆「角色管理面板」做成可装配的模块：
@@ -4440,10 +4440,8 @@ function bindSettings(root) {
                 return;
             }
             /* ---- 快捷按钮托盘 ---- */
-            if (t.dataset.sspQbon !== undefined) { quickBarSettings().on = Boolean(t.checked); save(); qbMount(); return; }
             if (t.dataset.sspQbanchor) { quickBarSettings().anchor = t.value; save(); qbPlace(); return; }
             if (t.dataset.sspQblabel !== undefined) { quickBarSettings().showLabel = Boolean(t.checked); save(); qbMount(); return; }
-            if (t.dataset.sspQbbtn) { quickBarSettings().btns[t.dataset.sspQbbtn] = Boolean(t.checked); save(); qbMount(); return; }
             if (t.dataset.sspQbnum) { quickBarSettings()[t.dataset.sspQbnum] = Number(t.value); save(); qbMount(); return; }
             if (t.dataset.sspOrbon !== undefined) {
             getSettings().orbOn = Boolean(t.checked); save();
@@ -4506,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.57';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.58';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4892,7 +4890,8 @@ function settingsPanelHTML() {
     /* —— 快捷按钮托盘（悬浮在输入框上方）—— */
 const q0 = quickBarSettings();
 const secQuick = sec('fa-wand-magic-sparkles', '快捷按钮托盘', [
-    frow('显示托盘', '浮在输入框上方的一小条（只在聊天页显示）', fsw('data-ssp-qbon="1"', q0.on !== false)),
+    frow('开关都在这儿', '总开关 / 回底 / 重新发送 → 都在「鼠鼠口袋 → 美化 → 常用开关」里，随开随用',
+        '<div class="ssp-pbtn" data-ssp-qbgoto="1"><i class="fa-solid fa-wand-magic-sparkles"></i>去常用开关</div>'),
     frow('挂在哪', '默认「发送按钮上方」——跟着发送键走，聊天栏居中/靠右都不会飘到别处', `<select class="ssp-inp" data-ssp-qbanchor="1">
         ${QB_ANCHORS.map(k => '<option value="' + k + '"' + (q0.anchor === k ? ' selected' : '') + '>' + esc(QB_ANCHOR_NAME[k]) + '</option>').join('')}
     </select>`),
@@ -4905,11 +4904,10 @@ const secQuick = sec('fa-wand-magic-sparkles', '快捷按钮托盘', [
     frow('距输入框', '托盘和输入框之间的空隙', `<input class="ssp-crange" type="range" data-ssp-qbnum="offset" min="0" max="60" step="1" value="${q0.offset}">
         <b class="ssp-cval" data-ssp-qbout="offset">${q0.offset}px</b>`),
     frow('显示文字', '关掉就只留图标（更省地方）', fsw('data-ssp-qblabel="1"', !!q0.showLabel)),
-    `<div class="ssp-qblist">${QUICK_BUTTONS.map(b => '<label class="ssp-ccheck ssp-qbrow"><input type="checkbox" data-ssp-qbbtn="' + b.id + '"'
-        + (q0.btns[b.id] !== false ? ' checked' : '') + '><span><b>' + esc(b.name) + '</b>'
-        + '<i>' + esc(b.hint) + '</i></span></label>').join('')}</div>`,
 ].join(''), '按钮都是**我们自己画的**：需要原生功能的一律"点酒馆那颗"（比如重新发送＝转发原生的「重新生成」），'
-    + '没有原生按键的就自己实现（比如回底＝直接滚 #chat）。以后要加按钮，往按钮表里加一行，开关会自动出现在这里。');
+    + '没有原生按键的就自己实现（比如回底＝直接滚 #chat）。'
+    + '<b>每个按钮的开关都在「鼠鼠口袋 → 美化 → 常用开关」里</b>（用户要求：随开随用）；'
+    + '以后要加按钮，往按钮表里加一行，常用开关里会自动多一行。');
 
 /* —— 悬浮球（鼠鼠口袋）—— */
     const secOrb = sec('fa-circle-nodes', '悬浮球（鼠鼠口袋）', [
@@ -4936,7 +4934,7 @@ const secQuick = sec('fa-wand-magic-sparkles', '快捷按钮托盘', [
         <div class="ssp-p-x" data-ssp-panel-close="1" title="关闭"><i class="fa-solid fa-xmark"></i></div>
       </div>
       <div class="ssp-p-body">
-        ${secOrb}${secThink}${secCard}${secDetail}${secImport}${secBuild}${secSort}${secDiag}
+        ${secOrb}${secThink}${secCard}${secQuick}${secDetail}${secImport}${secBuild}${secSort}${secDiag}
       </div>
       <div class="ssp-p-foot">
         <span>改完立刻生效并落盘，不用点保存</span>
@@ -4945,7 +4943,7 @@ const secQuick = sec('fa-wand-magic-sparkles', '快捷按钮托盘', [
     </div>`;
 }
 
-/ 建面板（只建一次，建完留在 DOM 里，靠 .on 显隐） */
+/* 建面板（只建一次，建完留在 DOM 里，靠 .on 显隐） */
 function mountSettingsPanel() {
     if (document.getElementById('ssp_panel')) return true;
     if (!document.body) return false;
@@ -6275,22 +6273,50 @@ var ORB_BEAUTY_TWEAKS = [
    想恢复这两个：把下面这一行删掉即可 —— 两个开关的定义**原样留在上面，没删**。
    去掉后：s.beautyTweaks 里那两个键没人认领 → 拼出来的 CSS 为空 → 注入的 <style> 会被自动移除，
    也就是你本机上那两条样式**会自己消失**，不需要你手动清。 */
-ORB_BEAUTY_TWEAKS = [];
+ORB_BEAUTY_TWEAKS = [
+    /* ---- 下面是**钩子型**开关（不注入 CSS，直接开/关功能本身）----
+       v1.31.58：用户要求「把这些按钮的开关都放在常用开关里面，随开随用」。
+       状态**只有一个真源**：s.quickBar（不往 beautyTweaks 里再存一份，免得两边不一致）。 */
+    {
+        id: 'quickbar', name: '快捷按钮托盘', def: true,
+        desc: '浮在发送按钮上方那一小条（回底 / 重新发送）',
+        get: () => quickBarSettings().on !== false,
+        set: (on) => { quickBarSettings().on = !!on; save(); qbMount(); },
+    },
+    {
+        id: 'qbBottom', name: '托盘 · 回底', def: true,
+        desc: '滚到最新一条（自己滚 #chat，不依赖酒馆的"自动滚到底"设置）',
+        get: () => quickBarSettings().btns.bottom !== false,
+        set: (on) => { quickBarSettings().btns.bottom = !!on; save(); qbMount(); },
+    },
+    {
+        id: 'qbResend', name: '托盘 · 重新发送', def: true,
+        desc: '转发酒馆原生的「重新生成」：最后一条是 AI 就重生成、是你的消息就相当于再发一次',
+        get: () => quickBarSettings().btns.resend !== false,
+        set: (on) => { quickBarSettings().btns.resend = !!on; save(); qbMount(); },
+    },
+];
 function orbBeautyState() {
     const s = getSettings();
     if (!s.beautyTweaks || typeof s.beautyTweaks !== 'object') s.beautyTweaks = {};
     return s.beautyTweaks;
 }
 function orbBeautyOn(id) {
-    const st = orbBeautyState();
     const t = ORB_BEAUTY_TWEAKS.filter(x => x.id === id)[0];
+    /* 钩子型：状态在它自己那边（比如 s.quickBar），直接问它 */
+    if (t && typeof t.get === 'function') { try { return !!t.get(); } catch (e) { return false; } }
+    const st = orbBeautyState();
     if (typeof st[id] === 'boolean') return st[id];
     return !!(t && t.def);
 }
 /** 把当前开着的开关拼成一段 CSS，注入/更新 <style id="ssp_beauty_css">；全关就整段移除 */
 function orbBeautyApply() {
     try {
-        const css = ORB_BEAUTY_TWEAKS.filter(t => orbBeautyOn(t.id)).map(t => '/* ' + t.name + ' */\n' + t.css).join('\n\n');
+        /* 钩子型开关：状态变了就让功能本身跟上（托盘就是在这里重挂/撤掉的） */
+        ORB_BEAUTY_TWEAKS.filter(t => typeof t.set === 'function').forEach(t => {
+            try { t.set(orbBeautyOn(t.id)); } catch (e) { }
+        });
+        const css = ORB_BEAUTY_TWEAKS.filter(t => orbBeautyOn(t.id) && t.css).map(t => '/* ' + t.name + ' */\n' + t.css).join('\n\n');
         let el = document.getElementById('ssp_beauty_css');
         if (!css) { if (el) el.remove(); try { orbSeamFillOff(); } catch (e) { } return ''; }
         if (!el) {
@@ -6348,6 +6374,13 @@ function orbSeamFillSync() {
 }
 
 function orbBeautySet(id, on) {
+    const t = ORB_BEAUTY_TWEAKS.filter(x => x.id === id)[0];
+    if (t && typeof t.set === 'function') {           // 钩子型：交给它自己存
+        try { t.set(!!on); } catch (e) { }
+        save();
+        orbBeautyApply();
+        return !!on;
+    }
     const st = orbBeautyState();
     st[id] = !!on;
     save();
@@ -6356,9 +6389,13 @@ function orbBeautySet(id, on) {
 }
 function orbBeautyReset() {
     getSettings().beautyTweaks = {};
+    /* 钩子型开关也回到各自表里的默认值（否则"全部恢复默认"只影响 CSS 那几条） */
+    ORB_BEAUTY_TWEAKS.filter(t => typeof t.set === 'function').forEach(t => {
+        try { t.set(t.def !== false); } catch (e) { }
+    });
     save();
     orbBeautyApply();
-    toast('常用开关已全部恢复默认（注入的样式已撤销）', 'success');
+    toast('常用开关已全部恢复默认', 'success');
 }
 /* 页面加载时自动把开着的开关注入进去。
    ⚠️ 不去找 init 钩子：模块执行时设置可能还没读回来，所以延时几趟、每趟都重来一次（幂等，安全）。
@@ -6387,7 +6424,8 @@ function orbBeautyHTML() {
         + '</div>';
     if (!orbBeautyOpen) return '<div class="ssp-bt collapsed">' + head + '</div>';
     return '<div class="ssp-bt open">' + head
-        + '<div class="ssp-bt-note">由扩展注入样式实现，**不写进你的自定义 CSS**；关掉即完全撤销</div>'
+        + '<div class="ssp-bt-note">CSS 类的开关由扩展注入样式实现（**不写进你的自定义 CSS**）；'
+        + '带「托盘」字样的那几个是直接开关功能本身。关掉即完全撤销。</div>'
         + rows
         + '<div class="ssp-bt-foot">'
         + '<span class="ssp-pbtn" data-orb-btreset="1">' + (anyOn ? '全部关掉（恢复默认）' : '已全部关闭') + '</span>'
@@ -6654,10 +6692,13 @@ function orbThemeRowsHTML() {
     }).join('');
     return head + '<div class="ssp-orb-plist">' + rows + '</div>';
 }
+/* ⚠️ 「常用开关」要**不管有没有美化主题都渲染出来**：v1.31.58 起托盘的开关就放在这里面，
+   而冷启动/主题列表还没拉回来时（实测无头浏览器就是）`#themes` 是空的 ——
+   以前这里直接 return 列表，整块「常用开关」跟着一起消失，用户就找不到开关了。 */
 function orbThemeHTML() {
     if (orbThemeEdit) return orbThemeEditHTML();
     if (orbThemeBinding) return orbThemePickerHTML(orbThemeBinding);
-    if (!orbThemeList().length) return orbThemeRowsHTML();
+    if (!orbThemeList().length) return orbBeautyHTML() + orbThemeRowsHTML();
     return '<div class="ssp-orb-pfilter">'
         + '<i class="fa-solid fa-magnifying-glass"></i>'
         + '<input class="ssp-inp" type="text" data-orb-thsearch="1" placeholder="搜主题 / 角色卡" value="' + esc(orbThSearch) + '">'
@@ -9769,7 +9810,10 @@ function qbPlace() {
         /* 横向：按锚点算 left，最后**统一夹进视口**（避免算出负数或被右边缘截掉） */
         const vw = window.innerWidth;
         const w = el.offsetWidth || 84;
-        const pad = 10;
+        /* v1.31.58：内缩从 10px 改成 2px —— **手机上没连 API 时输入框本来就贴到屏幕边**（实测 390 宽时
+           输入框右边=390、发送键右边=387），原来留 10px 内缩会把托盘往里推 7~10px，
+           "贴着发送键"看着就不贴了（手机版 e2e 直接量出来 380 vs 387）。现在只在**要出屏幕**时才夹。 */
+        const pad = 2;
         const anchor = q.anchor;
         let leftX = null;
         /* 发送按钮不可见时（没连 API 等）→ 按用户定的退到"输入框右边缘" */
@@ -12404,6 +12448,13 @@ function bindOrb() {
                 return;
             }
         }
+        /* 设置面板里的「去常用开关」：关掉设置面板 → 打开鼠鼠口袋的「美化」页 → 顺手展开那一栏 */
+        if (t.closest('[data-ssp-qbgoto]')) {
+            try { closeSettingsPanel(); } catch (e) { }
+            try { orbBeautyOpen = true; } catch (e) { }
+            try { orbTab = 'theme'; openOrb(); renderOrbPanel(); } catch (e) { }
+            return;
+        }
         if (t.closest('[data-chsave]')) { chSave(); return; }
         if (t.closest('[data-chfav]')) { chNative('favorite_button'); return; }
         if (t.closest('[data-chadv]')) { chNative('advanced_div'); return; }
@@ -13305,6 +13356,7 @@ if (globalThis.__SSP_TEST__) {
         chTagPool, chTagsRecollect, chTagsDatalist, chNativeEl, chPinSheet,
         QUICK_BUTTONS, QUICK_BAR_ID, quickBarSettings, qbList, qbHTML, qbMount, qbPlace, qbRun, qbScrollBottom, qbBind,
         QB_ANCHORS, QB_ANCHOR_NAME,
+        orbBeautyHTML, orbBeautyOn, orbBeautySet, orbBeautyReset, orbBeautyApply, ORB_BEAUTY_TWEAKS,
         get chGreetOpen() { return chGreetOpen; }, set chGreetOpen(v) { chGreetOpen = v; },
         get chGreetPick() { return chGreetPick; }, set chGreetPick(v) { chGreetPick = v; },
         get chDirty() { return chDirty; }, get chTabNow() { return chTab; },
