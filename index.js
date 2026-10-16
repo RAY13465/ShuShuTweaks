@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.58';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.59';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5331,6 +5331,11 @@ var orbDelConfirm = null;   // 正在等确认删除的条目 uid（就地确认
 var orbPurgeConfirm = false; // DLC 栏「清空全部条目」是否在等确认
 /* DLC 栏状态 */
 var orbDlcSearch = '';
+/* v1.31.59 「DLC 条目 ↔ 面具」用到的几个状态 */
+var orbDlcFilter = 'all';      // 条目列表筛选：all | mask（只给面具的）| free（没绑的）
+var orbDlcMaskFor = null;      // 正在给哪个条目挑面具（uid；null = 不在挑）
+var dlcTempOff = new Set();    // 戴着面具时你手动"临时关"的条目（换面具 / 换聊天就清空）
+var dlcWornCache = '';         // 从 PERSONA_CHANGED 事件里记下的当前面具（DOM 读不到时的兜底）
 var orbCollapsed = false;   // 悬浮球是否收纳进左下角魔法棒
 
 /* ============================ 背景图（绑定 + 统一管理） ============================
@@ -7672,6 +7677,13 @@ async function orbDlcFetch() {
         const list = await orbEntriesOf(orbDlcBook());
         orbDlcEntries = list;
         orbDlcLoaded = true;
+        /* v1.31.59：①清掉"条目已经不在了"的孤儿绑定 ②把「全局常驻」对齐 ③挂上面具监听 */
+        try {
+            const n = dlcMaskPrune(list);
+            if (n) toast('清理了 ' + n + ' 条失效的面具绑定（原来那条条目已经不在书里了）', 'info');
+        } catch (e) { }
+        try { if (dlcGlobalOn()) dlcGlobalApply(true); } catch (e) { }
+        try { bindDlcMaskWatch(); } catch (e) { }
     } catch (e) {
         orbDlcErr = String((e && e.message) || e);
         orbDlcLoaded = true;
@@ -7697,8 +7709,26 @@ function orbDlcRowsHTML() {
 }
 
 function orbDlcHTML() {
+    /* 正在给某一条挑面具 → 整页换成挑面具的界面（跟面具页那套「绑定角色」一个套路） */
+    if (orbDlcMaskFor !== null && orbDlcMaskFor !== undefined) return dlcMaskPickerHTML(orbDlcMaskFor);
     const book = orbDlcBook();
     const on = orbDlcEntries.filter(e => e.disable !== true).length;
+    const worn = dlcWornPersona();
+    const boundN = orbDlcEntries.filter(e => dlcEntryMasks(e.uid).length > 0).length;
+    const idleN = orbDlcEntries.filter(e => dlcEntryMasks(e.uid).length > 0 && !dlcEntryEffective(e)).length;
+    /* 三个筛选（全部 / 只给面具的 / 没绑的） */
+    const filterBar = '<div class="ssp-orb-pcount ssp-en-maskfilters">'
+        + [['all', '全部 ' + orbDlcEntries.length], ['mask', '只给面具的 ' + boundN], ['free', '没绑的 ' + (orbDlcEntries.length - boundN)]]
+            .map(([k, label]) => '<span class="ssp-pbtn' + (orbDlcFilter === k ? ' primary' : '') + '" data-orb-dlcfilter="' + k + '">' + label + '</span>').join('')
+        + '</div>';
+    /* 「全局常驻」：书不常在，条目开了也不生效（用户要求 DLC 这本书保持全局生效） */
+    const gsel = dlcGlobalSelected();
+    const globalRow = '<label class="ssp-orb-auto" style="padding-top:4px"><input type="checkbox" data-orb-dlcglobal="1"'
+        + (dlcGlobalOn() ? ' checked' : '') + '><span>让「' + esc(book) + '」全局常驻'
+        + (gsel === null ? '（还没读到酒馆的世界书面板）' : (gsel ? '（已勾上）' : '（还没勾上）')) + '</span></label>'
+        + (gsel === null
+            ? '<div class="ssp-orb-empty" style="padding:0 2px 4px">先在酒馆里打开一次「世界书」面板，这里就能自动帮你勾上它。</div>'
+            : '');
     const bar = '<div class="ssp-orb-pfilter">'
         + '<i class="fa-solid fa-magnifying-glass"></i>'
         + '<input class="ssp-inp" type="text" data-orb-dlcsearch="1" placeholder="搜条目（标题 / 正文 / 触发词）" value="' + esc(orbDlcSearch) + '">'
@@ -7723,26 +7753,302 @@ function orbDlcHTML() {
                 + '</div>'
             : '');
     const info = '<div class="ssp-orb-empty" style="padding-top:2px">'
-        + '这本书：<b>' + esc(book) + '</b> · 共 <b>' + orbDlcEntries.length + '</b> 条，其中 <b>' + on + '</b> 条开着'
-        + '<br><span style="opacity:.7">🔵常驻 🟢关键词触发 🔗向量化 ❌已关闭 —— 点那个点就是开关。'
-        + '点标题展开就能改。这是一本**真世界书**，酒馆里也能看到、也会照常参与扫描。</span>'
+        + '这本书：<b>' + esc(book) + '</b> · 共 <b>' + orbDlcEntries.length + '</b> 条，'
+        + '其中 <b>' + on + '</b> 条你自己的开关是开的' + (boundN ? '，<b>' + boundN + '</b> 条绑了面具' : '') + '<br>'
+        + (boundN
+            ? '现在戴着：<b>' + (worn ? esc(dlcPersonaName(worn)) : '（没戴面具）') + '</b>'
+                + ' · 绑了面具的条目里 <b>' + idleN + '</b> 条现在不生效'
+                + (worn ? '（戴着别的面具的那些 —— 专属，换走就关）' : '（没戴面具时按它们自己的开关走）') + '<br>'
+            : '')
+        + '<span style="opacity:.7">🔵常驻 🟢关键词触发 🔗向量化 ❌已关闭 —— 点那一行就是开关。'
+        + '点 🎭 给这条绑面具：<b>戴上那个面具就自动开</b>（生成时生效，不改你的书文件）。</span>'
         + '</div>';
     const draft = (orbDlcOpen === 'new')
         ? orbEntryFormHTML(null, book, true, orbDlcDraft || { comment: '', content: '', key: '', constant: orbDlcConstantDefault() })
         : '';
     const keyNote = '<label class="ssp-orb-auto" style="padding-top:4px"><input type="checkbox" data-orb-dlcconst="1"'
         + (orbDlcConstantDefault() ? ' checked' : '') + '><span>新建时默认用 🔵 常驻</span></label>';
-    return bar + tools + info + keyNote + draft
+    return bar + filterBar + tools + globalRow + info + keyNote + draft
         + '<div id="ssp_orb_dlc_list">' + orbDlcRowsHTML() + '</div>';
 }
+/* ============================ DLC 条目 ↔ 面具 绑定（v1.31.59）============================
+   用户要的（讨论过好几轮，最后定的）：开始玩一张角色卡时必定会选一款面具 —— 选了面具之后，
+   **把属于这个面具的 DLC 条目打开**，其余条目一律不插手；没绑面具的条目照旧走自己的开关。
+   一句话：**绑定 = "玩这个面具时必须有它"**。
+
+   规则（用户逐条拍板）：
+     · 没绑面具              → 完全按它自己的开关，面具不插手
+     · 绑了 + 正戴着名单里的   → 强制开（你手动"临时关"的除外）
+     · 绑了 + 正戴着别的面具   → 关（专属：换走就关）
+     · 绑了 + 没戴面具        → 按它自己的开关（宽松；用户把这条从"严格"改成了"宽松"）
+
+   实现（**绝不改你的书文件**，用户选的"甲"，他在对话里确认过这个语义）：
+     · 酒馆每次生成前发 WORLDINFO_ENTRIES_LOADED，交出来的条目对象是**克隆**
+       （world-info.js:4445/4492：`{uid, world: 书名, ...rest}`），我就在那一刻把该关的标成
+       disable=true、该开的标成 disable=false —— **只影响这一次提示词**。
+     · 所以 鼠鼠DLC.json 一字不动：酒馆自己的世界书编辑器里它仍显示"未启用"，
+       但生成时它确实进了提示词。扩展没加载/被关掉 → 回到书里的原样（等于没绑过）。
+     · 没绑面具的条目**永远不碰**。
+   ========================================================================== */
+
+/** 绑定表：s.dlcEntryMasks[书名][条目uid] = [面具id…]（按书名分开：uid 只在书内唯一） */
+function dlcMaskBookTable(book) {
+    const s = getSettings();
+    if (!s.dlcEntryMasks || typeof s.dlcEntryMasks !== 'object' || Array.isArray(s.dlcEntryMasks)) s.dlcEntryMasks = {};
+    const key = String(book || '').trim();
+    if (!key) return {};
+    if (!s.dlcEntryMasks[key] || typeof s.dlcEntryMasks[key] !== 'object' || Array.isArray(s.dlcEntryMasks[key])) s.dlcEntryMasks[key] = {};
+    return s.dlcEntryMasks[key];
+}
+function dlcMaskTable() { return dlcMaskBookTable(orbDlcBook()); }
+
+/** 一个条目绑了哪些面具（永远返回新数组） */
+function dlcEntryMasks(uid) {
+    const v = dlcMaskTable()[String(uid)];
+    return Array.isArray(v) ? v.filter(x => typeof x === 'string' && x) : [];
+}
+/** 绑 / 解绑一个面具（返回 true = 现在绑上了） */
+function dlcMaskToggle(uid, pid, book) {
+    const t = dlcMaskBookTable(book || orbDlcBook());
+    const k = String(uid);
+    if (!Array.isArray(t[k])) t[k] = [];
+    const i = t[k].indexOf(pid);
+    if (i >= 0) t[k].splice(i, 1); else if (pid) t[k].push(pid);
+    if (!t[k].length) delete t[k];                 // 空数组不留（少点垃圾数据）
+    save();
+    return i < 0;
+}
+function dlcMaskClear(uid, book) {
+    const t = dlcMaskBookTable(book || orbDlcBook());
+    delete t[String(uid)];
+    save();
+    return true;
+}
+/** 清理孤儿绑定：条目已经不在书里了 → 绑定也删掉（返回清了几条） */
+function dlcMaskPrune(entries) {
+    const t = dlcMaskTable();
+    const live = new Set((entries || []).map(e => String(e.uid)));
+    let n = 0;
+    Object.keys(t).forEach(uid => { if (!live.has(String(uid))) { delete t[uid]; n++; } });
+    if (n) save();
+    return n;
+}
+/** 某个面具挂着几条 DLC 条目（面具页只读展示用） */
+function dlcPersonaEntryCount(pid) {
+    let n = 0;
+    Object.keys(dlcMaskTable()).forEach(uid => { if (dlcEntryMasks(uid).indexOf(pid) >= 0) n++; });
+    return n;
+}
+/** 条目绑的面具名字（逗号分隔）；没绑返回空串 */
+function dlcMaskNames(uid) {
+    const list = dlcEntryMasks(uid);
+    if (!list.length) return '';
+    const all = orbPersonas();
+    return list.map(id => (all.find(p => p.id === id) || {}).name || id).join('、');
+}
+/** 面具 id → 名字（读不到就回 id） */
+function dlcPersonaName(id) {
+    const all = orbPersonas();
+    return (all.find(p => p.id === id) || {}).name || String(id || '');
+}
+/** 现在戴的是哪个面具 —— **按酒馆自己的顺序读数据**，都读不到才退回 DOM：
+    chat_metadata.persona（本聊天锁定的）→ 事件里记下的 → 酒馆列表里 .selected 那个
+    → 名字对得上唯一一个面具。都没有 = 空串（没戴面具）。 */
+function dlcWornPersona() {
+    try {
+        /* e2e 用：只在 __SSP_TEST__ 打开时生效（测试要能模拟"没戴面具 / 戴着某个面具"） */
+        if (globalThis.__SSP_TEST__ && globalThis.__SSP_TEST_PERSONA__ !== undefined) {
+            return String(globalThis.__SSP_TEST_PERSONA__ || '');
+        }
+        const ctx = getContext() || {};
+        const md = ctx.chatMetadata || {};
+        if (typeof md.persona === 'string' && md.persona) return md.persona;
+        if (dlcWornCache) return dlcWornCache;
+        const dom = orbActivePersona();
+        if (dom) return dom;
+        const pu = ctx.powerUserSettings || {};
+        const nm = String(ctx.name1 || '');
+        if (nm) {
+            const hit = Object.keys(pu.personas || {}).filter(k => String((pu.personas || {})[k]) === nm);
+            if (hit.length === 1) return hit[0];
+        }
+    } catch (e) { }
+    return '';
+}
+/** 这一条现在什么状态（UI 显示 + 判断都用它）：
+    mode = free（没绑·按自己开关）/ on（跟着面具开着）/ temp-off（你临时关了）/
+           other-mask（戴着别的面具 → 关）/ no-mask（没戴面具 → 按自己开关） */
+function dlcEntryState(e) {
+    const bound = dlcEntryMasks(e && e.uid);
+    const worn = dlcWornPersona();
+    const own = !(e && e.disable === true);
+    if (!bound.length) return { bound: bound, worn: worn, mode: 'free', effective: own };
+    if (!worn) return { bound: bound, worn: '', mode: 'no-mask', effective: own };
+    if (bound.indexOf(worn) < 0) return { bound: bound, worn: worn, mode: 'other-mask', effective: false };
+    if (dlcTempOff.has(String(e && e.uid))) return { bound: bound, worn: worn, mode: 'temp-off', effective: false };
+    return { bound: bound, worn: worn, mode: 'on', effective: true };
+}
+function dlcEntryEffective(e) { return dlcEntryState(e).effective; }
+
+/** 生成前的那一发过滤（**只在内存里改，书文件不动**）。返回被动过的条数。 */
+function dlcFilterEntries(payload) {
+    const p = payload || {};
+    const book = orbDlcBook();
+    const worn = dlcWornPersona();
+    const groups = [p.globalLore, p.characterLore, p.chatLore, p.personaLore];
+    let n = 0;
+    groups.forEach(arr => {
+        if (!Array.isArray(arr)) return;
+        arr.forEach(e => {
+            if (!e || String(e.world || '') !== book) return;    // 只管 DLC 这一本
+            const bound = dlcEntryMasks(e.uid);
+            if (!bound.length) return;                           // 没绑面具 → 永远不插手
+            if (!worn) return;                                   // 没戴面具 → 宽松：按它自己的开关
+            const want = (bound.indexOf(worn) >= 0) ? !dlcTempOff.has(String(e.uid)) : false;
+            if (want && e.disable === true) { e.disable = false; n++; }
+            else if (!want && e.disable !== true) { e.disable = true; n++; }
+        });
+    });
+    return n;
+}
+/** 挂监听（幂等）：①生成前过滤 ②换面具/换聊天时刷新面板上的标记 */
+function bindDlcMaskWatch() {
+    if (bindDlcMaskWatch.done) return true;
+    try {
+        const c = getContext() || {};
+        const es = c.eventSource, et = c.eventTypes || {};
+        if (!es || typeof es.on !== 'function') return false;
+        es.on(et.WORLDINFO_ENTRIES_LOADED || 'worldinfo_entries_loaded', (payload) => {
+            try { dlcFilterEntries(payload); } catch (e) { try { sspPushErr('dlc-mask', e && e.message); } catch (e2) { } }
+        });
+        es.on(et.PERSONA_CHANGED || 'persona_changed', (id) => {
+            dlcTempOff.clear();                                   // 换面具 → "临时关"作废（用户定的）
+            if (typeof id === 'string' && id) dlcWornCache = id;
+            if (orbOpenNow && (orbTab === 'dlc' || orbTab === 'persona')) renderOrbPanel();
+        });
+        es.on(et.CHAT_CHANGED || 'chat_changed', () => {
+            dlcTempOff.clear(); dlcWornCache = '';
+            if (orbOpenNow && orbTab === 'dlc') renderOrbPanel();
+        });
+        bindDlcMaskWatch.done = true;
+        return true;
+    } catch (e) { return false; }
+}
+/** 「鼠鼠DLC 全局常驻」开关（用户要的：书得一直加载，条目才有意义） */
+function dlcGlobalOn() {
+    const s = getSettings();
+    if (typeof s.dlcGlobal !== 'boolean') s.dlcGlobal = true;
+    return s.dlcGlobal;
+}
+/** 这本书现在在酒馆那边是不是全局勾着的（读不到返回 null） */
+function dlcGlobalSelected() {
+    try {
+        const sel = document.getElementById('world_info');
+        if (!sel) return null;
+        const opt = Array.from(sel.options).find(o => (o.textContent || '').trim() === orbDlcBook());
+        return opt ? !!opt.selected : null;
+    } catch (e) { return null; }
+}
+/** 勾上 / 去掉「鼠鼠DLC」—— 驱动酒馆自己那个世界书多选框，走它自己的 handler + 保存。
+    返回：true 成功 / null 面板还没建出来（那就先不动，DLC 页会提示） / false 出错 */
+function dlcGlobalApply(on) {
+    try {
+        const sel = document.getElementById('world_info');
+        if (!sel) return null;
+        const opt = Array.from(sel.options).find(o => (o.textContent || '').trim() === orbDlcBook());
+        if (!opt) return null;
+        if (opt.selected === !!on) return true;                 // 已经是这个状态
+        opt.selected = !!on;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+    } catch (e) { return false; }
+}
+
+/** 编辑表单里的「🎭 面具」一节（只有 DLC 栏有）：点面具名 = 绑 / 解绑（点了立刻存，不用等保存）。
+    语义直接写在小字里，免得用户以为"绑了就是不生效"。 */
+function dlcFormMasksHTML(e) {
+    const uid = String(e.uid);
+    const bound = dlcEntryMasks(uid);
+    const all = orbPersonas();
+    const worn = dlcWornPersona();
+    const chips = all.length
+        ? all.map(p => {
+            const on = bound.indexOf(p.id) >= 0;
+            return '<span class="ssp-en-maskchip' + (on ? ' on' : '') + (p.id === worn ? ' worn' : '') + '"'
+                + ' data-orb-enmaskchip="' + uid + '" data-orb-enmaskid="' + esc(p.id) + '"'
+                + ' title="' + (on ? '点一下解绑' : '点一下绑上') + '">'
+                + esc(p.name) + (p.id === worn ? ' · 现在戴着' : '') + '</span>';
+        }).join('')
+        : '<span class="ssp-en-masknote">读不到面具列表 —— 先在酒馆里打开一次「用户设定」。</span>';
+    return '<div class="ssp-en-masks">'
+        + '<span class="ssp-en-maskhead">🎭 戴哪些面具时必须有它'
+        + (bound.length
+            ? '（已选 ' + bound.length + ' 个 · <span class="ssp-en-masklink" data-orb-enmaskclear="' + uid + '">清空</span>）'
+            : '（没选＝不绑：一直按你自己的开关）')
+        + '</span>'
+        + '<div class="ssp-en-maskrow">' + chips + '</div>'
+        + '<span class="ssp-en-masknote">戴上其中一个 → 这条自动开；戴着别的面具 → 它关（专属，换走就关）；'
+        + '没戴面具 → 按你自己的开关。点一下立刻生效，不用等保存。</span>'
+        + '</div>';
+}
+
+/** 「给这一条挑面具」那一页（整页替换 DLC 页，跟面具页的"绑定角色"一样） */
+function dlcMaskPickerHTML(uid) {
+    const key = String(uid);
+    const hit = (orbDlcEntries || []).find(e => String(e.uid) === key);
+    const title = (hit && String(hit.comment || '').trim()) || ('条目 ' + key);
+    const bound = dlcEntryMasks(key);
+    const worn = dlcWornPersona();
+    const all = orbPersonas();
+    const rows = all.length ? all.map(p => {
+        const on = bound.indexOf(p.id) >= 0;
+        return '<div class="ssp-orb-charrow' + (on ? ' on' : '') + '" data-orb-enmaskid="' + esc(p.id) + '"'
+            + ' data-orb-enmaskuid="' + esc(key) + '">'
+            + '<img src="' + orbPersonaThumb(p.id) + '" alt="">'
+            + '<span class="ssp-orb-charn">' + esc(p.name)
+            + (p.id === worn ? '<i class="ssp-en-maskworn">现在戴着</i>' : '') + '</span>'
+            + '<span class="ssp-orb-charmark">' + (on ? '<i class="fa-solid fa-check"></i> 已绑' : '<i class="fa-regular fa-circle"></i>') + '</span>'
+            + '</div>';
+    }).join('') : '<div class="ssp-orb-empty">读不到面具列表 —— 先在酒馆里打开一次「用户设定」面板。</div>';
+    return '<div class="ssp-orb-bindhead">'
+        + '<span class="ssp-pbtn" data-orb-enmaskback="1"><i class="fa-solid fa-arrow-left"></i>返回</span>'
+        + '<b>🎭 ' + esc(title) + '</b>'
+        + (bound.length ? '<span class="ssp-pbtn danger" data-orb-enmaskclear="' + esc(key) + '">清空</span>' : '')
+        + '</div>'
+        + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">点面具＝绑 / 解绑。'
+        + '<b>绑上 = 玩这个面具时必须有它</b>（戴上就自动开）；戴着别的面具时它关（专属）；没戴面具时按你自己的开关。<br>'
+        + '<span style="opacity:.75">现在戴着：<b>' + (worn ? esc(dlcPersonaName(worn)) : '（没戴面具）') + '</b></span></div>'
+        + '<div class="ssp-orb-charrows">' + rows + '</div>';
+}
+
 /* ---- 条目列表 / 编辑器（DLC 栏和世界书栏共用同一套）---- */
 
 /** 状态点 + 标题 + 元信息 的一行（kind='dlc' 或 'book'） */
+/** 条目行上那枚面具标记（只有 DLC 栏有）。
+    没绑 → 一个淡淡的 🎭（点一下去挑面具）；绑了 → 「🎭 名字 · 现在的状态」。 */
+function dlcRowMaskHTML(e) {
+    const uid = String(e.uid);
+    const names = dlcMaskNames(uid);
+    if (!names) {
+        return '<span class="ssp-pbtn ssp-en-mask" data-orb-enmask="' + uid + '"'
+            + ' title="绑给面具：戴这个面具时必须有它。现在没绑＝一直按你自己的开关。">🎭</span>';
+    }
+    const st = dlcEntryState(e);
+    const label = st.mode === 'on' ? '跟着面具 · 已开'
+        : st.mode === 'temp-off' ? '你临时关了'
+            : st.mode === 'other-mask' ? ('戴着「' + dlcPersonaName(st.worn) + '」，不生效')
+                : '没戴面具 · 按你自己的开关';
+    return '<span class="ssp-pbtn ssp-en-mask bound' + (st.effective ? '' : ' dim') + '" data-orb-enmask="' + uid + '"'
+        + ' title="点一下改绑哪些面具"><span class="ssp-en-maskname">🎭 ' + esc(names) + '</span>'
+        + '<i class="ssp-en-maskstate">' + esc(label) + '</i></span>';
+}
+
 /** 条目行。
     ⚠️ 交互是用户定的（改过一版）：
        · **点整行 = 开关这一条**（最常用的动作，占整行的点击面积）
        · **✏ 编辑** = 单独一个按钮（不再靠"点标题展开"，容易和开关抢）
        · **🗑 删除** = 单独按钮，只有 DLC 栏给（世界书栏怕误删别人的书）
+       · **🎭 面具** = 只有 DLC 栏给（v1.31.59）
     以前是"点那个点开关、点标题编辑" —— 那个小小的点很难点中（用户反馈点不动），已经废掉。 */
 function orbEntryRowHTML(e, book, kind) {
     const uid = e.uid;
@@ -7750,16 +8056,18 @@ function orbEntryRowHTML(e, book, kind) {
     const off = e.disable === true;
     const title = (e.comment || '').trim() || ('未命名条目 ' + uid);
     const keys = orbEntryKeys(e);
+    const maskOff = (kind === 'dlc') && dlcEntryMasks(uid).length > 0 && !dlcEntryEffective(e);
     const meta = orbEntryStateText(e) + ' · ' + orbEntryLen(e) + ' 字'
         + (keys && !e.constant ? ' · 触发：' + keys : '');
     /* 这一行正在等确认删除 → 在行**下面**展开一条确认（不用酒馆弹窗，见点击处理里的说明） */
     const confirming = (orbDelConfirm !== null && String(orbDelConfirm) === String(uid));
-    const row = '<div class="ssp-orb-wrow ssp-en-row' + (off ? ' off' : '') + (confirming ? ' confirming' : '') + '"'
+    const row = '<div class="ssp-orb-wrow ssp-en-row' + (off ? ' off' : '') + (maskOff ? ' maskoff' : '') + (confirming ? ' confirming' : '') + '"'
         + ' data-ssp-enrow="' + uid + '" data-ssp-entoggle="' + uid + '" data-ssp-book="' + esc(book) + '"'
         + ' title="点这一行＝' + (off ? '打开' : '关掉') + '「' + esc(title) + '」">'
         + '<span class="ssp-orb-state ssp-en-state">' + icon + '</span>'
         + '<span class="ssp-orb-wname ssp-en-main">'
         + '<b>' + esc(title) + '</b><i class="ssp-en-meta">' + esc(meta) + '</i></span>'
+        + (kind === 'dlc' ? dlcRowMaskHTML(e) : '')
         + '<span class="ssp-pbtn ssp-en-edit" data-ssp-enedit="' + uid + '" data-ssp-book="' + esc(book) + '"'
         + ' title="改标题 / 正文 / 常驻方式">✏</span>'
         + (kind === 'dlc'
@@ -7805,6 +8113,13 @@ function orbEntryFormHTML(e, book, isNew, defaults) {
         + '</div>'
         + '<div class="ssp-orb-empty" style="padding:0 2px 6px">「插入位置」这类更细的项，等面板不够用了再说 —— 需要的话去酒馆世界书编辑器改，两边是同一份文件。</div>'
         + '</div>'
+        /* v1.31.59：DLC 栏才有「🎭 面具」这一节（用户要求只做 DLC 栏，世界书栏一个字不动） */
+        + ((String(book) === orbDlcBook())
+            ? (isNew
+                ? '<div class="ssp-en-masks"><span class="ssp-en-maskhead">🎭 面具</span>'
+                    + '<span class="ssp-en-masknote">先创建这一条 —— 创建完在列表里点 🎭 挑面具。</span></div>'
+                : dlcFormMasksHTML(e))
+            : '')
         + '<div class="ssp-en-acts">'
         + '<span class="ssp-pbtn primary" data-ssp-ensave="' + uid + '" data-ssp-book="' + esc(book) + '">'
         + '<i class="fa-solid fa-check"></i>' + (isNew ? '创建' : '保存') + '</span>'
@@ -8066,12 +8381,22 @@ function orbEntryListHTML(ctx) {
     if (c.err) return '<div class="ssp-orb-empty">读不出来：' + esc(c.err) + '</div>';
     const all = c.entries || [];
     if (!all.length) return '<div class="ssp-orb-empty">这本书还是空的' + (c.kind === 'dlc' ? ' —— 点「＋新建条目」写第一条。' : '。') + '</div>';
-    const hit = all.filter(e => !q
+    /* v1.31.59：DLC 栏那三个筛选（全部 / 只给面具的 / 没绑的）；世界书栏不受影响 */
+    const filtering = (c.kind === 'dlc' && orbDlcFilter !== 'all');
+    const maskHit = (e) => {
+        if (!filtering) return true;
+        const bound = dlcEntryMasks(e.uid).length > 0;
+        return orbDlcFilter === 'mask' ? bound : !bound;
+    };
+    const hit = all.filter(e => maskHit(e) && (!q
         || String(e.comment || '').toLowerCase().indexOf(q) >= 0
         || String(e.content || '').toLowerCase().indexOf(q) >= 0
-        || orbEntryKeys(e).toLowerCase().indexOf(q) >= 0);
-    if (!hit.length) return '<div class="ssp-orb-empty">没有匹配「' + esc(c.search) + '」的条目。</div>';
-    const head = q ? '<div class="ssp-orb-pcount">筛选出 ' + hit.length + ' / ' + all.length + ' 条</div>' : '';
+        || orbEntryKeys(e).toLowerCase().indexOf(q) >= 0));
+    if (!hit.length) {
+        if (filtering) return '<div class="ssp-orb-empty">这个筛选下没有条目 —— 换个筛选看看。</div>';
+        return '<div class="ssp-orb-empty">没有匹配「' + esc(c.search) + '」的条目。</div>';
+    }
+    const head = (q || filtering) ? '<div class="ssp-orb-pcount">筛选出 ' + hit.length + ' / ' + all.length + ' 条</div>' : '';
     const rows = hit.map(e => {
         let html = orbEntryRowHTML(e, book, c.kind);
         if (c.editing != null && String(c.editing) === String(e.uid)) html += orbEntryFormHTML(e, book, false);
@@ -11340,12 +11665,14 @@ function orbPersonaRowsHTML() {
         const on = (p.id === act);
         const bound = orbBindNames(p.id);
         const desc = orbPersonaDesc(p.id);
+        const dlcN = dlcPersonaEntryCount(p.id);          // v1.31.59：只读显示"这个面具挂了哪几条 DLC"
         return '<div class="ssp-orb-prow' + (on ? ' on' : '') + '">'
             + '<img class="ssp-orb-pav" src="' + orbPersonaThumb(p.id) + '" data-orb-persona="' + esc(p.id) + '" title="点头像换面具" alt="">'
             + '<div class="ssp-orb-pmain">'
             + '<div class="ssp-orb-pname">' + esc(p.name) + (on ? '<span class="ssp-orb-ptag">当前</span>' : '') + '</div>'
             + '<div class="ssp-orb-pdesc">' + (desc ? esc(desc.slice(0, 80)) + (desc.length > 80 ? '…' : '') : '<i>没写描述</i>') + '</div>'
             + '<div class="ssp-orb-pbind' + (bound ? ' has' : '') + '"><i class="fa-solid fa-link"></i>' + (bound ? esc(bound) : '未绑定角色') + '</div>'
+            + (dlcN ? '<div class="ssp-orb-pbind has"><i class="fa-solid fa-masks-theater"></i>DLC 条目：挂 ' + dlcN + ' 条</div>' : '')
             + '</div>'
             + '<div class="ssp-orb-pacts">'
             + '<span class="ssp-pbtn' + (on ? ' primary' : '') + '" data-orb-persona="' + esc(p.id) + '">' + (on ? '当前' : '换成这个') + '</span>'
@@ -11706,6 +12033,7 @@ function orbScrollIntoView(el) {
 function openOrb() {
     mountOrb();
     bindWbWatch();                            // 顺便重试挂「世界书被改了」的监听（首次常拿不到上下文）
+    bindDlcMaskWatch();                       // 同一个道理：DLC↔面具 的生成前过滤也在这儿重试
     /* 球被收回（orbOn=false）时，从「扩展程序」栏开面板不该把球带出来 */
     try { const bb = document.getElementById('ssp_orb'); if (bb && getSettings().orbOn === false) bb.style.display = 'none'; } catch (e) { }
     const root = document.getElementById('ssp_orb_root');
@@ -12091,6 +12419,7 @@ function bindOrb() {
     /* 世界书被改了（谁改的都算）→ 面板开着就跟着更新。真正的挂载在 ensureWbWatch() 里，
        这里只是尽早试一次（那时酒馆上下文常常还没到位，所以它自己会重试）。 */
     bindWbWatch();
+    bindDlcMaskWatch();
 
     /* 兜底：酒馆把自己列表的选中状态改了（.selected 变动），面板开着就跟着刷 */
     try {
@@ -12806,6 +13135,45 @@ function bindOrb() {
             renderOrbPanel();
             return;
         }
+        /* ⚠️ v1.31.59：🎭 那颗也长在行**里面**（行本身＝开关），所以面具的判断同样要先判。
+           它同时管三处：行上的 🎭、编辑表单里的面具 chips、挑面具那一页的行。 */
+        if (t.closest('[data-orb-enmaskback]')) { orbDlcMaskFor = null; renderOrbPanel(); return; }
+        const maskClear = t.closest('[data-orb-enmaskclear]');
+        if (maskClear) {
+            dlcMaskClear(maskClear.dataset.orbEnmaskclear);
+            toast('已清空这一条的面具绑定（改回按你自己的开关）', 'success');
+            renderOrbPanel();
+            return;
+        }
+        const maskChip = t.closest('[data-orb-enmaskid]');
+        if (maskChip) {
+            const uid0 = maskChip.dataset.orbEnmaskchip || maskChip.dataset.orbEnmaskuid || orbDlcMaskFor;
+            const pid = maskChip.dataset.orbEnmaskid || '';
+            if (uid0 !== null && uid0 !== undefined && String(uid0) !== '' && pid) {
+                const nowOn = dlcMaskToggle(uid0, pid);
+                const nm = dlcPersonaName(pid);
+                toast(nowOn ? ('已绑：戴「' + nm + '」时必须有它') : ('已解绑：' + nm), 'info');
+                renderOrbPanel();
+            }
+            return;
+        }
+        const maskOpen = t.closest('[data-orb-enmask]');
+        if (maskOpen) { orbDlcMaskFor = String(maskOpen.dataset.orbEnmask); renderOrbPanel(); return; }
+        const dlcFilterBtn = t.closest('[data-orb-dlcfilter]');
+        if (dlcFilterBtn) { orbDlcFilter = dlcFilterBtn.dataset.orbDlcfilter || 'all'; renderOrbPanel(); return; }
+        const dlcGlobalBox = t.closest('[data-orb-dlcglobal]');
+        if (dlcGlobalBox) {
+            const want = Boolean(dlcGlobalBox.checked);
+            getSettings().dlcGlobal = want;
+            save();
+            const r = dlcGlobalApply(want);
+            toast(r === true
+                ? (want ? '已让「' + orbDlcBook() + '」全局常驻' : '已取消全局常驻')
+                : (r === null ? '还没读到酒馆的「世界书」面板 —— 先打开一次它，再回来点这个' : '没能改酒馆那边的勾选'),
+                r === true ? 'success' : 'warning');
+            if (r === true) renderOrbPanel();
+            return;
+        }
         /* ⚠️ 删除的判断必须排在「点整行＝开关」**前面**：
            🗑 和确认按钮都长在那一行**里面**，而行本身有 data-ssp-entoggle，
            先判 enToggle 就会把点 🗑 当成"开关这一条" —— 表现就是"点删除没反应、删不掉"
@@ -12847,6 +13215,26 @@ function bindOrb() {
             const uid = parseInt(enToggle.dataset.sspEntoggle, 10);
             const book = enToggle.dataset.sspBook || (orbTab === 'dlc' ? orbDlcBook() : orbWbEntriesBook);
             const dlc = (orbTab === 'dlc');
+            /* v1.31.59：绑了面具的条目，点整行 = **临时关**（只在内存里，不写书、不解除绑定），
+               换面具 / 换聊天 / 刷新就恢复"面具要求开" —— 用户选的"当成临时关"。
+               没戴面具时（宽松）它跟普通条目没区别 → 照旧写书切换。 */
+            if (dlc && dlcEntryMasks(uid).length) {
+                const hit0 = (orbDlcEntries || []).find(x => String(x.uid) === String(uid)) || { uid: uid };
+                const st = dlcEntryState(hit0);
+                const nm = (hit0 && hit0.comment) || ('条目 ' + uid);
+                if (st.mode === 'other-mask') {
+                    toast('这条绑给别的面具了（' + dlcMaskNames(uid) + '）—— 戴上它才会开；想改就点 🎭', 'info');
+                    return;
+                }
+                if (st.mode !== 'no-mask') {
+                    const k = String(uid);
+                    if (dlcTempOff.has(k)) dlcTempOff.delete(k); else dlcTempOff.add(k);
+                    toast((dlcTempOff.has(k) ? '这次先关掉' : '又打开') + '：' + nm
+                        + '（换面具 / 刷新就恢复「面具要求开」）', 'info');
+                    renderOrbPanel();
+                    return;
+                }
+            }
             orbEntryToggle(book, uid).then(on => {
                 if (on === null) return;
                 const list = dlc ? orbDlcEntries : orbWbEntries;
@@ -13218,6 +13606,9 @@ function init() {
     registerThinkDisplayHook();                                  // 思维链收纳：显示层兜底（流式半截标签也不上屏）
     registerThinkEvents();                                       // 思维链收纳：生成结束/收到消息/换聊天时收纳
     if (getSettings().orbOn !== false) { mountOrb(); bindOrb(); }
+    /* v1.31.59：DLC 条目 ↔ 面具的过滤监听**无条件**挂一次（球关掉也要生效 —— 它管的是生成，
+       跟界面无关）。拿不到上下文时它自己会在后面重试。 */
+    bindDlcMaskWatch();
     qbMount(); bindOrb && qbBind();      // 快捷按钮托盘：建 + 绑事件（幂等）
     /* 面板一挂上就绑事件委托（含选卡页的分组框、开场白列表），别等到进写卡页才绑 */
     try {
@@ -13334,6 +13725,16 @@ if (globalThis.__SSP_TEST__) {
         get orbDlcEntries() { return orbDlcEntries; }, set orbDlcEntries(v) { orbDlcEntries = v; },
         get orbDlcOpen() { return orbDlcOpen; }, set orbDlcOpen(v) { orbDlcOpen = v; },
         get orbDlcLoaded() { return orbDlcLoaded; }, set orbDlcLoaded(v) { orbDlcLoaded = v; },
+        /* v1.31.59：DLC 条目 ↔ 面具 */
+        orbDlcBook, dlcMaskTable,
+        dlcEntryMasks, dlcMaskToggle, dlcMaskClear, dlcMaskPrune, dlcMaskNames, dlcPersonaName,
+        dlcPersonaEntryCount, dlcWornPersona, dlcEntryState, dlcEntryEffective, dlcFilterEntries,
+        bindDlcMaskWatch, dlcGlobalOn, dlcGlobalApply, dlcGlobalSelected, dlcMaskPickerHTML,
+        get dlcTempOff() { return dlcTempOff; },
+        get orbDlcFilter() { return orbDlcFilter; }, set orbDlcFilter(v) { orbDlcFilter = v; },
+        get orbTab() { return orbTab; }, set orbTab(v) { orbTab = v; },
+        get orbDlcMaskFor() { return orbDlcMaskFor; }, set orbDlcMaskFor(v) { orbDlcMaskFor = v; },
+        get dlcWornCache() { return dlcWornCache; }, set dlcWornCache(v) { dlcWornCache = v; },
         orbWbApplyForChar, orbWbCleanup, orbWbRestoreCur, orbWbOnChatChanged,
         orbWbApplied, orbWbEnabled, orbWbCurChar, orbWbBound, orbWbActive, orbWbSyncChar,
         orbWorldRefresh, orbWorldHTML, orbWorldRowsHTML, orbWorldPickerHTML,

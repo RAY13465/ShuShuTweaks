@@ -846,6 +846,40 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     border-radius: 0 0 9px 9px; background: rgba(236, 65, 65, .1);
 }
 .ssp-en-confirm-t { font-size: 11.5px; flex: 1 1 auto; min-width: 0; }
+/* ---------- v1.31.59：DLC 条目 ↔ 面具 ---------- */
+/* 行上那枚 🎭：没绑＝一个淡按钮；绑了＝「🎭 名字 · 状态」两行，当前不生效就灰掉 */
+.ssp-en-mask { flex: 0 0 auto; padding: 3px 7px; font-size: 11px; max-width: 44%; }
+.ssp-en-mask.bound {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+    line-height: 1.25; text-align: left;
+}
+.ssp-en-maskname { font-size: 11px; word-break: break-word; }
+.ssp-en-maskstate { font-size: 9.5px; font-style: normal; opacity: .6; }
+.ssp-en-mask.dim { opacity: .5; }
+/* 这一条现在不生效（戴着别的面具 / 你临时关了）：整行压暗一点，但别太狠，仍要点得动 */
+.ssp-en-row.maskoff { opacity: .62; }
+.ssp-en-row.maskoff .ssp-en-mask.bound { opacity: .95; }
+/* 筛选那一排 */
+.ssp-en-maskfilters { flex-wrap: wrap; gap: 5px; }
+.ssp-en-maskfilters .ssp-pbtn { padding: 3px 8px; font-size: 11px; }
+/* 编辑表单里的面具一节 */
+.ssp-en-masks {
+    display: flex; flex-direction: column; gap: 5px; padding: 7px 8px;
+    border: 1px solid rgba(255, 255, 255, .16); border-radius: 9px; background: rgba(255, 255, 255, .03);
+}
+.ssp-en-maskhead { font-size: 11.5px; font-weight: 700; }
+.ssp-en-maskrow { display: flex; flex-wrap: wrap; gap: 5px; }
+.ssp-en-maskchip {
+    padding: 3px 8px; font-size: 11px; cursor: pointer; user-select: none;
+    border: 1px solid rgba(255, 255, 255, .22); border-radius: 999px;
+    background: rgba(255, 255, 255, .05); touch-action: manipulation;
+}
+.ssp-en-maskchip:hover { background: rgba(255, 255, 255, .12); }
+.ssp-en-maskchip.on { border-color: rgba(255, 255, 255, .8); background: rgba(255, 255, 255, .2); font-weight: 700; }
+.ssp-en-maskchip.worn::after { content: ' ●'; font-size: 9px; opacity: .8; }
+.ssp-en-masknote { font-size: 10.5px; opacity: .62; line-height: 1.5; }
+.ssp-en-masklink { text-decoration: underline; cursor: pointer; }
+.ssp-en-maskworn { font-size: 9.5px; font-style: normal; opacity: .6; margin-left: 5px; }
 /* 美化「编辑口」：CSS 输入框（等宽、能拉高、手机上也别被尺寸压扁） */
 .ssp-theme-css {
     width: 100%; box-sizing: border-box; min-height: 190px; resize: vertical;
