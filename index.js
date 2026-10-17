@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.67';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.68';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -13346,9 +13346,16 @@ function bindOrb() {
            那一发合成 click 就落到了**刚显示出来的面板内容**上（于是世界书条目被点了两次）。
            按规范"取消 pointerdown 会抑制后续兼容鼠标事件"，但实测在 Chrome 里
            **它会把后面的 pointermove 也掐掉 → 球拖不动**，所以不能用。
-           改用下面那道 **click 捕获阶段的"吞一发"**：只吞"跟这次显隐同方向"的第一发 click。 */
-        orbGhostUntil = Date.now() + 600;
-        orbGhostScope = 'in';                 // 开面板 → 吞"面板内"的第一发幽灵 click
+           改用下面那道 **click 捕获阶段的"吞一发"**：只吞"跟这次显隐同方向"的第一发 click。
+
+        ⚠️ v1.31.68：**只在触摸/笔上布防**。桌面鼠标点球不会产生"合成 click"，以前也照着布防了 →
+           用户"点球开面板、紧接着点一张卡"的第一下被吞掉，表现就是
+           「刚进酒馆点对话点不动，进过一次聊天才正常」这种很怪的现象。 */
+        const isTouch = String(ev.pointerType || '') !== 'mouse';
+        if (isTouch) {
+            orbGhostUntil = Date.now() + 600;
+            orbGhostScope = 'in';                 // 开面板 → 吞"面板内"的第一发幽灵 click
+        }
         const r = o.getBoundingClientRect();
         dragging = true; moved = false;
         sx = ev.clientX; sy = ev.clientY; ox = r.left; oy = r.top;
