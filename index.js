@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.60';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.61';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -10526,8 +10526,9 @@ function orbOpenNativeList() {
    ========================================================================== */
 var orbFindQ = '';
 var orbFindCat = 'all';        // all | ai | me | sys
-var orbFindCur = -1;           // 当前停在结果里的第几条（上一条/下一条用）
-var orbFindLimit = 200;        // 结果最多渲染这么多行（防 DOM 撑爆）
+var orbFindCur = -1;           // 当前停在列表里的第几条（上一条/下一条用）
+var orbFindSort = 'desc';      // desc = 最新在上（默认）；asc = 最早在上
+var orbFindShow = 100;         // 列表先渲染多少条（点「显示更多」再加 100）
 
 /** 思维链标签（跟"思维链收纳"用同一份设置） */
 function findThinkTags() {
@@ -10665,16 +10666,41 @@ function findTime(m) {
         return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
     } catch (e) { return ''; }
 }
+/** 列表用哪一批行：**不搜的时候就是整段聊天**（常驻展示），搜的时候就是命中那些。
+    排序：orbFindSort = 'desc'（最新在上，默认） / 'asc'（最早在上）。
+    ⚠️ 用户明确要的是"上方搜索栏、下方常驻展示、一边打一边筛"，不是"搜了才出结果"。 */
+function findRows() {
+    const terms = findTerms();
+    const chat = findChat();
+    let list;
+    if (terms.length) {
+        list = findFiltered(findRun());
+    } else {
+        list = chat.map((m, i) => ({ id: i, cat: findMsgCat(m), text: findTextOf(m), mes: m }));
+        if (orbFindCat !== 'all') list = list.filter(h => h.cat === orbFindCat);
+    }
+    return orbFindSort === 'desc' ? list.slice().reverse() : list;
+}
+
 /** 结果列表（单独一块，输入时只重画它，输入框不会丢焦点） */
 function orbFindBodyHTML() {
     const run = findRun();
     const terms = findTerms();
     const at = { all: '全部', ai: '🤖 ' + findCharName(), me: '👤 ' + findUserName(), sys: '⚙ 系统' };
+    const chats = findChat();
+    /* 没搜的时候，分类 chip 上的数字是"这一类一共几条"（最有用） */
+    const counts = terms.length ? run.counts : (() => {
+        const c = { all: chats.length, ai: 0, me: 0, sys: 0 };
+        chats.forEach(m => { const k = findMsgCat(m); c[k] = (c[k] || 0) + 1; });
+        return c;
+    })();
     const chips = ['all', 'ai', 'me', 'sys'].map(k =>
         '<span class="ssp-pbtn' + (orbFindCat === k ? ' primary' : '') + '" data-orb-findcat="' + k + '">'
-        + esc(at[k]) + ' ' + (run.counts[k] || 0) + '</span>').join('');
-    const list = findFiltered(run);
-    const shown = list.slice(0, orbFindLimit);
+        + esc(at[k]) + ' ' + (counts[k] || 0) + '</span>').join('');
+    const sortChip = '<span class="ssp-pbtn" data-orb-findsort="1" title="切换顺序">'
+        + (orbFindSort === 'desc' ? '最新在上 ↓' : '最早在上 ↑') + '</span>';
+    const list = findRows();
+    const shown = list.slice(0, orbFindShow);
     const rows = shown.map((h, idx) => {
         const who = h.cat === 'me' ? findUserName() : (h.cat === 'sys' ? '系统' : ((h.mes && h.mes.name) || findCharName()));
         const cur = (idx === orbFindCur) ? ' cur' : '';
@@ -10684,35 +10710,39 @@ function orbFindBodyHTML() {
             + '<i class="ssp-find-snip">' + findSnippet(h.text, terms) + '</i></span>'
             + '</div>';
     }).join('');
-    const head = terms.length
-        ? '<div class="ssp-orb-pcount ssp-find-bar">'
-            + '<span>命中 <b>' + run.counts.all + '</b> 条' + (run.counts.all > shown.length ? '（只显示前 ' + shown.length + ' 条）' : '') + '</span>'
-            + '<span class="ssp-pbtn" data-orb-findprev="1" title="上一条">↑ 上一条</span>'
-            + '<span class="ssp-pbtn" data-orb-findnext="1" title="下一条">↓ 下一条</span>'
-            + '</div>'
-        : '';
-    const empty = terms.length && !list.length
-        ? '<div class="ssp-orb-empty">这个分类里没有命中 —— 换个分类或关键字试试。</div>' : '';
-    const hint = terms.length ? '' : '<div class="ssp-orb-empty">打几个字就开始搜（空格分隔多个词＝要全部命中）。'
-        + '<br>消息是酒馆的原文，屏幕上渲染出来的按钮/样式文字搜不到，这是正常的。</div>';
-    return '<div class="ssp-orb-pcount ssp-find-cats">' + chips + '</div>'
+    const head = '<div class="ssp-orb-pcount ssp-find-bar">'
+        + '<span>' + (terms.length ? ('命中 <b>' + list.length + '</b> 条') : ('共 <b>' + list.length + '</b> 条'))
+        + (list.length > shown.length ? '（显示前面 ' + shown.length + ' 条）' : '') + '</span>'
+        + '<span class="ssp-pbtn" data-orb-findprev="1" title="上一条">↑ 上一条</span>'
+        + '<span class="ssp-pbtn" data-orb-findnext="1" title="下一条">↓ 下一条</span>'
+        + '</div>';
+    const more = list.length > shown.length
+        ? '<div class="ssp-orb-pcount"><span class="ssp-pbtn" data-orb-findmore="1">显示更多（还有 '
+            + (list.length - shown.length) + ' 条）</span></div>' : '';
+    const empty = list.length ? ''
+        : '<div class="ssp-orb-empty">' + (terms.length ? '这个分类里没有命中 —— 换个分类或关键字试试。'
+            : (chats.length ? '这一类里没有消息。' : '这个聊天还没有消息。')) + '</div>';
+    const hint = terms.length
+        ? '<div class="ssp-orb-empty" style="padding-top:2px">消息是酒馆的<b>原文</b>：屏幕上渲染出来的按钮/样式文字搜不到，'
+            + '思维链默认跳过（上面那个勾可以打开）。空格分隔多个词＝要全部命中。</div>'
+        : '<div class="ssp-orb-empty" style="padding-top:2px">下面就是整个聊天（不搜也一直列着）。'
+            + '上面打字＝就地筛选；点任意一条就跳过去。空格分隔多个词＝要全部命中。</div>';
+    return '<div class="ssp-orb-pcount ssp-find-cats">' + chips + sortChip + '</div>'
         + head
         + (rows ? '<div class="ssp-orb-wlist ssp-find-list">' + rows + '</div>' : '')
-        + empty + hint;
+        + more + empty + hint;
 }
 
 function orbFindHTML() {
     const run = findRun();
     const box = '<div class="ssp-orb-pfilter">'
         + '<i class="fa-solid fa-magnifying-glass"></i>'
-        + '<input class="ssp-inp" type="text" data-orb-findq="1" placeholder="搜当前聊天（标题/正文都算）" value="' + esc(orbFindQ) + '">'
+        + '<input class="ssp-inp" type="text" data-orb-findq="1" placeholder="在上面打字＝就地筛下面这个列表（空格分隔＝全部命中）" value="' + esc(orbFindQ) + '">'
         + (orbFindQ ? '<span class="ssp-pbtn" data-orb-findclear="1">清除</span>' : '')
         + '</div>';
     const opt = '<label class="ssp-orb-auto" style="padding-top:2px"><input type="checkbox" data-orb-findthink="1"'
         + (findUseThink() ? ' checked' : '') + '><span>连思维链一起搜</span></label>';
-    const info = '<div class="ssp-orb-empty" style="padding:2px 2px 0">当前聊天共 <b>' + run.total + '</b> 条消息；'
-        + '点结果就跳到那一条（手机上面板会先收起）。</div>';
-    return box + opt + info + '<div id="ssp_orb_find_body">' + orbFindBodyHTML() + '</div>';
+    return box + opt + '<div id="ssp_orb_find_body">' + orbFindBodyHTML() + '</div>';
 }
 
 /** 跳到某条消息：滚到它 + 闪一下。手机上面板是全屏的，先关面板（否则看不见跳过去的东西） */
@@ -10734,15 +10764,18 @@ function orbFindGo(id, quiet) {
             el.classList.remove('ssp-find-flash');
             void el.offsetWidth;                       // 重启动画
             el.classList.add('ssp-find-flash');
-            globalThis.setTimeout?.(() => { try { el.classList.remove('ssp-find-flash'); } catch (e) { } }, 2200);
+            /* ⚠️ 定时器要挂在元素上、并且先清掉上一个：连着跳两条时，上一条的"收闪烁"
+               定时器会把这一条刚加上的类立刻删掉（实测：第二条不闪了）。 */
+            try { if (el.__sspFindTimer) globalThis.clearTimeout(el.__sspFindTimer); } catch (e) { }
+            el.__sspFindTimer = globalThis.setTimeout?.(() => { try { el.classList.remove('ssp-find-flash'); } catch (e) { } }, 2200);
         } catch (e) { }
     }, mobile ? 260 : 40);
     return true;
 }
-/** 上一条 / 下一条（在当前分类的结果里走） */
+/** 上一条 / 下一条（在当前这个列表里走 —— 不搜的时候就是整个聊天） */
 function orbFindStep(step) {
-    const list = findFiltered(findRun());
-    if (!list.length) { toast('没有命中可跳', 'info'); return false; }
+    const list = findRows();
+    if (!list.length) { toast('没有可跳的消息', 'info'); return false; }
     let i = orbFindCur;
     if (i < 0 || i >= list.length) i = step > 0 ? -1 : 0;
     i = (i + step + list.length) % list.length;
@@ -12982,6 +13015,7 @@ function bindOrb() {
         if (!el || !el.dataset || el.dataset.orbFindq === undefined) return;
         orbFindQ = el.value || '';
         orbFindCur = -1;
+        orbFindShow = 100;                    // 关键字变了 → 列表回到第一屏
         const box = document.getElementById('ssp_orb_find_body');
         if (box) box.innerHTML = orbFindBodyHTML();
         const bar = el.closest('.ssp-orb-pfilter');
@@ -12997,8 +13031,8 @@ function bindOrb() {
         if (!el || !el.dataset || el.dataset.orbFindq === undefined) return;
         if (ev.key !== 'Enter') return;
         ev.preventDefault();
-        const list = findFiltered(findRun());
-        if (!list.length) { toast('没有命中', 'info'); return; }
+        const list = findRows();
+        if (!list.length) { toast('没有可跳的消息', 'info'); return; }
         orbFindCur = 0;
         orbFindGo(list[0].id);
         if (orbOpenNow && orbTab === 'find') renderOrbPanel();
@@ -13443,7 +13477,19 @@ function bindOrb() {
         }
         /* v1.31.60 查找页：分类筛选 / 思维链开关 / 跳转 / 上一条下一条 / 清除 */
         const findCat = t.closest('[data-orb-findcat]');
-        if (findCat) { orbFindCat = findCat.dataset.orbFindcat || 'all'; orbFindCur = -1; renderOrbPanel(); return; }
+        if (findCat) { orbFindCat = findCat.dataset.orbFindcat || 'all'; orbFindCur = -1; orbFindShow = 100; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-findsort]')) {
+            orbFindSort = (orbFindSort === 'desc') ? 'asc' : 'desc';
+            orbFindCur = -1;
+            renderOrbPanel();
+            return;
+        }
+        if (t.closest('[data-orb-findmore]')) {
+            orbFindShow += 100;
+            const box = document.getElementById('ssp_orb_find_body');
+            if (box) box.innerHTML = orbFindBodyHTML(); else renderOrbPanel();
+            return;
+        }
         if (t.closest('[data-orb-findthink]')) {
             getSettings().findThink = Boolean(t.checked);
             save();
@@ -13454,7 +13500,7 @@ function bindOrb() {
         const findRow = t.closest('[data-orb-findrow]');
         if (findRow) {
             const id = findRow.dataset.orbFindrow;
-            const list = findFiltered(findRun());
+            const list = findRows();
             orbFindCur = list.findIndex(h => String(h.id) === String(id));
             orbFindGo(id);
             return;
@@ -14028,11 +14074,13 @@ if (globalThis.__SSP_TEST__) {
         get orbDlcMaskFor() { return orbDlcMaskFor; }, set orbDlcMaskFor(v) { orbDlcMaskFor = v; },
         get dlcWornCache() { return dlcWornCache; }, set dlcWornCache(v) { dlcWornCache = v; },
         /* v1.31.60：消息查找 */
-        orbFindHTML, orbFindBodyHTML, findRun, findFiltered, findStripThink, findSnippet, findTextOf,
+        orbFindHTML, orbFindBodyHTML, findRun, findFiltered, findRows, findStripThink, findSnippet, findTextOf,
         findUseThink, orbFindGo, orbFindStep,
         get orbFindQ() { return orbFindQ; }, set orbFindQ(v) { orbFindQ = v; },
         get orbFindCat() { return orbFindCat; }, set orbFindCat(v) { orbFindCat = v; },
         get orbFindCur() { return orbFindCur; }, set orbFindCur(v) { orbFindCur = v; },
+        get orbFindSort() { return orbFindSort; }, set orbFindSort(v) { orbFindSort = v; },
+        get orbFindShow() { return orbFindShow; }, set orbFindShow(v) { orbFindShow = v; },
         orbWbApplyForChar, orbWbCleanup, orbWbRestoreCur, orbWbOnChatChanged,
         orbWbApplied, orbWbEnabled, orbWbCurChar, orbWbBound, orbWbActive, orbWbSyncChar,
         orbWorldRefresh, orbWorldHTML, orbWorldRowsHTML, orbWorldPickerHTML,
