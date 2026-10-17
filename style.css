@@ -952,20 +952,24 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 }
 .ssp-tv-ghead i { font-style: normal; opacity: .6; font-weight: 400; }
 .ssp-tv-row {
-    display: grid; grid-template-columns: minmax(96px, 42%) 1fr auto; align-items: center; gap: 7px;
-    padding: 5px 9px; border-top: 1px solid rgba(255, 255, 255, .06);
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 9px; min-height: 26px;
+    border-top: 1px solid rgba(255, 255, 255, .06);
+    background: transparent;
 }
 .ssp-tv-row.changed { background: rgba(120, 190, 255, .07); }
 .ssp-tv-k {
-    font-family: Consolas, Monaco, monospace; font-size: 10.5px; opacity: .8;
+    flex: 0 0 auto; width: 40%; min-width: 90px;
+    font-family: Consolas, Monaco, monospace; font-size: 10.5px; line-height: 1.6;
+    color: #cfcfda; opacity: 1;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ssp-tv-ctl { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.ssp-tv-color { width: 30px; height: 22px; padding: 0; border: 1px solid rgba(255, 255, 255, .25); border-radius: 3px; background: none; cursor: pointer; }
-.ssp-tv-range { flex: 1 1 auto; min-width: 44px; }
-.ssp-tv-num { font-size: 10.5px; opacity: .72; font-weight: 400; min-width: 40px; text-align: right; }
-.ssp-tv-text { flex: 1 1 auto; min-width: 0; font-size: 11px; }
-.ssp-tv-reset { padding: 0 6px; font-size: 11px; line-height: 1.6; }
+.ssp-tv-ctl { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; color: #cfcfda; }
+.ssp-tv-color { flex: 0 0 auto; width: 30px; height: 22px; padding: 0; border: 1px solid rgba(255, 255, 255, .25); border-radius: 3px; background: none; cursor: pointer; }
+.ssp-tv-range { flex: 1 1 auto; min-width: 44px; height: 18px; accent-color: #6ea8ff; }
+.ssp-tv-num { flex: 0 0 auto; font-size: 10.5px; color: #a9a9ba; font-weight: 400; min-width: 44px; text-align: right; }
+.ssp-tv-text { flex: 1 1 auto; min-width: 0; font-size: 11px; padding: 3px 6px; color: #e8e8ef; background: rgba(0, 0, 0, .25); border: 1px solid rgba(255, 255, 255, .16); border-radius: 3px; }
+.ssp-tv-reset { flex: 0 0 auto; padding: 0 6px; font-size: 11px; line-height: 1.6; }
 .ssp-find-cats { flex-wrap: wrap; gap: 5px; }
 .ssp-find-cats .ssp-pbtn { padding: 3px 8px; font-size: 11px; }
 .ssp-find-bar { flex-wrap: wrap; gap: 6px; align-items: center; }
