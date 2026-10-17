@@ -943,8 +943,18 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
     font-size: 10px; padding: 1px 6px; border-radius: 3px;
     background: rgba(120, 190, 255, .18); border: 1px solid rgba(120, 190, 255, .4);
 }
-.ssp-tv-body { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow-y: auto; padding-right: 2px; }
-.ssp-tv-group { border: 1px solid rgba(255, 255, 255, .1); border-radius: 4px; overflow: hidden; }
+/* v1.31.76：这里原来是 display:flex + gap。因为 .ssp-tv-group 自带 overflow:hidden，
+   它的「自动最小尺寸」= 0，于是 68 个变量一旦超过 46vh，flex 就把每个组压成 7px 的薄片，
+   组里的行被 overflow 裁掉 —— 用户看到的就是「一排空条纹，一个字没有」。改成 block 布局。 */
+.ssp-tv-body {
+    display: block; flex: 0 0 auto; max-height: 46vh; overflow-y: auto;
+    overscroll-behavior: contain; padding-right: 2px;
+}
+.ssp-tv-group {
+    border: 1px solid rgba(255, 255, 255, .1); border-radius: 4px; overflow: hidden;
+    margin: 0 0 8px; flex: 0 0 auto;
+}
+.ssp-tv-group:last-child { margin-bottom: 0; }
 .ssp-tv-ghead {
     display: flex; align-items: center; gap: 6px; padding: 4px 9px;
     font-size: 10.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; opacity: .72;

@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.75';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.76';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6842,8 +6842,36 @@ function orbThemeVarsHTML() {
         + '</div>';
     if (!hit.length) return head + tools + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">没有匹配「' + esc(orbTVSearch) + '」的变量。</div>';
     const groups = new Map();
+    /* 分组：`--p5-pitch` 这种按第一个横线前的词分（p5）；
+       `--SmartThemeBodyColor` 这种没有横线的，按同族（公共前缀）并成一组，
+       否则 10 个 SmartTheme 变量会变成 10 个「一组一个」的组头，白占一大截高度。 */
+    const lcpOf = (arr) => arr.reduce((p, c) => {
+        let i = 0;
+        const n = Math.min(p.length, c.length);
+        while (i < n && p[i] === c[i]) i++;
+        return p.slice(0, i);
+    });
+    const famCut = (s) => {   // "SmartThemeB" → "SmartTheme"（切掉半个词）；"SmartTheme" 原样留着
+        const t = String(s);
+        return /.[A-Z]$/.test(t) ? t.slice(0, -1) : t;
+    };
+    const bucket = new Map();
     hit.forEach(v => {
-        const g = (v.k.replace(/^--/, '').split('-')[0] || '其他').toLowerCase();
+        const n = v.k.replace(/^--/, '');
+        if (n.indexOf('-') >= 0) return;
+        const b = n.slice(0, 4).toLowerCase();
+        if (!bucket.has(b)) bucket.set(b, []);
+        bucket.get(b).push(n);
+    });
+    const nameGroup = new Map();
+    bucket.forEach(names => {
+        const pre = names.length > 1 ? (famCut(lcpOf(names)) || names[0]) : names[0];
+        names.forEach(n => nameGroup.set(n, pre));
+    });
+    hit.forEach(v => {
+        const n = v.k.replace(/^--/, '');
+        const i = n.indexOf('-');
+        const g = (i > 0 ? n.slice(0, i) : (nameGroup.get(n) || n)).toLowerCase();
         if (!groups.has(g)) groups.set(g, []);
         groups.get(g).push(v);
     });
@@ -6870,7 +6898,8 @@ function orbThemeVarsHTML() {
                 + ' title="' + esc(val) + '" style="flex:0 0 auto !important;width:32px !important;height:22px !important;'
                 + 'padding:0 !important;border:1px solid rgba(255,255,255,.3) !important;border-radius:3px !important;'
                 + 'background:#222 !important;cursor:pointer !important;display:inline-block !important;">'
-                + '<code style="font-size:10px !important;color:#9a9ab0 !important;'
+                + '<code style="font-size:10px !important;color:#9a9ab0 !important;background:transparent !important;'
+                + 'border:0 !important;padding:0 !important;border-radius:0 !important;box-shadow:none !important;'
                 + 'font-family:Consolas,Monaco,monospace !important;">' + esc(val) + '</code>';
         } else if (kind === 'px' || kind === 'em' || kind === 'pct') {
             const num = themeVarNumOf(val);
