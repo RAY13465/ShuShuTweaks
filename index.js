@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.83';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.84';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -7413,7 +7413,7 @@ function orbThemeRowsHTML() {
 var orbTVSearch = '';
 var orbTVCat = 'all';           // v1.31.81：类别页签（全部/颜色/字号尺寸/字体/其它）
 var orbTVDictOpen = false;      // v1.31.79：词表（改中文名 / 导入导出）那块要不要展开
-var orbTVOpen = true;
+var orbTVOpen = false;   // v1.31.84：默认收起（68 行一展开就占满整页，用户说太难受了）
 
 function themeVarsBinds() {
     const s = getSettings();
@@ -16377,6 +16377,7 @@ if (globalThis.__SSP_TEST__) {
         sspVarDictJSON, sspVarDictLoad, sspDictUser, sspDictOf, themeVarsParse, orbThemeCss,
         get orbTVSearch() { return orbTVSearch; },
         set orbTVSearch(v) { orbTVSearch = String(v == null ? '' : v); },
+        get orbTVOpen() { return orbTVOpen; }, set orbTVOpen(v) { orbTVOpen = !!v; },
         get orbTVCat() { return orbTVCat; }, set orbTVCat(v) { orbTVCat = String(v || 'all'); },
         get orbTVDictOpen() { return orbTVDictOpen; },
         set orbTVDictOpen(v) { orbTVDictOpen = v; },
