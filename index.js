@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.62';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.63';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -12251,19 +12251,141 @@ function orbNoteRowsHTML() {
     }).join('');
 }
 
+/* ============================ 页签收纳（v1.31.63）============================
+   用户抱怨："手机上的标签已经快来到三行了" —— 13 个页签一换行就把聊天可视高度吃掉了。
+
+   规则（用户选的）：**他自己指定"一定收起来"的那几个**；其余一律显示；
+   收起来的进末尾那颗「…」，点开弹出来（图标+名字），点一下就切过去。
+   - 桌面也收（用户选的）：不按屏幕宽窄区别对待
+   - 自动兜底：就算他把什么都设成"显示"，只要当前宽度放不下，也会把**末尾那几个**挤进「…」，
+     保证页签栏永远是**一行**（挤进去的不写进设置，屏幕变宽就自己回来）
+   - 当前页签被收进去时，「…」那颗高亮（不然找不到自己在哪一页）
+   ========================================================================== */
+var orbTabMenu = false;        // 「…」弹层开着吗
+var orbTabMenuEdit = false;    // 弹层里的"整理"模式
+var orbTabSqueeze = new Set(); // 因为放不下被临时挤进「…」的（只是内存，不落盘）
+
+/** 用户指定"一定收起来"的页签 id（只认现存模块，顺序按 ORB_MODULES） */
+function orbTabHidden() {
+    const s = getSettings();
+    if (!Array.isArray(s.orbTabHidden)) s.orbTabHidden = [];
+    const ok = s.orbTabHidden.filter(id => ORB_MODULES.some(m => m.id === id));
+    if (ok.length !== s.orbTabHidden.length) s.orbTabHidden = ok;
+    return ok;
+}
+function orbTabIsHidden(id) { return orbTabHidden().indexOf(id) >= 0; }
+/** 收 / 放一个页签（返回 true = 现在收起来了） */
+function orbTabHideSet(id, on) {
+    const s = getSettings();
+    const list = orbTabHidden().slice();
+    const i = list.indexOf(id);
+    if (on && i < 0) list.push(id);
+    if (!on && i >= 0) list.splice(i, 1);
+    s.orbTabHidden = list;
+    if (!on) orbTabSqueeze.delete(id);        // 手动放出来就别再挤回去
+    save();
+    return list.indexOf(id) >= 0;
+}
+/** 现在真正进「…」的是哪些（指定收起来的 ∪ 因为放不下被挤的），顺序仍按 ORB_MODULES */
+function orbTabOverflowIds() {
+    const hid = orbTabHidden();
+    return ORB_MODULES.filter(m => hid.indexOf(m.id) >= 0 || orbTabSqueeze.has(m.id)).map(m => m.id);
+}
+function orbTabChipHTML(m, cur, extraCls) {
+    return '<span class="ssp-orb-tab' + (m.id === cur.id ? ' on' : ' off') + (extraCls || '')
+        + '" data-orb-tab="' + m.id + '" title="' + esc(m.name) + '">'
+        + '<i class="fa-solid ' + m.icon + '"></i>' + esc(m.name) + '</span>';
+}
+/** 页签栏：显示"没被收起来的" + 末尾那颗「…」 */
+function orbTabsHTML(cur) {
+    const over = orbTabOverflowIds();
+    const shown = ORB_MODULES.filter(m => over.indexOf(m.id) < 0);
+    const curHidden = over.indexOf(cur.id) >= 0;
+    const more = '<span class="ssp-orb-tabmore' + (curHidden ? ' on' : '') + '" data-orb-tabmore="1"'
+        + ' title="' + (over.length ? ('还有 ' + over.length + ' 个页签收在这里 · 点开；也可以在这里整理') : '整理页签（把不常用的收进来）') + '">'
+        + (curHidden ? ('<i class="fa-solid ' + cur.icon + '"></i>') : '')
+        + '<i class="fa-solid fa-ellipsis"></i>'
+        + (over.length ? '<span class="ssp-tabmore-n">' + over.length + '</span>' : '')
+        + '</span>';
+    return shown.map(m => orbTabChipHTML(m, cur)).join('')
+        + more
+        + '<span class="ssp-tab-now">' + esc(cur.name) + '</span>';
+}
+/** 「…」弹层：上半是收起来的页签（点一下切过去），下半是"整理"开关 */
+function orbTabMenuHTML(cur) {
+    if (!orbTabMenu) return '';
+    const over = orbTabOverflowIds();
+    const overMods = ORB_MODULES.filter(m => over.indexOf(m.id) >= 0);
+    const listRows = overMods.length
+        ? overMods.map(m => '<span class="ssp-orb-tab' + (m.id === cur.id ? ' on act' : ' off')
+            + '" data-orb-tabopen="' + m.id + '" title="切到「' + esc(m.name) + '」">'
+            + '<i class="fa-solid ' + m.icon + '"></i>' + esc(m.name) + '</span>').join('')
+        : '<span class="ssp-orb-tabmenu-h">没有收起来的页签 —— 下面点「整理」可以把不常用的收进来。</span>';
+    const editRows = orbTabMenuEdit
+        ? ORB_MODULES.map(m => {
+            /* ⚠️ 三种状态要分清（第一版只判了"显式收起的"，于是被宽度挤进「…」的也显示"显示中"，
+               用户看着就是"明明收起来了却说显示中"）：
+                 显式收起 → 已收进… ｜ 因为放不下被挤的 → 放不下 ｜ 其余 → 显示中 */
+            const hid = orbTabIsHidden(m.id);
+            const squeezed = !hid && orbTabSqueeze.has(m.id);
+            const label = hid ? '已收进…' : (squeezed ? '放不下' : '显示中');
+            return '<div class="ssp-orb-tabedit-row' + ((hid || squeezed) ? ' hid' : '') + '" data-orb-tabhide="' + m.id + '"'
+                + ' title="点一下＝' + (hid ? '放回页签栏' : '收进「…」') + '">'
+                + '<i class="fa-solid ' + m.icon + '"></i>'
+                + '<span class="ssp-orb-tabedit-n">' + esc(m.name) + '</span>'
+                + '<span class="ssp-orb-tabedit-s">' + label + '</span>'
+                + '</div>';
+        }).join('')
+        : '';
+    return '<div class="ssp-orb-tabmenu">'
+        + '<div class="ssp-orb-tabmenu-h"><b>收在这里的页签（' + overMods.length + '）</b>'
+        + '<span style="margin-left:auto"></span>'
+        + '<span class="ssp-pbtn" data-orb-tabmenuedit="1">' + (orbTabMenuEdit ? '完成' : '整理') + '</span>'
+        + '<span class="ssp-pbtn" data-orb-tabmenuclose="1">关闭</span></div>'
+        + '<div class="ssp-orb-tabmenu-row">' + listRows + '</div>'
+        + (orbTabMenuEdit
+            ? '<div class="ssp-orb-tabmenu-h" style="margin-top:4px"><b>整理：点一行＝收起来 / 放回去</b></div>'
+                + '<div class="ssp-orb-tabmenu-row" style="flex-direction:column;gap:4px">' + editRows + '</div>'
+                + '<span class="ssp-orb-tabmenu-h">页签栏永远只有一行：显示不下的会自动挤进「…」（不写进设置，屏幕变宽自己回来）。</span>'
+            : '')
+        + '</div>';
+}
+
+/** 放不下就把**末尾**的挤进「…」（只在内存里），保证页签栏永远一行。
+    ⚠️ 必须在 DOM 插进去之后量，所以由 renderOrbPanel 和窗口 resize 调用。 */
+function orbTabsFit() {
+    try {
+        const bar = document.querySelector('#ssp_orb_panel .ssp-orb-tabs');
+        if (!bar) return false;
+        const cur = orbModule(orbTab) || ORB_MODULES[0];
+        let guard = 0;
+        while (bar.scrollWidth > bar.clientWidth + 1 && guard++ < 40) {
+            const shown = ORB_MODULES.filter(m => {
+                const id = m.id;
+                const over = orbTabHidden().indexOf(id) >= 0 || orbTabSqueeze.has(id);
+                return !over;
+            });
+            /* 只挤"最后一个还在栏里的"；要是只剩当前页签了就别挤它（否则「…」里全是空的） */
+            const last = shown.length ? shown[shown.length - 1] : null;
+            if (!last) break;
+            if (shown.length <= 1) break;
+            orbTabSqueeze.add(last.id);
+            bar.innerHTML = orbTabsHTML(cur);
+        }
+        return true;
+    } catch (e) { return false; }
+}
+
 function orbPanelHTML() {
     const e = orbEditing;
     const cur = orbModule(orbTab) || ORB_MODULES[0];
-    const tabs = ORB_MODULES.map(m => '<span class="ssp-orb-tab' + (m.id === cur.id ? ' on' : ' off')
-        + '" data-orb-tab="' + m.id + '" title="' + esc(m.name) + '"><i class="fa-solid ' + m.icon + '"></i>' + esc(m.name) + '</span>').join('')
-        /* 当前页签的名字放最右：手机上页签一多、换行后容易找不到自己在哪一页 */
-        + '<span class="ssp-tab-now">' + esc(cur.name) + '</span>';
     return '<div class="ssp-orb-head"><span class="ssp-orb-logo"></span>'
         + '<div class="ssp-orb-title"><b>鼠鼠口袋</b><small>' + esc(cur.name) + ' · ' + ORB_MODULES.length + ' 个模块</small></div>'
         + '<span class="ssp-pbtn" data-orb-dbgopen="1" title="调试（脚本测试 / 一键诊断 / 抓元素）→ 见最后那个「调试」页签"><i class="fa-solid fa-code"></i></span>'
         + '<span class="ssp-pbtn" data-orb-retract="1" title="收回悬浮球（之后从酒馆「扩展」列表里的鼠鼠面板再打开）"><i class="fa-solid fa-eye-slash"></i></span>'
         + '<span class="ssp-pbtn" data-orb-close="1"><i class="fa-solid fa-xmark"></i></span></div>'
-        + '<div class="ssp-orb-tabs">' + tabs + '</div>'
+        + '<div class="ssp-orb-tabwrap"><div class="ssp-orb-tabs">' + orbTabsHTML(cur) + '</div>'
+        + orbTabMenuHTML(cur) + '</div>'
         + '<div class="ssp-orb-body">'
         + (e ? '<div class="ssp-orb-edit">'
             + '<input class="ssp-inp" type="text" data-orb-f="title" placeholder="标题（比如：番外·雨夜）" value="' + esc(e.title || '') + '">'
@@ -12291,6 +12413,8 @@ function renderOrbPanel() {
        重画只会换掉我们自己的骨架 → 记一下"上一帧有没有骨架"，重画后重挂 + 重读。 */
     try { chUnmountFrameSoft(); } catch (e) { }
     panel.innerHTML = orbPanelHTML();
+    /* v1.31.63：页签栏必须**一行** —— 插进 DOM 后量一次，放不下的挤进「…」 */
+    try { orbTabsFit(); } catch (e) { }
     const newBody = panel.querySelector('.ssp-orb-body');
     if (newBody) {
         const max = Math.max(0, (newBody.scrollHeight || 0) - (newBody.clientHeight || 0));
@@ -12332,6 +12456,7 @@ function openOrb() {
     const root = document.getElementById('ssp_orb_root');
     if (root && root.classList) root.classList.add('on');
     orbOpenNow = true; orbEditing = null;
+    orbTabSqueeze.clear();                    // 换屏幕/横竖屏后重新算"放得下几个"
     renderOrbPanel();
     if (orbTab === 'dlc') orbDlcEnsure();     // 停在 DLC 页时按需拉那本书的条目
     return true;
@@ -12713,6 +12838,26 @@ function bindOrb() {
        这里只是尽早试一次（那时酒馆上下文常常还没到位，所以它自己会重试）。 */
     bindWbWatch();
     bindDlcMaskWatch();
+
+    /* v1.31.63：窗口/横竖屏变了 → 重新算"页签放得下几个"（挤进「…」的只是内存状态，不能留着） */
+    try {
+        if (!bindOrb.resizeBound) {
+            bindOrb.resizeBound = true;
+            let rzTimer = 0;
+            globalThis.addEventListener?.('resize', () => {
+                if (!orbOpenNow) return;
+                try { globalThis.clearTimeout(rzTimer); } catch (e) { }
+                rzTimer = globalThis.setTimeout?.(() => {
+                    orbTabSqueeze.clear();
+                    try { renderOrbPanel(); } catch (e) { }
+                }, 160);
+            });
+            globalThis.addEventListener?.('orientationchange', () => {
+                orbTabSqueeze.clear();
+                if (orbOpenNow) { try { renderOrbPanel(); } catch (e) { } }
+            });
+        }
+    } catch (e) { }
 
     /* 兜底：酒馆把自己列表的选中状态改了（.selected 变动），面板开着就跟着刷 */
     try {
@@ -13715,6 +13860,47 @@ function bindOrb() {
         const wChar = t.closest('[data-orb-wchar]');
         if (wChar && wChar.tagName === 'SELECT') { /* 下面 change 事件里处理 */ return; }
         /* 模块标签页 */
+        /* v1.31.63 页签收纳：「…」开合 / 弹层里切页签 / 整理（收起来·放回去） */
+        if (t.closest('[data-orb-tabmore]')) {
+            orbTabMenu = !orbTabMenu;
+            if (!orbTabMenu) orbTabMenuEdit = false;
+            renderOrbPanel();
+            return;
+        }
+        if (t.closest('[data-orb-tabmenuclose]')) {
+            orbTabMenu = false; orbTabMenuEdit = false;
+            renderOrbPanel();
+            return;
+        }
+        if (t.closest('[data-orb-tabmenuedit]')) {
+            orbTabMenuEdit = !orbTabMenuEdit;
+            renderOrbPanel();
+            return;
+        }
+        const tabOpen = t.closest('[data-orb-tabopen]');
+        if (tabOpen) {
+            const nextTab = tabOpen.dataset.orbTabopen || 'pick';
+            if (orbTab === 'editor' && nextTab !== 'editor') { try { orbEditorUnmount(); } catch (e) { } }
+            orbTab = nextTab; orbEditing = null;
+            orbTabMenu = false; orbTabMenuEdit = false;
+            renderOrbPanel();
+            if (orbTab === 'editor') { setTimeout(() => { try { orbEditorMountSoon(28); } catch (e) { } }, 40); }
+            if (orbTab === 'chat') orbChatsFetch();
+            if (orbTab === 'bg') { try { orbBgSyncChar(true); } catch (e) { } orbBgFetch(); }
+            if (orbTab === 'world') orbWorldRefresh();
+            if (orbTab === 'dlc') orbDlcEnsure();
+            return;
+        }
+        const tabHide = t.closest('[data-orb-tabhide]');
+        if (tabHide) {
+            const id = tabHide.dataset.orbTabhide;
+            const now = orbTabHideSet(id, !orbTabIsHidden(id));
+            /* 收起来以后当前页签可能刚好被收进去 → 让「…」高亮，面板内容不用动 */
+            renderOrbPanel();
+            toast(now ? ('已把「' + ((orbModule(id) || {}).name || id) + '」收进「…」')
+                : ('已把「' + ((orbModule(id) || {}).name || id) + '」放回页签栏'), 'info');
+            return;
+        }
         const tabEl = t.closest('[data-orb-tab]');
         if (tabEl) {
             const nextTab = tabEl.dataset.orbTab || 'notes';
@@ -13722,6 +13908,7 @@ function bindOrb() {
             if (orbTab === 'editor' && nextTab !== 'editor') { try { orbEditorUnmount(); } catch (e) { } }
             orbTab = nextTab; orbEditing = null;
             orbWbBinding = null;
+            orbTabMenu = false; orbTabMenuEdit = false;    // 切页签就收起「…」
             orbWbCloseEntries(true);
             renderOrbPanel();
             /* 回到「写卡」页签：把块再搬进来 */
@@ -14094,6 +14281,11 @@ if (globalThis.__SSP_TEST__) {
         get orbTab() { return orbTab; }, set orbTab(v) { orbTab = v; },
         get orbDlcMaskFor() { return orbDlcMaskFor; }, set orbDlcMaskFor(v) { orbDlcMaskFor = v; },
         get dlcWornCache() { return dlcWornCache; }, set dlcWornCache(v) { dlcWornCache = v; },
+        /* v1.31.63：页签收纳 */
+        orbTabsHTML, orbTabMenuHTML, orbTabsFit, orbTabHidden, orbTabIsHidden, orbTabHideSet, orbTabOverflowIds,
+        get orbTabMenu() { return orbTabMenu; }, set orbTabMenu(v) { orbTabMenu = v; },
+        get orbTabMenuEdit() { return orbTabMenuEdit; }, set orbTabMenuEdit(v) { orbTabMenuEdit = v; },
+        get orbTabSqueeze() { return orbTabSqueeze; },
         /* v1.31.60：消息查找 */
         orbFindHTML, orbFindBodyHTML, findRun, findFiltered, findRows, findStripThink, findSnippet, findTextOf,
         findUseThink, orbFindGo, orbFindStep,

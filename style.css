@@ -634,8 +634,61 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-orb-title { flex: 1 1 auto; display: flex; flex-direction: column; }
 .ssp-orb-title b { font-size: 14.5px; }
 .ssp-orb-title small { font-size: 10.5px; opacity: .5; }
-.ssp-orb-tabs { flex: 0 0 auto; display: flex; gap: 6px; padding: 9px 13px 0; flex-wrap: wrap; }
+/* v1.31.63：页签栏改成**单行**（不换行）—— 放不下的进末尾那颗「…」。
+   用户抱怨"手机上的标签已经快来到三行了"，一换行就把聊天可视高度吃掉了。
+   ⚠️ 这里必须再包一层 .ssp-orb-tabwrap：页签栏自己 overflow:hidden 才切得干净，
+      而「…」弹层是绝对定位的 —— 放在 overflow:hidden 的盒子里会被**整块裁掉**（实测点了没反应）。 */
+.ssp-orb-tabwrap { position: relative; flex: 0 0 auto; }
+.ssp-orb-tabs {
+    flex: 0 0 auto; display: flex; gap: 6px; padding: 9px 13px 0;
+    flex-wrap: nowrap; overflow: hidden;
+}
+.ssp-orb-tabs .ssp-orb-tab { flex: 0 0 auto; }
+/* 末尾那颗「…」：当前页签被收进去时会高亮，让人知道自己在哪一页 */
+.ssp-orb-tabmore {
+    flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 999px; font-size: 12px;
+    background: rgba(255, 255, 255, .2); border: 1px solid rgba(255, 255, 255, .25);
+    cursor: pointer; touch-action: manipulation; white-space: nowrap;
+}
+.ssp-orb-tabmore:hover { background: rgba(255, 255, 255, .3); }
+.ssp-orb-tabmore.on { background: rgba(255, 255, 255, .42); border-color: rgba(255, 255, 255, .6); font-weight: 700; }
+.ssp-orb-tabmore .ssp-tabmore-n { font-size: 10px; opacity: .75; }
+/* 「…」弹层：贴在页签栏下方（相对 .ssp-orb-tabwrap 定位，所以不会被栏的 overflow 裁掉） */
+.ssp-orb-tabmenu {
+    position: absolute; left: 10px; right: 10px; top: calc(100% + 2px); z-index: 30;
+    margin-top: 0; padding: 8px;
+    border: 1px solid rgba(255, 255, 255, .28); border-radius: 11px;
+    background: rgba(24, 24, 28, .97); box-shadow: 0 10px 26px rgba(0, 0, 0, .5);
+    display: flex; flex-direction: column; gap: 6px; max-height: 58vh; overflow-y: auto;
+}
+.ssp-orb-tabmenu-mask { position: absolute; inset: 0; z-index: 29; }
+.ssp-orb-tabmenu-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.ssp-orb-tabmenu-h { display: flex; align-items: center; gap: 6px; font-size: 11px; opacity: .75; }
+.ssp-orb-tabmenu-h b { font-size: 12px; opacity: 1; }
+.ssp-orb-tabmenu .ssp-orb-tab { cursor: pointer; }
+.ssp-orb-tabmenu .ssp-orb-tab.act { background: rgba(255, 255, 255, .4); font-weight: 700; }
+/* 整理模式：一行一个页签，右边是"收进…/显示" */
+.ssp-orb-tabedit-row {
+    display: flex; align-items: center; gap: 8px; padding: 5px 7px;
+    border: 1px solid rgba(255, 255, 255, .16); border-radius: 8px;
+    background: rgba(255, 255, 255, .04); cursor: pointer; touch-action: manipulation;
+}
+.ssp-orb-tabedit-row:hover { background: rgba(255, 255, 255, .1); }
+.ssp-orb-tabedit-row.hid { opacity: .55; }
+.ssp-orb-tabedit-n { flex: 1 1 auto; font-size: 12px; min-width: 0; }
+.ssp-orb-tabedit-s {
+    flex: 0 0 auto; font-size: 10.5px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, .3);
+}
+.ssp-orb-tabedit-row.hid .ssp-orb-tabedit-s { background: rgba(255, 255, 255, .28); }
 .ssp-orb-tab { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; background: rgba(255, 255, 255, .14); }
+/* 「当前页签」的名字（放最右，页签被收进「…」时也还看得见自己在哪一页）
+   ⚠️ 单行 + overflow:hidden 之后它可能被切掉，所以给 min-width:0 并允许省略号 */
+.ssp-tab-now {
+    display: inline-flex; align-items: center; padding: 4px 2px; font-size: 10.5px; opacity: .55;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto;
+}
 .ssp-orb-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 13px 13px; }
 .ssp-orb-empty { padding: 14px 10px; font-size: 12px; line-height: 1.7; opacity: .6; }
 
