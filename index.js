@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.87';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.88';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -11767,7 +11767,8 @@ function findTextOf(m) {
    这里只是另一套界面：收起=一颗放大镜，展开=输入框 + 3/12 + ↑↓ + ×。
    纯只读：只搜当前聊天、只跳转。 */
 var findBarOpen = false;      // 展开成输入条了吗
-var findBarT = 0;             // 输入去抖
+var findBarT = 0;
+var findBarComposing = false;   // v1.31.88：输入法拼字中（这时候绝不重画输入框）             // 输入去抖
 function findBarOn() { return getSettings().findBarOn !== false; }
 function findBarCount() {
     try {
@@ -11775,48 +11776,55 @@ function findBarCount() {
         return { n: rows.length, i: orbFindCur >= 0 && orbFindCur < rows.length ? orbFindCur + 1 : 0 };
     } catch (e) { return { n: 0, i: 0 }; }
 }
+/** v1.31.88：只重画"结果列表"这一块。**输入框一个字母都不能重建** ——
+    之前每次输入都整块 innerHTML 重画，输入法正在拼的拼音会被直接打断，所以中文打不进去。 */
+function findBarListHTML() {
+    if (!String(orbFindQ || '').trim()) return '';
+    let rows = [];
+    try { rows = findRows() || []; } catch (e) { rows = []; }
+    const cap = rows.slice(0, 40);
+    return (cap.length ? cap.map((h, i) => {
+        const snip = String(h.text || '').replace(/\s+/g, ' ').trim().slice(0, 54);
+        return '<div class="ssp-fb-row' + (i === orbFindCur ? ' on' : '') + '" data-ssp-fb="go" data-id="' + h.id + '"'
+            + ' title="第 ' + (h.id + 1) + ' 楼"><b>#' + (h.id + 1) + '</b><span>' + esc(snip) + '</span></div>';
+    }).join('') : '<div class="ssp-fb-row none">没有匹配的消息</div>')
+        + (rows.length > cap.length ? '<div class="ssp-fb-row none">…还有 ' + (rows.length - cap.length) + ' 条（用 ↑↓ 继续）</div>' : '');
+}
 function findBarHTML() {
     const c = findBarCount();
     if (!findBarOpen) {
         return '<span class="ssp-fb-btn" data-ssp-fb="open" title="页面搜索（关掉面板也能用）"><i class="fa-solid fa-magnifying-glass"></i></span>';
     }
-    /* v1.31.87：展开后直接给结果列表（跟着输入实时变，点一条就跳过去） */
-    let list = '';
-    if (String(orbFindQ || '').trim()) {
-        let rows = [];
-        try { rows = findRows() || []; } catch (e) { rows = []; }
-        const cap = rows.slice(0, 40);
-        list = '<div class="ssp-fb-list">'
-            + (cap.length ? cap.map((h, i) => {
-                const snip = String(h.text || '').replace(/\s+/g, ' ').trim().slice(0, 54);
-                return '<div class="ssp-fb-row' + (i === orbFindCur ? ' on' : '') + '" data-ssp-fb="go" data-id="' + h.id + '"'
-                    + ' title="第 ' + (h.id + 1) + ' 楼">'
-                    + '<b>#' + (h.id + 1) + '</b><span>' + esc(snip) + '</span></div>';
-            }).join('') : '<div class="ssp-fb-row none">没有匹配的消息</div>')
-            + (rows.length > cap.length ? '<div class="ssp-fb-row none">…还有 ' + (rows.length - cap.length) + ' 条（用 ↑↓ 继续）</div>' : '')
-            + '</div>';
-    }
+    /* v1.31.87/88：结构只搭一次（输入框节点必须稳定），结果列表由 findBarListHTML 单独刷 */
     return '<div class="ssp-fb-top">'
         + '<span class="ssp-fb-btn" data-ssp-fb="close" title="收成放大镜"><i class="fa-solid fa-xmark"></i></span>'
         + '<input class="ssp-fb-inp" type="text" data-ssp-fb="inp" placeholder="搜本聊天…" value="' + esc(orbFindQ) + '">'
-        + '<span class="ssp-fb-n">' + (c.n ? (c.i || 1) + '/' + c.n : '0') + '</span>'
+        + '<span class="ssp-fb-n"></span>'
         + '<span class="ssp-fb-btn" data-ssp-fb="prev" title="上一条"><i class="fa-solid fa-chevron-up"></i></span>'
         + '<span class="ssp-fb-btn" data-ssp-fb="next" title="下一条"><i class="fa-solid fa-chevron-down"></i></span>'
         + '<span class="ssp-fb-btn ssp-fb-off" data-ssp-fb="off" title="关掉这个浮条（之后在 常用开关 → 页面搜索浮条 里再打开）"><i class="fa-solid fa-power-off"></i></span>'
-        + '</div>' + list;
+        + '</div><div class="ssp-fb-list"></div>';
 }
 function findBarPaint() {
     const el = document.getElementById('ssp_findbar');
     if (!el) return false;
-    const html = findBarHTML();
-    if (el.dataset.sspFbSig !== html) {
-        const keep = el.querySelector('[data-ssp-fb="inp"]');
-        const hadFocus = keep && document.activeElement === keep;
-        const sel = keep ? keep.selectionStart : 0;
-        el.innerHTML = html;
-        el.dataset.sspFbSig = html;
-        const inp = el.querySelector('[data-ssp-fb="inp"]');
-        if (inp && hadFocus) { try { inp.focus(); inp.setSelectionRange(sel, sel); } catch (e) { } }
+    const mode = findBarOpen ? 'open' : 'min';
+    /* 只在"收起 ⇄ 展开"这种结构切换时才重建 DOM；输入过程中一个字母都不重建 ——
+       否则输入法正在拼的拼音会被整块替换打断（中文就打不进去，实测用户报的就是这个）。 */
+    if (el.dataset.sspFbMode !== mode) {
+        el.innerHTML = findBarHTML();
+        el.dataset.sspFbMode = mode;
+        delete el.dataset.sspFbSig;
+        if (findBarOpen) { const i = el.querySelector('[data-ssp-fb="inp"]'); if (i) { try { i.focus(); } catch (e) { } } }
+    }
+    if (findBarOpen) {
+        /* 只刷两块：计数 + 结果列表 */
+        const c = findBarCount();
+        const n = el.querySelector('.ssp-fb-n');
+        if (n) n.textContent = c.n ? (c.i || 1) + '/' + c.n : '0';
+        const box = el.querySelector('.ssp-fb-list');
+        const want = findBarListHTML();
+        if (box && box.dataset.sspFbList !== want) { box.innerHTML = want; box.dataset.sspFbList = want; }
     }
     el.classList.toggle('open', findBarOpen);
     return true;
@@ -11849,10 +11857,18 @@ function findBarMount() {
             const t = ev.target;
             if (!t || t.dataset.sspFb !== 'inp') return;
             orbFindQ = String(t.value || '');
+            if (findBarComposing) return;          // 输入法正在拼（中文）：先别动界面
             orbFindCur = -1;
             try { if (orbOpenNow && orbTab === 'find') renderOrbPanel(); } catch (e) { }
             try { clearTimeout(findBarT); } catch (e) { }
             findBarT = setTimeout(() => { try { findBarPaint(); } catch (e) { } }, 140);
+        });
+        el.addEventListener('compositionstart', () => { findBarComposing = true; });
+        el.addEventListener('compositionend', ev => {
+            findBarComposing = false;
+            const t = ev.target;
+            if (t && t.dataset && t.dataset.sspFb === 'inp') { orbFindQ = String(t.value || ''); orbFindCur = -1; }
+            try { findBarPaint(); } catch (e) { }
         });
         el.addEventListener('keydown', ev => {
             const t = ev.target;
