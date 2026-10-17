@@ -1211,6 +1211,28 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-ct-blame.none { opacity: .45; }
 .ssp-ct-foot { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 7px; }
 
+/* ---------- v1.31.79：主题变量的中文化（原名 / 词表） ---------- */
+.ssp-tv-tools { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.ssp-tv-tools .ssp-pbtn { padding: 2px 7px; font-size: 10.5px; }
+.ssp-tv-k { cursor: text; }
+.ssp-tv-raw {
+    font-style: normal; font-size: 9.5px; opacity: .55; margin-left: 3px;
+    font-family: Consolas, Monaco, monospace;
+}
+.ssp-tv-dictbox {
+    margin: 0 0 8px; padding: 8px;
+    border: 1px solid rgba(255, 255, 255, .16); border-radius: 6px;
+    background: rgba(0, 0, 0, .18);
+}
+.ssp-tv-dictnote { font-size: 10.5px; line-height: 1.55; opacity: .62; margin-bottom: 6px; }
+.ssp-tv-json {
+    width: 100%; box-sizing: border-box; resize: vertical;
+    font-family: Consolas, Monaco, monospace; font-size: 10.5px; line-height: 1.45;
+    padding: 6px 7px; border-radius: 4px;
+    color: #dfe3ea; background: #12121a; border: 1px solid rgba(255, 255, 255, .16);
+}
+.ssp-tv-dictfoot { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+
 /* 收纳态：球收进魔法棒（缩到 0 + 淡出，不占位置也不会被点到） */
 #ssp_orb.ssp-collapsed {
     opacity: 0; transform: scale(.2); pointer-events: none;

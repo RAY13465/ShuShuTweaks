@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.78';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.79';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -7336,6 +7336,7 @@ function orbThemeRowsHTML() {
      · 自动按名字前缀分组 + 搜索（有的主题 :root 里几十上百个）
    ========================================================================== */
 var orbTVSearch = '';
+var orbTVDictOpen = false;      // v1.31.79：词表（改中文名 / 导入导出）那块要不要展开
 var orbTVOpen = true;
 
 function themeVarsBinds() {
@@ -7432,6 +7433,156 @@ function themeVarsWriteBack() {
     } catch (e) { toast('写回失败：' + (e && e.message), 'warning'); return false; }
 }
 
+/* ============================ 变量中文化（v1.31.79） ============================
+   变量名（--SmartThemeBodyColor / --float-bar-bottom-dist）对用户就是天书。这里三层：
+     ① 词典：把名字拆成词（驼峰 + 横线），逐词查中文 → "悬浮栏·离底距离"
+     ② 别名：用户/作者可以给某个变量起自己的名字，存在 s.varAlias[美化名][变量]
+     ③ 词表：词典 + 别名能导出成 JSON 发给别人（也能跟美化一起发），再载回来
+   原则：**翻译不出来就原样显示**，绝不硬凑；变量值一律不翻（那是 CSS 值，翻了就错）。
+   ========================================================================== */
+const SSP_VAR_DICT = {
+    /* 通用 */
+    body: '正文', color: '颜色', colour: '颜色', bg: '背景', background: '背景', bgcolor: '背景色',
+    tint: '底色', blur: '模糊', chat: '聊天', mes: '消息', message: '消息', user: '用户', bot: '机器人',
+    border: '边框', quote: '引用', em: '强调', font: '字体', text: '文字', fill: '填充', ink: '墨色',
+    line: '线条', accent: '强调色', white: '白色', shadow: '阴影', glow: '光晕', highlight: '高亮',
+    /* 颜色词（美化常用） */
+    pitch: '主色', ash: '灰', bone: '骨白', crimson: '绯红', gold: '金', green: '绿', panel: '面板色',
+    red: '红', blue: '蓝', yellow: '黄', purple: '紫', pink: '粉', gray: '灰', grey: '灰', black: '黑',
+    dark: '深', light: '浅', warm: '暖', cool: '冷',
+    /* 位置与尺寸 */
+    top: '顶部', bottom: '底部', left: '左', right: '右', side: '侧', bar: '栏', form: '输入区',
+    block: '区块', size: '尺寸', width: '宽', height: '高', min: '最小', max: '最大', gap: '间距',
+    padding: '内边距', margin: '外边距', offset: '偏移', dist: '距离', distance: '距离', space: '空间',
+    inner: '内部', outer: '外部', radius: '圆角', width: '宽', layer: '图层', row: '行', column: '列',
+    /* 部件 */
+    btn: '按钮', button: '按钮', send: '发送', stop: '中止', action: '操作', qr: '快捷回复',
+    rocket: '火箭', icon: '图标', label: '标签', options: '选项', ext: '扩展', menu: '菜单',
+    float: '悬浮栏', input: '输入框', avatar: '头像', card: '卡片', tab: '页签', tabs: '页签',
+    /* 状态与杂项 */
+    hover: '悬停', focus: '聚焦', active: '激活', divider: '分隔线', toast: '气泡提示', count: '数量',
+    hd: '高清', ease: '缓动', mono: '等宽', display: '标题', cut: '裁切', smarttheme: '酒馆主题',
+    st: '主题', theme: '主题', scale: '缩放', opacity: '不透明度', speed: '速度', delay: '延迟',
+    anim: '动画', transition: '过渡', mode: '模式', align: '对齐', center: '居中', list: '列表',
+};
+function sspDictUser() {
+    const s = getSettings();
+    if (!s.varDictUser || typeof s.varDictUser !== 'object' || Array.isArray(s.varDictUser)) s.varDictUser = {};
+    return s.varDictUser;
+}
+function sspDictOf(token) {
+    const t = String(token || '').toLowerCase();
+    const u = sspDictUser()[t];
+    if (typeof u === 'string' && u) return u;
+    return SSP_VAR_DICT[t] || '';
+}
+/** --SmartThemeBodyColor → ['smart','theme','body','color']；--float-bar-bottom-dist → ['float','bar','bottom','dist'] */
+function sspNameTokens(raw) {
+    const name = String(raw || '').replace(/^--/, '');
+    const out = [];
+    name.split(/[-_]+/).forEach(part => {
+        if (!part) return;
+        /* 驼峰再拆一遍：SmartThemeBodyColor → Smart / Theme / Body / Color */
+        (part.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+/g) || [part]).forEach(t => out.push(t.toLowerCase()));
+    });
+    return out;
+}
+function sspVarAliasMap() {
+    const s = getSettings();
+    if (!s.varAlias || typeof s.varAlias !== 'object' || Array.isArray(s.varAlias)) s.varAlias = {};
+    return s.varAlias;
+}
+function sspVarAliasOf(k) {
+    const m = sspVarAliasMap()[String(orbThemeCur() || '(未命名)')];
+    return (m && typeof m[k] === 'string') ? m[k] : '';
+}
+function sspVarAliasSet(k, v) {
+    const all = sspVarAliasMap();
+    const key = String(orbThemeCur() || '(未命名)');
+    if (!all[key] || typeof all[key] !== 'object') all[key] = {};
+    const name = String(v || '').trim();
+    if (name) all[key][k] = name; else delete all[key][k];
+    save();
+    return name;
+}
+/** 变量的中文显示名（没有就返回空串，调用方回退成原名）
+    ⚠️ 只按词翻会念出怪名字（SmartThemeBodyColor → 主题·正文·颜色），所以再加两条：
+       ① 相邻词先拼短语（top+bar → 顶栏、bottom+form → 底部输入区…）
+       ② `SmartTheme` 是酒馆自己的前缀、不是用户要的信息，直接丢掉；
+          结尾那个"颜色"在已经有别的词时也算废话（要"模糊·底色"，不要"模糊·底色·颜色"）。 */
+const SSP_VAR_PAIRS = {
+    'top|bar': '顶栏', 'bottom|form': '底部输入区', 'block|size': '区块尺寸', 'float|bar': '悬浮栏',
+    'qr|bar': '快捷回复栏', 'border|color': '边框颜色', 'font|color': '字体颜色', 'background|color': '背景色',
+    'blur|tint': '模糊底色', 'chat|tint': '聊天底色',
+    'top|btn': '顶栏按钮', 'send|btn': '发送按钮', 'stop|btn': '中止按钮', 'action|btn': '操作按钮',
+    'float|input': '悬浮输入框', 'rocket|icon': '火箭图标', 'group|divider': '分组分隔线',
+};
+function sspVarNameCN(k) {
+    const alias = sspVarAliasOf(k);
+    if (alias) return alias;
+    let toks = sspNameTokens(k);
+    if (toks.length > 2 && toks[0] === 'smart' && toks[1] === 'theme') toks = toks.slice(2);
+    const parts = [];
+    for (let i = 0; i < toks.length; i++) {
+        const three = toks[i] + '|' + toks[i + 1] + '|' + toks[i + 2];
+        const two = toks[i] + '|' + toks[i + 1];
+        if (SSP_VAR_PAIRS[three]) { parts.push(SSP_VAR_PAIRS[three]); i += 2; continue; }
+        if (SSP_VAR_PAIRS[two]) { parts.push(SSP_VAR_PAIRS[two]); i += 1; continue; }
+        const c = sspDictOf(toks[i]);
+        if (c) parts.push(c);
+    }
+    const last = parts[parts.length - 1] || '';
+    if (parts.length >= 2 && (/^颜色$/.test(last) && parts.slice(0, -1).some(p => /色$|底色$/.test(p)) || (parts.length > 2 && /^(尺寸|间距)$/.test(last)))) parts.pop();
+    const uniq = [];
+    parts.forEach(p => { if (uniq.indexOf(p) < 0) uniq.push(p); });
+    return uniq.length ? uniq.join('·') : '';
+}
+/** 分组名（p5 / float / top / smarttheme …）也翻成中文；翻不出来就原样 */
+function sspGroupNameCN(g) {
+    const raw = String(g || '');
+    /* 组名本来就是变量名的前缀，翻译规则跟变量名一样（顶栏 / 悬浮栏 / 快捷回复栏 …） */
+    const cn = sspVarNameCN(raw) || sspVarNameCN('--' + raw);
+    return cn || raw;
+}
+function sspVarDictJSON() {
+    const key = String(orbThemeCur() || '(未命名)');
+    const alias = sspVarAliasMap()[key] || {};
+    return JSON.stringify({
+        说明: '鼠鼠小助手 · 变量中文名词表。词典=通用词，别名=这个美化专用的名字。可以改完发人。',
+        美化: key,
+        词典: Object.assign({}, SSP_VAR_DICT, sspDictUser()),
+        别名: alias,
+    }, null, 2);
+}
+/** 载入一份词表（只认 词典 / 别名 两个键；坏的 JSON 不会把设置搞乱） */
+function sspVarDictLoad(txt) {
+    let j = null;
+    try { j = JSON.parse(String(txt || '')); } catch (e) { return { ok: false, msg: '不是合法的 JSON' }; }
+    if (!j || typeof j !== 'object') return { ok: false, msg: 'JSON 里没有对象' };
+    let nDict = 0, nAlias = 0;
+    if (j.词典 && typeof j.词典 === 'object') {
+        const u = sspDictUser();
+        Object.keys(j.词典).forEach(k => {
+            const v = j.词典[k];
+            if (typeof v === 'string' && v.trim() && v !== SSP_VAR_DICT[String(k).toLowerCase()]) { u[String(k).toLowerCase()] = v.trim(); nDict++; }
+        });
+    }
+    if (j.别名 && typeof j.别名 === 'object') {
+        const all = sspVarAliasMap();
+        const key = String(j.美化 || orbThemeCur() || '(未命名)');
+        if (!all[key] || typeof all[key] !== 'object') all[key] = {};
+        Object.keys(j.别名).forEach(k => {
+            const v = j.别名[k];
+            if (typeof v === 'string') {
+                if (v.trim()) all[key][k] = v.trim(); else delete all[key][k];
+                nAlias++;
+            }
+        });
+    }
+    save();
+    return { ok: true, msg: '载入完成：词典 ' + nDict + ' 条、别名 ' + nAlias + ' 条' };
+}
+
 /** 美化页里那块「主题变量」 */
 function orbThemeVarsHTML() {
     const cur = orbThemeCur() || '(读不到当前美化)';
@@ -7439,7 +7590,10 @@ function orbThemeVarsHTML() {
     const ov = themeVarsOf();
     const ovN = Object.keys(ov).length;
     const q = String(orbTVSearch || '').trim().toLowerCase();
-    const hit = all.filter(v => !q || v.k.toLowerCase().indexOf(q) >= 0);
+    /* v1.31.79：搜索同时匹 英文原名 / 中文名 / 别名（用户不该被迫记英文） */
+    const hit = all.filter(v => !q
+        || v.k.toLowerCase().indexOf(q) >= 0
+        || sspVarNameCN(v.k).toLowerCase().indexOf(q) >= 0);
     const head = '<div class="ssp-tv-head">'
         + '<span class="ssp-tv-title">🎨 主题变量' + (all.length ? '（' + all.length + ' 个）' : '') + '</span>'
         + (ovN ? '<span class="ssp-tv-badge">已改 ' + ovN + '</span>' : '')
@@ -7453,10 +7607,27 @@ function orbThemeVarsHTML() {
             + '这个美化把值写死在具体选择器上了，所以没得调。</div>' : '');
     }
     if (!orbTVOpen) return head;
-    const tools = '<div class="ssp-orb-pfilter" style="margin-bottom:6px">'
-        + '<input class="ssp-inp" type="text" data-orb-tvsearch="1" placeholder="搜变量名（比如 --accent）" value="' + esc(orbTVSearch) + '">'
+    const rawOn = getSettings().varShowRaw !== false;
+    const tools = '<div class="ssp-orb-pfilter" style="margin-bottom:4px">'
+        + '<input class="ssp-inp" type="text" data-orb-tvsearch="1" placeholder="搜中文名或变量名（比如 正文 / --accent）" value="' + esc(orbTVSearch) + '">'
         + (orbTVSearch ? '<span class="ssp-pbtn" data-orb-tvsearchclear="1">清除</span>' : '')
-        + '</div>';
+        + '</div>'
+        + '<div class="ssp-tv-tools">'
+        + '<span class="ssp-pbtn" data-orb-tvraw="1" title="点一下切换：变量名后面要不要跟英文原名">'
+        + (rawOn ? '✓ 显示英文原名' : '只显示中文名') + '</span>'
+        + '<span class="ssp-pbtn" data-orb-tvdict="1" title="改中文名 / 导入导出词表">词表（' + (Object.keys(sspVarAliasMap()[cur] || {}).length + Object.keys(sspDictUser()).length) + '）</span>'
+        + '</div>'
+        + (orbTVDictOpen
+            ? ('<div class="ssp-tv-dictbox">'
+                + '<div class="ssp-tv-dictnote">点变量名可以直接改它的中文名（留空＝恢复默认）。下面这份是词表：'
+                + '词典＝通用词，别名＝这个美化专用的名字，可以导出给别的美化作者 / 发给别人。</div>'
+                + '<textarea class="ssp-inp ssp-tv-json" data-orb-tvjson="1" spellcheck="false" rows="9">' + esc(sspVarDictJSON()) + '</textarea>'
+                + '<div class="ssp-tv-dictfoot">'
+                + '<span class="ssp-pbtn" data-orb-tvjsonload="1">载入这份</span>'
+                + '<span class="ssp-pbtn" data-orb-tvjsondown="1">下载 JSON</span>'
+                + '<span class="ssp-pbtn" data-orb-tvjsonreset="1" title="把词典恢复成内置的（别名不动）">词典复位</span>'
+                + '</div></div>')
+            : '');
     if (!hit.length) return head + tools + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">没有匹配「' + esc(orbTVSearch) + '」的变量。</div>';
     const groups = new Map();
     /* 分组：`--p5-pitch` 这种按第一个横线前的词分（p5）；
@@ -7485,11 +7656,13 @@ function orbThemeVarsHTML() {
         const pre = names.length > 1 ? (famCut(lcpOf(names)) || names[0]) : names[0];
         names.forEach(n => nameGroup.set(n, pre));
     });
+    const 组原名 = new Map();      // 小写 key → 原始大小写（翻译要原始大小写，小写拆不出驼峰）
     hit.forEach(v => {
         const n = v.k.replace(/^--/, '');
         const i = n.indexOf('-');
-        const g = (i > 0 ? n.slice(0, i) : (nameGroup.get(n) || n)).toLowerCase();
-        if (!groups.has(g)) groups.set(g, []);
+        const raw = (i > 0 ? n.slice(0, i) : (nameGroup.get(n) || n));
+        const g = raw.toLowerCase();
+        if (!groups.has(g)) { groups.set(g, []); 组原名.set(g, raw); }
         groups.get(g).push(v);
     });
     const rowsHTML = (arr) => arr.map(v => {
@@ -7536,14 +7709,20 @@ function orbThemeVarsHTML() {
                 + 'color:#e8e8ef !important;background:#15151c !important;border:1px solid rgba(255,255,255,.18) !important;'
                 + 'border-radius:3px !important;display:inline-block !important;">';
         }
+        /* v1.31.79：左边显示中文名，英文原名按开关跟在小字里；点一下可以改中文名 */
+        const cn = sspVarNameCN(v.k);
+        const rawOn = getSettings().varShowRaw !== false;
+        const label = (cn || v.k) + (cn && rawOn ? ' <i class="ssp-tv-raw">' + esc(v.k) + '</i>' : '');
+        const labelTitle = (cn ? cn + '\n' + v.k : v.k) + ' = ' + v.v + '\n（点一下可以给它起个中文名）';
         return '<div data-orb-tvrow="' + esc(v.k) + '" style="' + S_ROW + '">'
-            + '<span title="' + esc(v.k) + ' = ' + esc(v.v) + '" style="' + S_K + '">' + esc(v.k) + '</span>'
+            + '<span class="ssp-tv-k" data-orb-tvrename="' + esc(v.k) + '" title="' + esc(labelTitle) + '" style="' + S_K + '">'
+            + label + '</span>'
             + '<span style="' + S_CTL + '">' + ctl + '</span>'
             + (changed ? '<span class="ssp-pbtn ssp-tv-reset" data-orb-tvr="' + esc(v.k) + '" title="还原成主题原值">↺</span>' : '')
             + '</div>';
     }).join('');
     const body = [...groups.entries()].map(([g, arr]) => '<div class="ssp-tv-group">'
-        + '<div class="ssp-tv-ghead">' + esc(g) + '<i>· ' + arr.length + ' 个</i></div>'
+        + '<div class="ssp-tv-ghead" title="' + esc(组原名.get(g) || g) + '">' + esc(sspGroupNameCN(组原名.get(g) || g)) + '<i>· ' + arr.length + ' 个</i></div>'
         + rowsHTML(arr) + '</div>').join('');
     return head + tools + '<div class="ssp-tv-body">' + body + '</div>';
 }
@@ -14964,6 +15143,50 @@ function bindOrb() {
         if (t.closest('[data-orb-tvwrite]')) { themeVarsWriteBack(); renderOrbPanel(); return; }
         if (t.closest('[data-orb-tvfold]')) { orbTVOpen = !orbTVOpen; renderOrbPanel(); return; }
         if (t.closest('[data-orb-tvsearchclear]')) { orbTVSearch = ''; renderOrbPanel(); return; }
+        /* v1.31.79：中文化 —— 改中文名 / 显示原名 / 词表 */
+        const rename = t.closest('[data-orb-tvrename]');
+        if (rename) {
+            const k = rename.dataset.orbTvrename;
+            let val = null;
+            try {
+                val = globalThis.prompt ? globalThis.prompt('给 ' + k + ' 起个中文名（留空＝用词典/原名）', sspVarAliasOf(k) || sspVarNameCN(k) || '') : null;
+            } catch (e) { val = null; }
+            if (val === null) return;                      // 取消
+            sspVarAliasSet(k, val);
+            renderOrbPanel();
+            toast(String(val).trim() ? ('已改名：' + String(val).trim()) : '已恢复默认名字', 'success');
+            return;
+        }
+        if (t.closest('[data-orb-tvraw]')) {
+            const s = getSettings();
+            s.varShowRaw = (s.varShowRaw === false);
+            save();
+            renderOrbPanel();
+            return;
+        }
+        if (t.closest('[data-orb-tvdict]')) { orbTVDictOpen = !orbTVDictOpen; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-tvjsonload]')) {
+            const box = document.querySelector('#ssp_orb_panel [data-orb-tvjson]');
+            const r = sspVarDictLoad(box ? box.value : '');
+            if (r.ok) { orbTVDictOpen = false; renderOrbPanel(); }
+            toast(r.msg, r.ok ? 'success' : 'error');
+            return;
+        }
+        if (t.closest('[data-orb-tvjsondown]')) {
+            try {
+                const blob = new Blob([sspVarDictJSON()], { type: 'application/json' });
+                orbDataDownload(blob, '鼠鼠变量词表-' + String(orbThemeCur() || '当前美化').replace(/[\\/:*?"<>|]/g, '_') + '.json');
+                toast('词表已导出（也可以直接把文本框里的内容复制走）', 'success');
+            } catch (e) { toast('导出失败：' + (e && e.message), 'warning'); }
+            return;
+        }
+        if (t.closest('[data-orb-tvjsonreset]')) {
+            getSettings().varDictUser = {};
+            save();
+            renderOrbPanel();
+            toast('词典已恢复成内置的（别名没动）', 'success');
+            return;
+        }
         /* 调试页签里的按钮（以前是独立窗口自己接监听；现在是页签，走面板委托）---- */
         if (t.closest('[data-ssp-dbgclose]')) { orbDbgClose(); return; }
         if (t.closest('[data-ssp-dbgclear]')) { orbDbgClear(); return; }
@@ -16000,6 +16223,13 @@ if (globalThis.__SSP_TEST__) {
         SSP_CT_POINTS, sspContrastRun, sspBlameVar, sspBlameConfirm, sspContrastBlame,
         sspFixColorToContrast, sspCssRules, sspSplitDecls, sspSpec, sspToHsl, sspFromHsl,
         sspRgbToHex, sspCtFallback, sspCtFallbackClear, sspCtBad, orbContrastHTML, themeVarsOf, themeVarsApply,
+        /* v1.31.79：中文化 */
+        SSP_VAR_DICT, sspNameTokens, sspVarNameCN, sspGroupNameCN, sspVarAliasOf, sspVarAliasSet,
+        sspVarDictJSON, sspVarDictLoad, sspDictUser, sspDictOf, themeVarsParse, orbThemeCss,
+        get orbTVSearch() { return orbTVSearch; },
+        set orbTVSearch(v) { orbTVSearch = String(v == null ? '' : v); },
+        get orbTVDictOpen() { return orbTVDictOpen; },
+        set orbTVDictOpen(v) { orbTVDictOpen = v; },
         get orbCtRows() { return orbCtRows; },
         set orbCtRows(v) { orbCtRows = v; },
         get orbCtEls() { return orbCtEls; },
