@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.61';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.62';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -10745,7 +10745,12 @@ function orbFindHTML() {
     return box + opt + '<div id="ssp_orb_find_body">' + orbFindBodyHTML() + '</div>';
 }
 
-/** 跳到某条消息：滚到它 + 闪一下。手机上面板是全屏的，先关面板（否则看不见跳过去的东西） */
+/** 跳到某条消息：滚到它 + 闪一下。手机上面板是全屏的，先关面板（否则看不见跳过去的东西）
+    ⚠️ 对齐的是**消息头部**，不是居中 —— 用户报过"传送到消息中间而不是头部"：
+       v1.31.60/61 用的是 scrollIntoView({block:'center'})，消息一长，屏幕中间正好是消息的中段，
+       头部被顶到视口上面去了（等于"跳进去以后还得自己往上找"）。
+       现在自己算 #chat 的 scrollTop：让这条消息的**上沿**落在聊天区上沿下面一点（留 8px 呼吸），
+       跟酒馆自己的滚动容器一致；找不到 #chat 才退回 scrollIntoView。 */
 function orbFindGo(id, quiet) {
     const idx = Number(id);
     if (!isFinite(idx) || idx < 0) return false;
@@ -10758,8 +10763,24 @@ function orbFindGo(id, quiet) {
     try { mobile = Boolean((getContext() || {}).isMobile?.()); } catch (e) { }
     if (mobile) { try { closeOrb(); } catch (e) { } }
     globalThis.setTimeout?.(() => {
-        try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
-        catch (e) { try { el.scrollIntoView(); } catch (e2) { } }
+        /* 头部对齐：优先自己算（可控），算不出来才退回 scrollIntoView */
+        let done = false;
+        try {
+            const chat = document.getElementById('chat');
+            if (chat && chat.scrollHeight > chat.clientHeight + 2) {
+                const cRect = chat.getBoundingClientRect();
+                const eRect = el.getBoundingClientRect();
+                const want = Math.max(0, chat.scrollTop + (eRect.top - cRect.top) - 8);
+                /* **瞬时**滚动，不用 smooth：实测 smooth 在这一下会被打断/回弹（点了结果位置没变），
+                   而且搜索定位本来也不该让人等一段动画。 */
+                chat.scrollTop = want;
+                done = true;
+            }
+        } catch (e) { }
+        if (!done) {
+            try { el.scrollIntoView({ block: 'start' }); }
+            catch (e) { try { el.scrollIntoView(); } catch (e2) { } }
+        }
         try {
             el.classList.remove('ssp-find-flash');
             void el.offsetWidth;                       // 重启动画
