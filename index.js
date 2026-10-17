@@ -10484,7 +10484,21 @@ function orbCardOpen(avatar) {
         if (chid < 0) { toast('没找到这张卡（列表可能还没加载）', 'warning'); return false; }
         const ctx = getContext() || {};
         if (typeof ctx.selectCharacterById !== 'function') { toast('酒馆没导出选角接口，先在酒馆里切到它', 'warning'); return false; }
-        Promise.resolve(ctx.selectCharacterById(chid, { switchMenu: false })).catch(() => { });
+        /* ⚠️ selectCharacterById 是**异步**的：立刻重画面板只会画到"上一张卡"，
+           用户看到的就是「点了没反应，要关掉口袋再打开才刷新」（实测反馈）。
+           所以等它 resolve 之后再：①把写卡骨架标记成"要重读" ②关掉口袋，直接落到聊天页。 */
+        Promise.resolve(ctx.selectCharacterById(chid, { switchMenu: false }))
+            .then(() => {
+                globalThis.setTimeout?.(() => {
+                    try {
+                        chPulledOnce = false;                 // 下次进写卡页强制重新 pull
+                        chDirtyReset && chDirtyReset();
+                        /* 就地把面板按新卡重画（不再需要"关掉口袋再打开"） */
+                        if (orbOpenNow) renderOrbPanel();
+                    } catch (e) { }
+                }, 700);
+            })
+            .catch(() => { });
         return true;
     } catch (e) { toast('打开失败：' + (e && e.message), 'warning'); return false; }
 }
