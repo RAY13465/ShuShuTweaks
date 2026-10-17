@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.72';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.73';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6732,19 +6732,24 @@ function themeVarsOf(name) {
     if (!b[k] || typeof b[k] !== 'object' || Array.isArray(b[k])) b[k] = {};
     return b[k];
 }
-/** 只扒 :root / html 里的 --变量（返回 [{k,v}]，同名以第一次出现为准） */
+/** 只扒 :root / html 里的 --变量（返回 [{k,v}]，同名以第一次出现为准）
+    ⚠️ 选择器前面**不能**要求"行首或 }"：实测用户的主题是把变量块写在注释结尾之后
+       （注释用星斜杠收尾，紧跟着 :root ），那种写法一条都匹配不到 —— 用户反馈"感觉没抓到"。
+       所以改成"前面不是字母数字/横线就算"，注释结尾那个斜杠也能过。 */
 function themeVarsParse(css) {
     const out = [];
     const seen = new Set();
     const txt = String(css || '');
     let m;
-    const blockRe = /(?:^|\})\s*(:root|html)\b[^{}]*\{([^}]*)\}/gi;
+    const blockRe = /(?:^|[^\w-])(:root|html)\b([^{}]*)\{([^}]*)\}/gi;
     while ((m = blockRe.exec(txt))) {
-        const body = m[2] || '';
+        const body = m[3] || '';
         const declRe = /(--[\w-]+)\s*:\s*([^;}]+)/g;
         let d;
         while ((d = declRe.exec(body))) {
-            const k = d[1], v = String(d[2]).trim();
+            const k = d[1];
+            /* 值里常带 !important：控件里显示干净值，写回时再把 !important 保留住 */
+            const v = String(d[2]).replace(/\s*!\s*important\s*$/i, '').trim();
             if (!k || seen.has(k)) continue;
             seen.add(k);
             out.push({ k: k, v: v });
@@ -6798,8 +6803,9 @@ function themeVarsWriteBack() {
         if (!keys.length) { toast('还没有调过任何变量', 'info'); return false; }
         let css = String(orbThemeCss() || '');
         keys.forEach(k => {
-            const re = new RegExp('(' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*:\\s*)([^;}]+)', 'g');
-            if (re.test(css)) { re.lastIndex = 0; css = css.replace(re, function (m0, p1) { return p1 + ov[k]; }); }
+            /* 只替换"值"那一段，保留原来的 !important（主题很多变量靠它压过别人的规则） */
+            const re = new RegExp('(' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*:\\s*)([^;}!]+)', 'g');
+            if (re.test(css)) { re.lastIndex = 0; css = css.replace(re, function (m0, p1) { return p1 + ov[k] + ' '; }); }
         });
         orbThemePreview(css);
         orbThemeSyncToSt(css);
