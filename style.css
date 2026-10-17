@@ -880,6 +880,39 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-en-masknote { font-size: 10.5px; opacity: .62; line-height: 1.5; }
 .ssp-en-masklink { text-decoration: underline; cursor: pointer; }
 .ssp-en-maskworn { font-size: 9.5px; font-style: normal; opacity: .6; margin-left: 5px; }
+/* ---------- v1.31.60：消息查找 ---------- */
+.ssp-find-cats { flex-wrap: wrap; gap: 5px; }
+.ssp-find-cats .ssp-pbtn { padding: 3px 8px; font-size: 11px; }
+.ssp-find-bar { flex-wrap: wrap; gap: 6px; align-items: center; }
+.ssp-find-bar .ssp-pbtn { padding: 3px 8px; font-size: 11px; }
+.ssp-find-list { gap: 4px; }
+.ssp-find-row {
+    display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, .14); border-radius: 9px;
+    background: rgba(255, 255, 255, .04); touch-action: manipulation;
+}
+.ssp-find-row:hover { background: rgba(255, 255, 255, .1); }
+.ssp-find-row.cur { border-color: rgba(255, 255, 255, .7); background: rgba(255, 255, 255, .14); }
+.ssp-find-tag {
+    flex: 0 0 auto; padding: 1px 6px; border-radius: 999px; font-size: 10px; line-height: 1.6;
+    border: 1px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .08);
+}
+.ssp-find-tag.me { border-color: rgba(140, 200, 255, .65); background: rgba(140, 200, 255, .16); }
+.ssp-find-tag.sys { opacity: .7; }
+.ssp-find-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.ssp-find-main b { font-size: 10.5px; font-weight: 700; opacity: .75; }
+.ssp-find-snip { font-size: 12px; font-style: normal; line-height: 1.5; word-break: break-word; }
+.ssp-find-snip mark { background: rgba(255, 232, 120, .5); color: inherit; border-radius: 2px; padding: 0 1px; }
+/* 跳到那条时的闪一下（描边 + 淡出；主题可能有自己的 box-shadow，所以用 outline） */
+#chat .mes.ssp-find-flash {
+    outline: 2px solid rgba(255, 255, 255, .9) !important;
+    outline-offset: 2px;
+    animation: sspFindFlash 1.1s ease-out 2;
+}
+@keyframes sspFindFlash {
+    0% { outline-color: rgba(255, 255, 255, .95); }
+    100% { outline-color: rgba(255, 255, 255, 0); }
+}
 /* 美化「编辑口」：CSS 输入框（等宽、能拉高、手机上也别被尺寸压扁） */
 .ssp-theme-css {
     width: 100%; box-sizing: border-box; min-height: 190px; resize: vertical;
