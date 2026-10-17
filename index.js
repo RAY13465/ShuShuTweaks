@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 鼠鼠面板工坊 ShuShu Panel —— v0.3
  * ---------------------------------------------------------------------------
  * 把酒馆「角色管理面板」做成可装配的模块：
@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.66';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.67';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -12499,7 +12499,7 @@ const SSP_SHADOW_EXTRA_CSS = `
 :host #ssp_orb_panel .ssp-ch-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)) !important; gap: 8px !important; }
 :host #ssp_orb_panel .ssp-ch-card {
     position: relative !important; display: flex !important; flex-direction: column !important; gap: 4px !important; padding: 6px !important;
-    border: 1px solid rgba(255,255,255,.14) !important; border-radius: 8px !important;
+    border: 1px solid rgba(255,255,255,.14) !important; border-radius: 5px !important;
     background: #1b1b22 !important; height: auto !important; min-height: 0 !important;
     cursor: pointer; touch-action: manipulation; overflow: hidden !important;
     color: #ececf2 !important; letter-spacing: normal !important;
@@ -12520,12 +12520,12 @@ const SSP_SHADOW_EXTRA_CSS = `
     display: block !important; font-family: inherit !important; font-size: 10px !important; color: #8a8a99 !important;
     letter-spacing: normal !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
 }
-:host #ssp_orb_panel .ssp-ch-cardrow { border-radius: 8px !important; background: #1b1b22 !important; border: 1px solid rgba(255,255,255,.14) !important; }
+:host #ssp_orb_panel .ssp-ch-cardrow { border-radius: 5px !important; background: #1b1b22 !important; border: 1px solid rgba(255,255,255,.14) !important; }
 :host #ssp_orb_panel .ssp-ch-cname { font-family: inherit !important; font-size: 13px !important; color: #ececf2 !important; letter-spacing: normal !important; }
 /* 列表视图那一行（行里带 ssp-ch-grow / ssp-ch-cardrow，头像叫 ssp-ch-cav）
    —— 这些也要按死，不然还是吃主样式里"角色卡样式"那套（圆角 3px、color-mix 背景） */
 :host #ssp_orb_panel .ssp-ch-grow {
-    border-radius: 8px !important; background: #1b1b22 !important;
+    border-radius: 5px !important; background: #1b1b22 !important;
     border: 1px solid rgba(255,255,255,.14) !important; box-shadow: none !important;
 }
 :host #ssp_orb_panel .ssp-ch-grow.on { border-color: #79a8ff !important; background: #1a2233 !important; }
@@ -12541,12 +12541,12 @@ const SSP_SHADOW_EXTRA_CSS = `
 /* 写卡页：输入框/按钮固定观感（不吃主题的 input/button 规则） */
 :host #ssp_orb_panel .ssp-ch-inp, :host #ssp_orb_panel .ssp-inp {
     background: #101015 !important; color: #ececf2 !important;
-    border: 1px solid rgba(255,255,255,.18) !important; border-radius: 5px !important;
+    border: 1px solid rgba(255,255,255,.18) !important; border-radius: 3px !important;
     font-family: inherit !important; font-size: 12.5px !important; line-height: 1.5 !important;
     letter-spacing: normal !important; text-shadow: none !important;
 }
 :host #ssp_orb_panel .ssp-pbtn {
-    border: 1px solid rgba(255,255,255,.2) !important; border-radius: 6px !important;
+    border: 1px solid rgba(255,255,255,.2) !important; border-radius: 3px !important;
     background: rgba(255,255,255,.06) !important; color: #ececf2 !important;
     font-family: inherit !important; font-size: 11.5px !important; letter-spacing: normal !important;
     text-shadow: none !important; text-transform: none !important;
@@ -12630,7 +12630,11 @@ async function sspShadowRender() {
             root.innerHTML = iconLinks
                 + '<style>' + (css || '') + '</style>'
                 + '<style>' + SSP_SHADOW_EXTRA_CSS + '</style>'
-                + '<div id="ssp_orb_panel">' + html + '</div>';
+                /* ⚠️ 外壳必须同时带 **class="ssp-orb-panel"**：主样式里大量规则是
+                   `.ssp-orb-panel .ssp-pbtn{…}` 这种 **class** 选择器（不是 #id），
+                   只给 id 的话它们全部不命中 → 按钮/文字的 padding、字号、间距全丢，
+                   表现就是"图标和字都满出去了"（用户反馈）。 */
+                + '<div id="ssp_orb_panel" class="ssp-orb-panel">' + html + '</div>';
         };
         /* ① 同步先画（有缓存就用缓存，没有就先空样式顶上） */
         paint(sspShadowCssCache);
