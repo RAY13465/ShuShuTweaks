@@ -1156,6 +1156,24 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-bt-main small { opacity: .62; font-size: 11px; line-height: 1.45; }
 .ssp-bt-foot { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
 
+/* ---------- v1.31.77：美化页的「面板配色」 ---------- */
+.ssp-skin {
+    margin: 6px 0 8px; padding: 8px 9px;
+    border: 1px solid rgba(255, 255, 255, .16); border-radius: 8px;
+    background: rgba(255, 255, 255, .04);
+}
+.ssp-skin-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+.ssp-skin-head b { font-size: 12.5px; }
+.ssp-skin-head small { font-size: 11px; line-height: 1.45; opacity: .62; }
+.ssp-skin-seg { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.ssp-skin-seg .ssp-pbtn { padding: 3px 8px; font-size: 11px; }
+.ssp-skin-seg .ssp-pbtn.on {
+    border-color: rgba(120, 200, 255, .7); background: rgba(70, 140, 220, .2);
+    color: #dff0ff; font-weight: 700;
+}
+.ssp-skin-now { margin-top: 6px; font-size: 11px; line-height: 1.5; opacity: .72; }
+.ssp-skin-now.bad { color: #ffd479; opacity: 1; }
+
 /* 收纳态：球收进魔法棒（缩到 0 + 淡出，不占位置也不会被点到） */
 #ssp_orb.ssp-collapsed {
     opacity: 0; transform: scale(.2); pointer-events: none;

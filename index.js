@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.76';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.77';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6405,7 +6405,14 @@ function orbBeautyReset() {
 /* 页面加载时自动把开着的开关注入进去。
    ⚠️ 不去找 init 钩子：模块执行时设置可能还没读回来，所以延时几趟、每趟都重来一次（幂等，安全）。
    刷新页面后开关依然是生效状态 —— 这是"存扩展设置、刷新保持"那一条的落点。 */
-[800, 1800, 3500].forEach(ms => { try { setTimeout(() => { try { orbBeautyApply(); } catch (e) { } }, ms); } catch (e) { } });
+[800, 1800, 3500].forEach(ms => {
+    try {
+        setTimeout(() => {
+            try { orbBeautyApply(); } catch (e) { }
+            try { sspSkinApply(); } catch (e) { }      // v1.31.77 面板配色自锁（同样要等设置读回来）
+        }, ms);
+    } catch (e) { }
+});
 /** 面板里那一块（挂在美化页 —— 用户要求：就在「改当前美化 / 新建美化 / 导出当前美化」**这一排按钮下面**，
     并且用**展开栏**的格式（点标题展开/收起），而不是扔在页面最底下没人翻得到） */
 var orbBeautyOpen = false;      // 展开栏是否展开（默认收起，标题条就在按钮下面，一眼能看到）
@@ -6427,7 +6434,7 @@ function orbBeautyHTML() {
         + '<small>' + (anyOn ? ('已开 ' + anyOn + ' 个') : '一键美化小毛病（点标题展开）') + '</small>'
         + '<span class="ssp-bt-arrow"><i class="fa-solid fa-sliders"></i></span>'
         + '</div>';
-    if (!orbBeautyOpen) return '<div class="ssp-bt collapsed">' + head + '</div>';
+    if (!orbBeautyOpen) return '<div class="ssp-bt collapsed">' + head + '</div>' + sspSkinHTML();
     return '<div class="ssp-bt open">' + head
         + '<div class="ssp-bt-note">CSS 类的开关由扩展注入样式实现（**不写进你的自定义 CSS**）；'
         + '带「托盘」字样的那几个是直接开关功能本身。关掉即完全撤销。</div>'
@@ -6435,7 +6442,264 @@ function orbBeautyHTML() {
         + '<div class="ssp-bt-foot">'
         + '<span class="ssp-pbtn" data-orb-btreset="1">' + (anyOn ? '全部关掉（恢复默认）' : '已全部关闭') + '</span>'
         + '<span class="ssp-pbtn" data-orb-btreload="1" title="重新注入一次（排错用）">重新应用</span>'
-        + '</div></div>';
+        + '</div></div>' + sspSkinHTML();
+}
+
+/* ============================ 面板配色自锁（v1.31.77） ============================
+   为什么要有：有些美化会把"文字色"和"底色"调成同一个颜色，用户连"去哪改"都看不见，
+   等于把入口本身弄瞎。实测（用户的「仿p5」，v1.31.77 那次）有两种病，性质不一样：
+
+     ① 变量撞车：写卡/选卡页（影子 DOM）里的淡字是 --ch-ink 和 --ch-bg 按比例混出来的，
+        而这两个是从 --SmartThemeBodyColor / --SmartThemeBlurTintColor 推出来的。
+        仿p5 是 #0B0B0D + #16161A → 混出来 1.06 : 1，"底色上写底色"，整页等于没字。
+     ② 全局 !important：`body * { color: … !important }` 这种粗暴美化，跟变量一点关系
+        都没有，光改变量救不了。
+
+   办法（两层）：
+     a) 只在**我们自己的容器**上把这几个 --SmartTheme* 就地重声明成一套固定色板。
+        自定义属性的层叠是"选择器更具体的赢"，我们写 id + !important，美化在 :root 里
+        写 !important 也压不掉。→ 治①
+     b) 再补一层兜底：`#我们的容器 :is(几个关键 class) { color: … !important }`。
+        id 选择器比 `body *` 具体，两个都 !important 时我们赢。→ 治②
+        代价：锁色时面板会变"单色"，这是故意的 —— 救命模式先保证看得清。
+    作用域到我们的容器为止，酒馆原生界面 / 角色卡列表一律不碰。
+
+   三档（存 s.panelSkin）：
+     auto   先量一遍"如果按美化颜色来，我们面板上最差的那处对比度是多少"，
+            < 3 才锁深色（默认档）
+     follow 不注入，完全跟美化（老行为）
+     dark   固定深色板
+   ⚠️ 没做「固定浅色」：面板自己的背景是写死的深色（不是变量），只把字换成深色
+      等于深字压深底（实测 1.12 : 1）。要做浅色得连面板背景一起换，那是另一件事。
+   ========================================================================== */
+const SSP_SKIN_SEL = '#ssp_panel_root, #ssp_orb, #ssp_orb_root, #ssp_quickbar, #ssp_mount';
+const SSP_SKIN_MODES = [['auto', '自动'], ['follow', '跟随美化'], ['dark', '固定深色']];
+const SSP_SKIN_VARS = {
+    dark: {
+        '--SmartThemeBodyColor': '#e9e9f0',
+        '--SmartThemeBlurTintColor': '#16161d',
+        '--SmartThemeBorderColor': 'rgba(255, 255, 255, .16)',
+        '--SmartThemeEmColor': '#8fb6ff',
+        '--SmartThemeQuoteColor': '#cfd3dc',
+    },
+};
+let sspSkinNow = '';            // 现在实际生效的：follow / dark
+let sspSkinProbeLast = null;    // {worst, at: {名字, 对比度}}
+
+function sspSkinMode() {
+    const s = getSettings();
+    const m = String(s.panelSkin || 'auto');
+    return ['auto', 'follow', 'dark'].indexOf(m) >= 0 ? m : 'auto';
+}
+function sspSkinSet(mode) {
+    const s = getSettings();
+    s.panelSkin = ['auto', 'follow', 'dark'].indexOf(String(mode)) >= 0 ? String(mode) : 'auto';
+    save();
+    sspSkinProbeLast = null;
+    sspSkinApply(true);
+}
+/** 解析 rgb()/rgba()/#hex/transparent —— 拿不到就返回 null（调用方要能忍） */
+function sspParseColor(c) {
+    const s = String(c || '').trim().toLowerCase();
+    if (!s) return null;
+    if (s === 'transparent') return { r: 0, g: 0, b: 0, a: 0 };
+    let m = /^rgba?\(([^)]+)\)$/.exec(s);
+    if (m) {
+        const p = m[1].split(/[,/\s]+/).filter(x => x !== '').map(Number);
+        if (p.length < 3 || p.some(isNaN)) return null;
+        return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? Math.max(0, Math.min(1, p[3])) : 1 };
+    }
+    m = /^#([0-9a-f]{3,8})$/.exec(s);
+    if (m) {
+        let h = m[1];
+        if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2] + 'ff';
+        if (h.length === 6) h += 'ff';
+        if (h.length !== 8) return null;
+        return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16), a: parseInt(h.slice(6, 8), 16) / 255 };
+    }
+    /* color-mix() 的**算完结果**在 Chrome 里是 `color(srgb 0.06 0.06 0.08)` 这种写法
+       （我们的 --ch-ink-2/3 就是 color-mix 混出来的，不认它就会漏掉整个写卡页） */
+    m = /^color\(\s*srgb\s+([^)]+)\)$/.exec(s);
+    if (m) {
+        const p = m[1].split(/[/\s]+/).filter(x => x !== '').map(Number);
+        if (p.length >= 3 && !p.slice(0, 3).some(isNaN)) {
+            return { r: p[0] * 255, g: p[1] * 255, b: p[2] * 255, a: p.length > 3 && !isNaN(p[3]) ? Math.max(0, Math.min(1, p[3])) : 1 };
+        }
+    }
+    return null;
+}
+/** fg 盖在 bg 上（都带 alpha） */
+function sspMixColor(fg, bg) {
+    const a = fg.a + bg.a * (1 - fg.a);
+    if (a <= 0.0001) return { r: 0, g: 0, b: 0, a: 0 };
+    const mix = (x, y) => (x * fg.a + y * bg.a * (1 - fg.a)) / a;
+    return { r: mix(fg.r, bg.r), g: mix(fg.g, bg.g), b: mix(fg.b, bg.b), a };
+}
+/** WCAG 相对亮度 */
+function sspLum(c) {
+    const f = (v) => { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+}
+/** WCAG 对比度（1 ~ 21） */
+function sspContrast(a, b) {
+    if (!a || !b) return null;
+    const la = sspLum(a), lb = sspLum(b);
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+/** 往上找"实际铺在下面的颜色"：最近的不透明背景，边找边合成 */
+function sspEffBg(el) {
+    let acc = null, node = el, guard = 0;
+    while (node && node.nodeType === 1 && guard++ < 40) {
+        const cs = getComputedStyle(node);
+        const c = sspParseColor(cs.backgroundColor);
+        if (c && c.a > 0) { acc = acc ? sspMixColor(acc, c) : c; if (acc.a >= 0.995) break; }
+        node = node.parentElement;
+    }
+    const base = { r: 255, g: 255, b: 255, a: 1 };   // 最后还有透明就压在白底上算
+    return acc ? sspMixColor(acc, base) : { r: 12, g: 12, b: 14, a: 1 };
+}
+/** 量面板上几处自己的文字：如果按"美化原色"来，最差的那处对比度是多少
+    ⚠️ 只量**主文字**（标题 / 页签 / 按钮）。别量 .ssp-orb-title small 那种次级文字：
+       它本来就是淡的（opacity .5 或 --ch-ink-3 混色），跟着深色美化时天然只有 1.0x，
+       量它会让"自动档"在健康主题上也乱锁 —— 第一版就是这么误锁的。 */
+const SSP_SKIN_PROBE = [
+    ['口袋标题', '#ssp_orb_panel .ssp-orb-title b'],
+    ['口袋页签', '#ssp_orb_panel .ssp-orb-tab'],
+    ['口袋按钮', '#ssp_orb_panel .ssp-pbtn'],
+    ['面板标题', '#ssp_panel .ssp-p-title b'],
+    ['面板按钮', '#ssp_panel .ssp-pbtn'],
+    ['悬浮球', '#ssp_orb i'],
+];
+function sspSkinProbeRead() {
+    const list = [];
+    /* ⓪ 先量"变量自洽性"：写卡 / 选卡两页（影子 DOM）里的淡字是 --ch-ink 和 --ch-bg
+          按比例混出来的。美化只要把 BodyColor 和 BlurTintColor 调成同一个色，
+          混出来就是"底色上写底色"，整页等于没字。
+          实测：用户的「仿p5」是 BodyColor #0B0B0D + BlurTint #16161A → 1.06 : 1，
+          写卡页那句提示真的看不见。影子里的元素 document.querySelector 抓不到，
+          所以这里直接量变量（在面板根上量，正好能拿到 --ch-*）。 */
+    try {
+        const host = document.getElementById('ssp_orb_panel') || document.body;
+        const cs = getComputedStyle(host);
+        const ink = sspParseColor(cs.getPropertyValue('--ch-ink').trim());
+        const bg = sspParseColor(cs.getPropertyValue('--ch-bg').trim());
+        const cr = sspContrast(ink, bg);
+        if (cr !== null) list.push({ 名字: '写卡页淡字', 对比度: cr });
+    } catch (e) { }
+    for (const [name, sel] of SSP_SKIN_PROBE) {
+        let el = null;
+        try { el = document.querySelector(sel); } catch (e) { el = null; }
+        if (!el) continue;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        if (cs.opacity !== '' && Number(cs.opacity) < 0.9) continue;   // 本来就淡的，别算
+        const fg = sspParseColor(cs.color);
+        if (!fg) continue;
+        const bg = sspEffBg(el);
+        if (fg.a < 1) {
+            /* 文字半透明：先跟"它下面的颜色"合成，再比 */
+            const flat = sspMixColor(fg, bg);
+            const cr = sspContrast(flat, bg);
+            if (cr !== null) list.push({ 名字: name, 对比度: cr });
+        } else {
+            const cr = sspContrast(fg, bg);
+            if (cr !== null) list.push({ 名字: name, 对比度: cr });
+        }
+    }
+    if (!list.length) return null;
+    list.sort((a, b) => a.对比度 - b.对比度);
+    return { worst: list[0], list };
+}
+/** 量的时候先把我们自己的锁摘掉，量完原地装回去（同一帧内，不会闪） */
+function sspSkinProbe(force) {
+    if (!force && sspSkinProbeLast) return sspSkinProbeLast;
+    const st = document.getElementById('ssp_panel_skin');
+    const keep = st ? st.textContent : null;
+    let out = null;
+    try {
+        if (st) st.textContent = '';
+        out = sspSkinProbeRead();
+    } catch (e) { out = null; }
+    finally { if (st) st.textContent = keep || ''; }
+    if (out) sspSkinProbeLast = out;
+    return out;
+}
+function sspSkinDecide() {
+    const mode = sspSkinMode();
+    const probe = (mode === 'auto') ? sspSkinProbe() : null;
+    let skin = 'follow', why = '跟美化';
+    if (mode === 'dark') { skin = 'dark'; why = '你选的固定深色'; }
+    else if (mode === 'auto') {
+        if (probe && probe.worst && probe.worst.对比度 < 3) {
+            skin = 'dark'; why = '自动：' + probe.worst.名字 + '只有 ' + probe.worst.对比度.toFixed(2) + ' : 1，看不见';
+        } else {
+            why = probe && probe.worst ? ('自动：最差也有 ' + probe.worst.对比度.toFixed(2) + ' : 1，能看清') : '自动：没有可量的地方';
+        }
+    }
+    return { mode, skin, why, probe };
+}
+/** 锁色板时要一起"护住"的文字（这些是我们面板上必须看得见的东西）。
+    ⚠️ 只写 var 是不够的：有些美化是 `body *{color:…!important}` 这种**全局 !important**，
+       跟变量一点关系都没有。所以要再补一层带 !important + id 选择器的兜底
+       （id 选择器比 body * 更具体，两个都 !important 时我们赢）。
+       代价：锁色时面板会变成"单色"，这是故意的 —— 救命模式先保证能看清。 */
+const SSP_SKIN_INK = [
+    '.ssp-orb-title b', '.ssp-orb-tab', '.ssp-pbtn', '.ssp-p-title', '.ssp-tv-title', '.ssp-tv-ghead',
+    '.ssp-bt-main b', '.ssp-bt-toggle b', '.ssp-skin-head b', '.ssp-skin-seg .ssp-pbtn', '.ssp-inp', '.ssp-orb-pfilter',
+];
+const SSP_SKIN_MUTED = [
+    '.ssp-orb-title small', '.ssp-bt-main small', '.ssp-bt-toggle small', '.ssp-skin-head small',
+    '.ssp-skin-now', '.ssp-bt-note', '.ssp-orb-empty', '.ssp-tv-k', '.ssp-tv-num',
+];
+
+/** 把固定色板注入/撤掉（返回这次的决定，给 UI 和测试用） */
+function sspSkinApply(force) {
+    const d = sspSkinDecide();
+    sspSkinNow = d.skin;
+    let st = document.getElementById('ssp_panel_skin');
+    if (!st) {
+        st = document.createElement('style');
+        st.id = 'ssp_panel_skin';
+        st.setAttribute('type', 'text/css');
+        document.head.appendChild(st);
+    }
+    let txt = '';
+    if (d.skin !== 'follow') {
+        const v = SSP_SKIN_VARS[d.skin];
+        const ink = v['--SmartThemeBodyColor'];
+        const muted = d.skin === 'dark' ? '#a7a9b6' : '#585c68';
+        const decl = Object.keys(v).map(k => k + ': ' + v[k] + ' !important;').join(' ');
+        /* ① 把这几个变量就地重声明（我们容器里的 var(--SmartTheme*) 全跟着变）
+           ② 给容器自己补一个兜底 color：只影响"本来会去继承 body 颜色"的元素，
+              我们自己的 class 规则照样赢（继承来的值永远输给直接声明）
+           ③ 兜底层：防全局 !important 的粗暴美化
+           ⚠️ 根选择器是逗号列表，**必须**包进 :is() —— 否则 `A, B .x` 里只有 B 才是祖先。
+              第一版就踩了：兜底层只对 #ssp_mount 生效，测试里 1.03 原样不动。 */
+        const ROOT = ':is(' + SSP_SKIN_SEL + ')';
+        txt = SSP_SKIN_SEL + ' { ' + decl + ' color: ' + ink + ' !important; }'
+            + ROOT + ' :is(' + SSP_SKIN_INK.join(', ') + ') { color: ' + ink + ' !important; }'
+            + ROOT + ' :is(' + SSP_SKIN_MUTED.join(', ') + ') { color: ' + muted + ' !important; }';
+    }
+    if (st.textContent !== txt) st.textContent = txt;
+    return d;
+}
+function sspSkinHTML() {
+    const d = sspSkinDecide();
+    const mode = d.mode;
+    const seg = SSP_SKIN_MODES.map(([k, label]) => '<span class="ssp-pbtn' + (k === mode ? ' on' : '')
+        + '" data-orb-skin="' + k + '" title="' + (k === 'auto' ? '对比度不够时自动锁一套固定色' : label) + '">' + label + '</span>').join('');
+    const worst = d.probe && d.probe.worst;
+    const now = d.skin === 'follow' ? '现在：跟随美化'
+        : ('现在：已锁' + (d.skin === 'dark' ? '深色' : '浅色'));
+    return '<div class="ssp-skin">'
+        + '<div class="ssp-skin-head"><b>面板配色</b>'
+        + '<small>有些美化会把文字调成跟背景一个颜色，连面板都看不见 —— 这一档给面板自己留一套颜色</small></div>'
+        + '<div class="ssp-skin-seg">' + seg
+        + '<span class="ssp-sp"></span>'
+        + '<span class="ssp-pbtn" data-orb-skinretest="1" title="重新量一次对比度">重测</span></div>'
+        + '<div class="ssp-skin-now' + (worst && worst.对比度 < 3 ? ' bad' : '') + '">' + esc(now) + '　·　' + esc(d.why)
+        + (worst ? '（最差一处：' + esc(worst.名字) + '）' : '') + '</div>'
+        + '</div>';
 }
 
 /* ============================ 存档（聊天记录）栏 ============================
@@ -13380,6 +13644,8 @@ function renderOrbPanel() {
     refreshOrbBadge();
     /* 「调试」页签：重画后把脚本内容 / 输出补回去（HTML 里只放了输出，文本框是空的） */
     if (orbTab === 'debug') { try { orbDbgPaint(); } catch (e) { } }
+    /* v1.31.77：每次重画顺手把面板配色按当前档位过一遍（面板刚建好，量出来的才是真值） */
+    try { sspSkinApply(); } catch (e) { }
     return true;
 }
 
@@ -13621,9 +13887,12 @@ function orbSetCollapsed(on, silent) {
      ② 卡片样式表（同一条规则会把卡片圆角抹平 → 重新注入一次带 !important 的版本）
     酒馆没有「主题已切换」事件导出，所以盯主题下拉 + 盯 body 的 class/style（主题会往 body 挂 class）。 */
 function protectSkinAfterThemeChange() {
+    /* v1.31.77：主题换了，面板配色得重新量一遍对比度（顺手把上次的结论作废） */
+    try { sspSkinProbeLast = null; } catch (e) { }
     [0, 120, 400].forEach(ms => setTimeout(() => {
         try { lockOrbSkin(); } catch (e) { }
         try { applyCardStyle(); } catch (e) { }
+        try { sspSkinApply(); } catch (e) { }
     }, ms));
 }
 
@@ -14991,6 +15260,22 @@ function bindOrb() {
         }
         if (t.closest('[data-orb-btreset]')) { orbBeautyReset(); renderOrbPanel(); return; }
         if (t.closest('[data-orb-btreload]')) { orbBeautyApply(); toast('已重新注入常用开关样式', 'info'); return; }
+        /* 美化页：面板配色（自动 / 跟随 / 深色 / 浅色）＋ 重测 */
+        const skinBtn = t.closest('[data-orb-skin]');
+        if (skinBtn) {
+            sspSkinSet(skinBtn.dataset.orbSkin);
+            renderOrbPanel();
+            toast('面板配色：' + (SSP_SKIN_MODES.find(x => x[0] === sspSkinMode()) || ['', '自动'])[1]
+                + (sspSkinNow === 'follow' ? '（跟随美化）' : '（已锁深色）'), 'success');
+            return;
+        }
+        if (t.closest('[data-orb-skinretest]')) {
+            sspSkinProbeLast = null;
+            const d = sspSkinApply(true);
+            renderOrbPanel();
+            toast(d.why, d.skin === 'follow' ? 'info' : 'warning');
+            return;
+        }
         /* 存档页：刷新 / 读档 / 删除 / 清除搜索 */
         if (t.closest('[data-orb-chrefresh]')) { orbChatsFetch(); return; }        if (t.closest('[data-orb-chclear]')) { orbChSearch = ''; renderOrbPanel(); return; }
         /* v1.31.64：存档页 🎭 —— 给这份存档挑面具（整页替换） */
@@ -15289,6 +15574,10 @@ if (globalThis.__SSP_TEST__) {
         orbDbgSelectorOf, orbDbgInspect, orbDbgPickStart, orbDbgPickOff, orbDbgStore,
         orbDbgEl, orbDbgSaveScript, orbDbgListScripts,
         ORB_BEAUTY_TWEAKS, orbBeautyState, orbBeautyOn, orbBeautyApply, orbBeautySet, orbBeautyReset, orbBeautyHTML,
+        sspSkinApply, sspSkinSet, sspSkinMode, sspSkinProbe, sspSkinHTML, sspContrast, sspParseColor, sspEffBg,
+        sspMixColor, sspLum, SSP_SKIN_VARS, SSP_SKIN_SEL, SSP_SKIN_MODES,
+        get sspSkinProbeLast() { return sspSkinProbeLast; },
+        get sspSkinNow() { return sspSkinNow; },
         orbSeamFillOff, orbSeamFillUpdate, orbSeamFillSync,
         get orbBeautyOpen() { return orbBeautyOpen; }, set orbBeautyOpen(v) { orbBeautyOpen = v; },
         orbDbgRule, orbDbgDivider, orbDbgHl, orbDbgHlShow, orbDbgHlHide, orbDbgTagOf, orbDbgUnder,
