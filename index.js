@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.88';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.89';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6287,6 +6287,12 @@ ORB_BEAUTY_TWEAKS = [
         desc: '浮在发送按钮上方那一小条（回底 / 重新发送）',
         get: () => quickBarSettings().on !== false,
         set: (on) => { quickBarSettings().on = !!on; save(); qbMount(); },
+    },
+    {
+        id: 'findbar', name: '页面搜索浮条', def: false,
+        desc: '在页面上挂一颗放大镜：点开就搜当前聊天（结果下拉、点一条就跳），关掉口袋面板它还在',
+        get: () => getSettings().findBarOn === true,
+        set: (on) => { getSettings().findBarOn = !!on; save(); findBarMount(); },
     },
     {
         id: 'qbBottom', name: '托盘 · 回底', def: true,
@@ -11769,7 +11775,7 @@ function findTextOf(m) {
 var findBarOpen = false;      // 展开成输入条了吗
 var findBarT = 0;
 var findBarComposing = false;   // v1.31.88：输入法拼字中（这时候绝不重画输入框）             // 输入去抖
-function findBarOn() { return getSettings().findBarOn !== false; }
+function findBarOn() { return getSettings().findBarOn === true; }   // v1.31.89：默认关（用户要常闭，别影响平时聊天）
 function findBarCount() {
     try {
         const rows = findRows();
