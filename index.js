@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.82';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.83';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6299,6 +6299,18 @@ ORB_BEAUTY_TWEAKS = [
         desc: '转发酒馆原生的「重新生成」：最后一条是 AI 就重生成、是你的消息就相当于再发一次',
         get: () => quickBarSettings().btns.resend !== false,
         set: (on) => { quickBarSettings().btns.resend = !!on; save(); qbMount(); },
+    },
+    {
+        id: 'qbStartNew', name: '托盘 · 新聊天', def: false,
+        desc: '等同于酒馆「选项 → 开始新聊天」（给当前角色开新聊天，现在这份留在存档里）',
+        get: () => quickBarSettings().btns.startnew !== false,
+        set: (on) => { quickBarSettings().btns.startnew = !!on; save(); qbMount(); },
+    },
+    {
+        id: 'qbDelMes', name: '托盘 · 删除消息', def: false,
+        desc: '等同于酒馆「选项 → 删除消息」（打开酒馆自己的删除框，选哪条删哪条）',
+        get: () => quickBarSettings().btns.delmes !== false,
+        set: (on) => { quickBarSettings().btns.delmes = !!on; save(); qbMount(); },
     },
 ];
 function orbBeautyState() {
@@ -11159,6 +11171,17 @@ const QUICK_BUTTONS = [
         id: 'resend', name: '重新发送', icon: 'fa-rotate-right',
         hint: '转发酒馆原生的「重新生成」：最后一条是 AI 就重新生成它，是你的消息就相当于再发一次',
         native: 'option_regenerate',
+    },
+    /* v1.31.83：用户要的另外两个原生项。**只点原生元素、不搬 DOM** ——
+       删除消息走酒馆自己的删除框（选哪条删哪条），新聊天走它自己的逻辑。
+       两个都是破坏性动作，所以 def:false（默认不上托盘，要用自己在常用开关里打开）。 */
+    {
+        id: 'startnew', name: '新聊天', icon: 'fa-comments', hint: '等同于酒馆「选项 → 开始新聊天」：给当前角色开一份新聊天，现在这份留在存档里',
+        native: 'option_start_new_chat', def: false,
+    },
+    {
+        id: 'delmes', name: '删除消息', icon: 'fa-trash-can', hint: '等同于酒馆「选项 → 删除消息」：打开酒馆自己的删除框，选哪条删哪条',
+        native: 'option_delete_mes', def: false,
     },
 ];
 
