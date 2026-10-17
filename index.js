@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.74';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.75';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6852,24 +6852,47 @@ function orbThemeVarsHTML() {
         const val = (now === undefined) ? v.v : now;
         const kind = themeVarKind(v.v);
         const changed = now !== undefined && now !== v.v;
+        /* ⚠️ 全部用**行内 !important**：用户的 `仿p5` 主题全局样式很凶，
+           之前用 class 布局时整行只剩一条空条（实测两次）。行内 !important 它压不掉。 */
+        const S_K = 'display:inline-block !important;flex:0 0 42% !important;max-width:42% !important;'
+            + 'font-family:Consolas,Monaco,monospace !important;font-size:10.5px !important;line-height:1.7 !important;'
+            + 'color:#d0d0dc !important;opacity:1 !important;overflow:hidden !important;'
+            + 'text-overflow:ellipsis !important;white-space:nowrap !important;';
+        const S_CTL = 'display:flex !important;align-items:center !important;gap:6px !important;'
+            + 'flex:1 1 auto !important;min-width:0 !important;';
+        const S_ROW = 'display:flex !important;align-items:center !important;gap:8px !important;'
+            + 'padding:4px 9px !important;min-height:28px !important;'
+            + 'border-top:1px solid rgba(255,255,255,.07) !important;'
+            + 'background:' + (changed ? 'rgba(120,190,255,.08)' : 'transparent') + ' !important;';
         let ctl = '';
         if (kind === 'color') {
-            ctl = '<input class="ssp-tv-color" type="color" data-orb-tvk="' + esc(v.k) + '" value="' + esc(themeVarColorOf(val)) + '"'
-                + ' title="' + esc(val) + '">';
+            ctl = '<input type="color" data-orb-tvk="' + esc(v.k) + '" value="' + esc(themeVarColorOf(val)) + '"'
+                + ' title="' + esc(val) + '" style="flex:0 0 auto !important;width:32px !important;height:22px !important;'
+                + 'padding:0 !important;border:1px solid rgba(255,255,255,.3) !important;border-radius:3px !important;'
+                + 'background:#222 !important;cursor:pointer !important;display:inline-block !important;">'
+                + '<code style="font-size:10px !important;color:#9a9ab0 !important;'
+                + 'font-family:Consolas,Monaco,monospace !important;">' + esc(val) + '</code>';
         } else if (kind === 'px' || kind === 'em' || kind === 'pct') {
             const num = themeVarNumOf(val);
             const max = kind === 'px' ? Math.max(64, Math.round(num.n * 2) + 32)
                 : kind === 'em' ? Math.max(4, num.n * 2 + 2) : 100;
             const step = kind === 'px' ? 1 : (kind === 'pct' ? 1 : 0.05);
-            ctl = '<input class="ssp-tv-range" type="range" min="0" max="' + max + '" step="' + step + '"'
-                + ' data-orb-tvk="' + esc(v.k) + '" data-orb-tvunit="' + esc(num.unit || kind) + '" value="' + num.n + '">'
-                + '<b class="ssp-tv-num" data-orb-tvout="' + esc(v.k) + '">' + esc(val) + '</b>';
+            ctl = '<input type="range" data-orb-tvk="' + esc(v.k) + '" data-orb-tvunit="' + esc(num.unit || kind) + '"'
+                + ' min="0" max="' + max + '" step="' + step + '" value="' + num.n + '"'
+                + ' style="flex:1 1 auto !important;min-width:60px !important;height:18px !important;'
+                + 'accent-color:#6ea8ff !important;display:inline-block !important;">'
+                + '<b data-orb-tvout="' + esc(v.k) + '" style="flex:0 0 auto !important;font-size:10.5px !important;'
+                + 'color:#a9a9ba !important;font-weight:400 !important;min-width:46px !important;text-align:right !important;">'
+                + esc(val) + '</b>';
         } else {
-            ctl = '<input class="ssp-inp ssp-tv-text" type="text" data-orb-tvk="' + esc(v.k) + '" value="' + esc(val) + '">';
+            ctl = '<input type="text" data-orb-tvk="' + esc(v.k) + '" value="' + esc(val) + '"'
+                + ' style="flex:1 1 auto !important;min-width:0 !important;font-size:11px !important;padding:3px 6px !important;'
+                + 'color:#e8e8ef !important;background:#15151c !important;border:1px solid rgba(255,255,255,.18) !important;'
+                + 'border-radius:3px !important;display:inline-block !important;">';
         }
-        return '<div class="ssp-tv-row' + (changed ? ' changed' : '') + '" data-orb-tvrow="' + esc(v.k) + '">'
-            + '<span class="ssp-tv-k" title="' + esc(v.k) + ' = ' + esc(v.v) + '">' + esc(v.k) + '</span>'
-            + '<span class="ssp-tv-ctl">' + ctl + '</span>'
+        return '<div data-orb-tvrow="' + esc(v.k) + '" style="' + S_ROW + '">'
+            + '<span title="' + esc(v.k) + ' = ' + esc(v.v) + '" style="' + S_K + '">' + esc(v.k) + '</span>'
+            + '<span style="' + S_CTL + '">' + ctl + '</span>'
             + (changed ? '<span class="ssp-pbtn ssp-tv-reset" data-orb-tvr="' + esc(v.k) + '" title="还原成主题原值">↺</span>' : '')
             + '</div>';
     }).join('');
