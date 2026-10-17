@@ -1217,6 +1217,15 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-ct-foot { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 7px; }
 
 /* ---------- v1.31.79：主题变量的中文化（原名 / 词表） ---------- */
+.ssp-tv-exp {
+    font-size: 9.5px; padding: 1px 5px; border-radius: 3px; margin-left: 5px;
+    border: 1px solid rgba(255, 190, 90, .55); color: #ffcf6b; background: rgba(255, 170, 60, .12);
+}
+.ssp-tv-expnote {
+    font-size: 10.5px; line-height: 1.55; opacity: .72; margin-bottom: 6px;
+    padding: 5px 7px; border-radius: 4px;
+    border-left: 2px solid rgba(255, 190, 90, .6); background: rgba(255, 170, 60, .08);
+}
 .ssp-tv-cats { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
 .ssp-tv-cat {
     cursor: pointer; padding: 2px 8px; border-radius: 999px; font-size: 10.5px;

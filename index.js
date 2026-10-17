@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.81';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.82';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -7678,9 +7678,10 @@ function orbThemeVarsHTML() {
         || sspVarNameCN(v.k).toLowerCase().indexOf(q) >= 0));
     const head = '<div class="ssp-tv-head">'
         + '<span class="ssp-tv-title">🎨 主题变量' + (all.length ? '（' + all.length + ' 个）' : '') + '</span>'
+        + '<span class="ssp-tv-exp" title="此功能为实验性功能，不能保证能全都修改">实验性</span>'
         + (ovN ? '<span class="ssp-tv-badge">已改 ' + ovN + '</span>' : '')
         + '<span class="ssp-sp"></span>'
-        + (ovN ? '<span class="ssp-pbtn" data-orb-tvwrite="1" title="把调过的值写进主题 CSS，并点酒馆自己的「更新当前美化」">写回主题</span>' : '')
+        + (ovN ? '<span class="ssp-pbtn" data-orb-tvwrite="1" title="把调过的值写进主题 CSS，并点酒馆自己的「更新当前美化」（实验性：只管 :root/html 里的变量）">写回主题</span>' : '')
         + (ovN ? '<span class="ssp-pbtn" data-orb-tvall="1" title="把所有变量还原成主题原值">全部还原</span>' : '')
         + '<span class="ssp-pbtn" data-orb-tvfold="1">' + (orbTVOpen ? '收起' : '展开') + '</span>'
         + '</div>';
@@ -7693,7 +7694,10 @@ function orbThemeVarsHTML() {
     const tabs = '<div class="ssp-tv-cats">' + SSP_TV_CATS.map(([k, label]) =>
         '<span class="ssp-tv-cat' + (k === orbTVCat ? ' on' : '') + '" data-orb-tvcat="' + k + '">'
         + label + '<i>' + (k === 'all' ? all.length : (catN[k] || 0)) + '</i></span>').join('') + '</div>';
-    const tools = tabs + '<div class="ssp-orb-pfilter" style="margin-bottom:4px">'
+    const note = '<div class="ssp-tv-expnote">⚠️ 此功能为实验性功能，不能保证能全都修改。'
+        + '这里只能调美化作者写进 <b>:root</b> / <b>html</b> 的变量；写死在具体选择器上的值（比如这套美化的正文字号）它就管不到 —— '
+        + '遇到这种情况用上面「看得清吗」里的兜底修法。</div>';
+    const tools = note + tabs + '<div class="ssp-orb-pfilter" style="margin-bottom:4px">'
         + '<input class="ssp-inp" type="text" data-orb-tvsearch="1" placeholder="搜中文名或变量名（比如 正文 / --accent）" value="' + esc(orbTVSearch) + '">'
         + (orbTVSearch ? '<span class="ssp-pbtn" data-orb-tvsearchclear="1">清除</span>' : '')
         + '</div>'
