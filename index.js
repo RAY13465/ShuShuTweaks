@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.69';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.70';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -10487,18 +10487,22 @@ function orbCardOpen(avatar) {
         /* ⚠️ selectCharacterById 是**异步**的：立刻重画面板只会画到"上一张卡"，
            用户看到的就是「点了没反应，要关掉口袋再打开才刷新」（实测反馈）。
            所以等它 resolve 之后再：①把写卡骨架标记成"要重读" ②关掉口袋，直接落到聊天页。 */
+        /* ⚠️ selectCharacterById 是**异步**的。用户原话：
+           「点对话 → 还得点空白把口袋弄掉 → 再点球进去，才看到那个对话界面」
+           → 所以这里等它 resolve 之后：①把写卡骨架标记成"要重读" ②**把口袋收起来**，
+           让用户直接落在聊天页（口袋是全屏浮层，不收起来就挡着聊天）。 */
         Promise.resolve(ctx.selectCharacterById(chid, { switchMenu: false }))
             .then(() => {
                 globalThis.setTimeout?.(() => {
                     try {
-                        chPulledOnce = false;                 // 下次进写卡页强制重新 pull
+                        chPulledOnce = false;
                         chDirtyReset && chDirtyReset();
-                        /* 就地把面板按新卡重画（不再需要"关掉口袋再打开"） */
-                        if (orbOpenNow) renderOrbPanel();
                     } catch (e) { }
-                }, 700);
+                    try { if (orbOpenNow) closeOrb(); } catch (e) { }   // 收起口袋 → 直接看到聊天页
+                }, 600);
             })
             .catch(() => { });
+        return true;
         return true;
     } catch (e) { toast('打开失败：' + (e && e.message), 'warning'); return false; }
 }
@@ -13816,7 +13820,12 @@ function bindOrb() {
                 /* 离开这一页前先把改动落回原生（页签之间来回切不该丢字） */
                 try { chPush(true); } catch (e) { }
                 chTab = ct.dataset.orbCftab || 'persona';
-                chPanesLoad(true);               // 只重画分页内容：标题栏 / 保存条 / 原生那排都不动
+                /* ⚠️ v1.31.70：这里原来只做 `chPanesLoad(true)`（局部重画分页）。
+                   进了影子根以后，那条路径里的某一步会抛（页签亮了、内容不换），
+                   用户看到的就是「点对话切不过去，必须关掉口袋再打开」。
+                   改成**整页重画**：renderOrbPanel 里调 chPanesLoad 是包在 try/catch 里的，
+                   一条出错也不会挡住整页渲染。 */
+                renderOrbPanel();
                 return;
             }
         }
