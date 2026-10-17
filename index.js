@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.79';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.80';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6600,19 +6600,28 @@ function sspSkinProbeRead() {
         const fg = sspParseColor(cs.color);
         if (!fg) continue;
         const bg = sspEffBg(el);
+        /* v1.31.80：字号也一起量 —— 美化把字号压到 6px，颜色再对也看不见 */
+        const fs = parseFloat(cs.fontSize) || 0;
+        const one = { 名字: name, 对比度: null, 字号: fs };
         if (fg.a < 1) {
             /* 文字半透明：先跟"它下面的颜色"合成，再比 */
             const flat = sspMixColor(fg, bg);
-            const cr = sspContrast(flat, bg);
-            if (cr !== null) list.push({ 名字: name, 对比度: cr });
+            one.对比度 = sspContrast(flat, bg);
         } else {
-            const cr = sspContrast(fg, bg);
-            if (cr !== null) list.push({ 名字: name, 对比度: cr });
+            one.对比度 = sspContrast(fg, bg);
         }
+        if (one.对比度 === null && !(fs > 0 && fs < SSP_CT_MIN_PX)) continue;
+        list.push(one);
     }
     if (!list.length) return null;
-    list.sort((a, b) => a.对比度 - b.对比度);
-    return { worst: list[0], list };
+    /* 排序：先按"哪种更严重"（字号太小优先报），再按对比度 */
+    list.sort((a, b) => (a.对比度 === null ? 99 : a.对比度) - (b.对比度 === null ? 99 : b.对比度));
+    const 小字 = list.filter(x => x.字号 > 0 && x.字号 < SSP_CT_MIN_PX);
+    if (小字.length) {
+        const w = 小字.slice().sort((a, b) => a.字号 - b.字号)[0];
+        return { worst: { 名字: w.名字, 对比度: w.对比度 === null ? 0 : w.对比度, 字号: w.字号, 太小: true }, list, 最小字号: w.字号 };
+    }
+    return { worst: list[0], list, 最小字号: list.reduce((m, x) => Math.min(m || 99, x.字号 || 99), 99) };
 }
 /** 量的时候先把我们自己的锁摘掉，量完原地装回去（同一帧内，不会闪） */
 function sspSkinProbe(force) {
@@ -6631,16 +6640,23 @@ function sspSkinProbe(force) {
 function sspSkinDecide() {
     const mode = sspSkinMode();
     const probe = (mode === 'auto') ? sspSkinProbe() : null;
-    let skin = 'follow', why = '跟美化';
+    let skin = 'follow', why = '跟美化', 字体过小 = false;
     if (mode === 'dark') { skin = 'dark'; why = '你选的固定深色'; }
     else if (mode === 'auto') {
-        if (probe && probe.worst && probe.worst.对比度 < 3) {
-            skin = 'dark'; why = '自动：' + probe.worst.名字 + '只有 ' + probe.worst.对比度.toFixed(2) + ' : 1，看不见';
+        const worse = probe && probe.worst;
+        if (worse && worse.太小) {
+            skin = 'dark'; 字体过小 = true;
+            why = '自动：' + worse.名字 + '只有 ' + worse.字号 + 'px，太小了';
+        } else if (worse && worse.对比度 < 3) {
+            skin = 'dark';
+            why = '自动：' + worse.名字 + '只有 ' + worse.对比度.toFixed(2) + ' : 1，看不见';
         } else {
-            why = probe && probe.worst ? ('自动：最差也有 ' + probe.worst.对比度.toFixed(2) + ' : 1，能看清') : '自动：没有可量的地方';
+            why = worse ? ('自动：最差也有 ' + worse.对比度.toFixed(2) + ' : 1，能看清') : '自动：没有可量的地方';
         }
     }
-    return { mode, skin, why, probe };
+    /* 手选深色时也要知道"字号是不是被压小了"，好决定要不要上字号下限 */
+    if (skin === 'dark' && probe && probe.最小字号 && probe.最小字号 < SSP_CT_MIN_PX) 字体过小 = true;
+    return { mode, skin, why, probe, 字体过小 };
 }
 /** 锁色板时要一起"护住"的文字（这些是我们面板上必须看得见的东西）。
     ⚠️ 只写 var 是不够的：有些美化是 `body *{color:…!important}` 这种**全局 !important**，
@@ -6683,6 +6699,13 @@ function sspSkinApply(force) {
         txt = SSP_SKIN_SEL + ' { ' + decl + ' color: ' + ink + ' !important; }'
             + ROOT + ' :is(' + SSP_SKIN_INK.join(', ') + ') { color: ' + ink + ' !important; }'
             + ROOT + ' :is(' + SSP_SKIN_MUTED.join(', ') + ') { color: ' + muted + ' !important; }';
+        /* ④ v1.31.80：字号被压扁（< 9px）时，给主文字一个 12px 的地板。
+              只在"真的被压扁"时才加 —— 平时不改我们的排版（标题本来是 12.5~14.5px，
+              无脑加地板会把它们全压成一样大）。 */
+        const 最小 = (d.probe && d.probe.最小字号) || 99;
+        if (最小 < 9) {
+            txt += ROOT + ' :is(' + SSP_SKIN_INK.join(', ') + ') { font-size: 12px !important; }';
+        }
     }
     if (st.textContent !== txt) st.textContent = txt;
     return d;
@@ -6719,6 +6742,7 @@ function sspSkinHTML() {
      ③ 一键修：保色相、只推亮度，算到 ≥ 4.5:1，写进**覆盖层**（不动主题文件），当场预览；
         满意再点「写回主题」（人手点，绝不自动写）。
    ========================================================================== */
+const SSP_CT_MIN_PX = 11;   // v1.31.80：正文小到这个字号以下就算"看不清"（酒馆默认是 15px 上下）
 const SSP_CT_POINTS = [
     ['聊天正文', '#chat .mes_text'],
     ['角色名字', '#chat .ch_name'],
@@ -6805,13 +6829,16 @@ function sspSpec(sel) {
     const tag = (sel.replace(/[#.\][:][^\s>+~]*/g, '').match(/[a-z]+/gi) || []).length;
     return ids * 10000 + cls * 100 + tag;
 }
-/** 哪些美化规则在给这个元素的 color / background-color 供值？返回 [{k, prop, sel}] */
-function sspBlameVar(el) {
+/** 哪些美化规则在给这个元素的 color / background-color / font-size 供值？返回 [{k, prop, sel}]
+    props 可以传：['color','background-color','background','font-size']（默认只查颜色） */
+const SSP_BLAME_PROPS = ['color', 'background-color', 'background'];
+function sspBlameVar(el, props) {
     if (!el || !el.matches) return [];
+    const wantProps = Array.isArray(props) && props.length ? props : SSP_BLAME_PROPS;
     const rules = sspCssRules(orbThemeCss());
     const hits = [];
     for (const rule of rules) {
-        const props = rule.decls.filter(d => d.prop === 'color' || d.prop === 'background-color' || d.prop === 'background');
+        const props = rule.decls.filter(d => wantProps.indexOf(d.prop) >= 0);
         if (!props.length) continue;
         const vars = [];
         props.forEach(d => {
@@ -6927,12 +6954,22 @@ function sspContrastRun() {
         const cr = sspContrast(fg, bg);
         if (cr === null) return;
         orbCtEls.push(el);
-        rows.push({ 名字: name, 选择器: sel, 前景: sspRgbToHex(fg), 背景: sspRgbToHex(bg), 对比度: +cr.toFixed(2), 有图: bgInfo.有图 });
+        /* v1.31.80：字号也算"看得清"的一部分 —— 8px 的字再怎么高对比也看不清。
+           行高一起量（< 1.05 倍字号就是挤在一起，读起来费劲）。 */
+        const fs = parseFloat(cs.fontSize) || 0;
+        const lhRaw = String(cs.lineHeight || '');
+        const lh = /px$/.test(lhRaw) ? parseFloat(lhRaw) : (parseFloat(lhRaw) || 0) * fs;
+        rows.push({ 名字: name, 选择器: sel, 前景: sspRgbToHex(fg), 背景: sspRgbToHex(bg),
+                    对比度: +cr.toFixed(2), 有图: bgInfo.有图,
+                    字号: +fs.toFixed(1), 行高: lh ? +lh.toFixed(1) : 0,
+                    太小: fs > 0 && fs < SSP_CT_MIN_PX,
+                    太挤: fs > 0 && lh > 0 && lh < fs * 1.05 });
     });
     orbCtRows = rows;
     return rows;
 }
-function sspCtBad(row) { return row && row.对比度 < 3; }
+/** 一处算不算"看不清"：对比度 < 3，或者字号小于 SSP_CT_MIN_PX */
+function sspCtBad(row) { return !!row && (row.对比度 < 3 || !!row.太小); }
 /** 用哨兵色实测确认候选：把这个变量临时设成 #123456，看元素颜色变不变（同一帧内还原，不闪） */
 function sspBlameConfirm(el, hits) {
     if (!el || !hits || !hits.length) return [];
@@ -6959,17 +6996,26 @@ function sspBlameConfirm(el, hits) {
     const yes = out.filter(x => x.确认);
     return yes.length ? yes : out;
 }
-/** 给看不清的那几处找元凶（只找"看不清"的，省得白跑） */
+/** 给看不清的那几处找元凶（只找"看不清"的，省得白跑）
+    v1.31.80：字号太小也算"看不清"，所以一并找 font-size 的元凶（分开存，修的时候各走各的） */
 function sspContrastBlame() {
     const rows = orbCtRows || [];
     let found = 0;
     rows.forEach((row, i) => {
-        if (!sspCtBad(row)) { row.元凶 = row.元凶 || []; return; }
+        if (!sspCtBad(row)) { row.元凶 = row.元凶 || []; row.字号元凶 = row.字号元凶 || []; return; }
         const el = orbCtEls[i];
-        const hits = sspBlameVar(el).filter(h => h.prop === 'color');
-        const ok = sspBlameConfirm(el, hits);
+        const colorHits = sspBlameVar(el, ['color']).filter(h => h.prop === 'color');
+        const ok = sspBlameConfirm(el, colorHits);
         row.元凶 = ok;
         if (ok.length) found++;
+        /* 字号：没有"哨兵色"这种捷径，直接看哪条规则用 var() 给了 font-size */
+        if (row.太小) {
+            const fsHits = sspBlameVar(el, ['font-size']).filter(h => h.prop === 'font-size');
+            row.字号元凶 = fsHits;
+            if (fsHits.length) found++;
+        } else {
+            row.字号元凶 = [];
+        }
     });
     return found;
 }
@@ -6977,7 +7023,7 @@ function sspContrastBlame() {
     ⚠️ 光往样式表里写 `选择器 {color:…!important}` 常常压不住：美化的规则往往写成
        `html body #chat .mes_text{…!important}`，特异性比我们高（实测写进去还是原色）。
        所以写完**量一次**，没生效就退到行内 !important（行内最高，且能撤销）。 */
-function sspCtFallback(sel, color, el) {
+function sspCtFallback(sel, decl, el) {
     let st = document.getElementById('ssp_contrast_fix');
     if (!st) {
         st = document.createElement('style');
@@ -6985,21 +7031,34 @@ function sspCtFallback(sel, color, el) {
         st.setAttribute('type', 'text/css');
         document.head.appendChild(st);
     }
-    const rule = String(sel) + ' { color: ' + String(color) + ' !important; }';
+    /* v1.31.80：第二个参数既能是颜色字符串（老调用），也能是 {color, fontSize} */
+    const d = (decl && typeof decl === 'object') ? decl : { color: decl };
+    const CSS_PROP = { color: 'color', fontSize: 'font-size' };
+    const body = Object.keys(d).filter(k => d[k]).map(k => (CSS_PROP[k] || k) + ': ' + d[k] + ' !important;').join(' ');
+    const rule = String(sel) + ' { ' + body + ' }';
     if (st.textContent.indexOf(rule) < 0) st.textContent = (st.textContent || '') + rule + '\n';
     let 用了行内 = false;
     if (el && el.style) {
-        let got = '';
-        try { got = getComputedStyle(el).color; } catch (e) { got = ''; }
-        const want = sspParseColor(color);
-        const now = sspParseColor(got);
-        const same = want && now && Math.abs(want.r - now.r) < 2 && Math.abs(want.g - now.g) < 2 && Math.abs(want.b - now.b) < 2;
-        if (!same) {
+        /* 写完量一次：样式表没压住就退到行内 !important（行内最高，且能撤销） */
+        const checks = [];
+        if (d.color) checks.push(['color', sspParseColor(d.color), () => getComputedStyle(el).color]);
+        if (d.fontSize) checks.push(['fontSize', parseFloat(d.fontSize), () => parseFloat(getComputedStyle(el).fontSize)]);
+        for (const [prop, want, got] of checks) {
+            let ok = false;
             try {
-                el.setAttribute('data-ssp-ctfix', '1');
-                el.style.setProperty('color', color, 'important');
-                用了行内 = true;
-            } catch (e) { }
+                const now = got();
+                ok = (typeof want === 'number') ? (Math.abs(now - want) < 1.5) : (function () {
+                    const n = sspParseColor(now);
+                    return want && n && Math.abs(want.r - n.r) < 2 && Math.abs(want.g - n.g) < 2 && Math.abs(want.b - n.b) < 2;
+                })();
+            } catch (e) { ok = false; }
+            if (!ok) {
+                try {
+                    el.setAttribute('data-ssp-ctfix', '1');
+                    el.style.setProperty(prop === 'fontSize' ? 'font-size' : prop, d[prop], 'important');
+                    用了行内 = true;
+                } catch (e) { }
+            }
         }
     }
     return { rule, 用来行内: 用了行内 };
@@ -7010,7 +7069,7 @@ function sspCtFallbackClear() {
     if (st) st.remove();
     const els = document.querySelectorAll('[data-ssp-ctfix]');
     for (const el of els) {
-        try { el.style.removeProperty('color'); el.removeAttribute('data-ssp-ctfix'); } catch (e) { }
+        try { el.style.removeProperty('color'); el.style.removeProperty('font-size'); el.removeAttribute('data-ssp-ctfix'); } catch (e) { }
     }
     return els.length;
 }
@@ -7031,6 +7090,10 @@ function orbContrastHTML() {
             + '<span class="ssp-ct-name">' + esc(r.名字) + '</span>'
             + '<span class="ssp-ct-cr" title="' + esc(r.前景 + ' on ' + r.背景) + '">' + r.对比度.toFixed(2) + ':1'
             + (r.有图 ? '<i title="这一处底下有背景图，数值仅供参考">※</i>' : '') + '</span>'
+            + '<span class="ssp-ct-fs' + (r.太小 ? ' bad' : '') + '"'
+            + ' title="' + esc('字号 ' + r.字号 + 'px' + (r.行高 ? '／行高 ' + r.行高 + 'px' : '')
+                + (r.太小 ? '（小于 ' + SSP_CT_MIN_PX + 'px 就太小了）' : '') + (r.太挤 ? '（行高太挤）' : '')) + '">'
+            + esc(r.字号 ? r.字号 + 'px' : '—') + '</span>'
             + '<span class="ssp-ct-swatch" style="background:' + esc(r.背景) + ';color:' + esc(r.前景) + '">字</span>'
             + (元凶.length
                 ? ('<code class="ssp-ct-blame" title="命中的规则：' + esc(元凶[0].sel) + '">' + esc(元凶[0].k) + '</code>')
@@ -7045,8 +7108,8 @@ function orbContrastHTML() {
     const ovN = Object.keys(themeVarsOf()).length;
     return '<div class="ssp-ct' + (bad.length ? ' bad' : '') + '">' + head
         + '<div class="ssp-ct-body">'
-        + '<div class="ssp-ct-note">量的是真颜色（`color` 和往上第一个不透明背景），不是猜变量名。'
-        + '低于 3:1 就是看不清；※ 表示那底下有背景图，数值只能参考。</div>'
+        + '<div class="ssp-ct-note">量的是真颜色（`color` 和往上第一个不透明背景）、还有字号 —— 不是猜变量名。'
+        + '对比度低于 3:1、或字号小于 ' + SSP_CT_MIN_PX + 'px 都算看不清；※ 表示那底下有背景图，数值只能参考。</div>'
         + (list || '<div class="ssp-orb-empty">当前没有可量的位置（先打开一个聊天再看看）。</div>')
         + '<div class="ssp-ct-foot">'
         + '<span class="ssp-pbtn" data-orb-ctcheck="1">重新体检</span>'
@@ -15881,9 +15944,30 @@ function bindOrb() {
             const idx = Number(ctFix.dataset.orbCtfix);
             const row = (orbCtRows || [])[idx];
             const el = orbCtEls[idx];
-            if (!row || !row.元凶 || !row.元凶.length) {
+            if (!row || !el) { toast('这一处现在量不到了（聊天可能关了），刷新后再试', 'warning'); return; }
+            /* v1.31.80：先治"字太小"（字号小到看不清时，对比度再高也没用） */
+            const 目标字号 = Math.max(SSP_CT_MIN_PX + 2, 13);
+            if (row.太小) {
+                const fh = (row.字号元凶 || [])[0];
+                if (fh) {
+                    const ov = themeVarsOf();
+                    ov[fh.k] = 目标字号 + 'px';
+                    try { themeVarsApply(); } catch (e) { }
+                    save();
+                    orbCtRows = null;
+                    renderOrbPanel();
+                    toast('已把 ' + fh.k + ' 调成 ' + 目标字号 + 'px（覆盖层）；满意再点「写回主题」', 'success');
+                    return;
+                }
+                const fb = sspCtFallback(row.选择器, { fontSize: 目标字号 + 'px' }, el);
+                orbCtRows = null;
+                renderOrbPanel();
+                toast('这一处的字号定位不到变量，已只给它自己写了一条 ' + 目标字号 + 'px'
+                    + (fb && fb.用来行内 ? '（走行内 !important）' : ''), 'info');
+                return;
+            }
+            if (!row.元凶 || !row.元凶.length) {
                 /* 没元凶：只改这一处的颜色（兜底样式），并且把标签说清楚 */
-                if (!el) { toast('这一处现在量不到了（聊天可能关了），刷新后再试', 'warning'); return; }
                 const bg = sspParseColor(row.背景) || { r: 12, g: 12, b: 14, a: 1 };
                 const fg = sspParseColor(getComputedStyle(el).color) || { r: 200, g: 200, b: 200, a: 1 };
                 const r = sspFixColorToContrast(fg, bg, 4.5);
@@ -16220,7 +16304,7 @@ if (globalThis.__SSP_TEST__) {
         get sspSkinProbeLast() { return sspSkinProbeLast; },
         get sspSkinNow() { return sspSkinNow; },
         /* v1.31.78：对比度体检 */
-        SSP_CT_POINTS, sspContrastRun, sspBlameVar, sspBlameConfirm, sspContrastBlame,
+        SSP_CT_POINTS, SSP_CT_MIN_PX, sspContrastRun, sspBlameVar, sspBlameConfirm, sspContrastBlame,
         sspFixColorToContrast, sspCssRules, sspSplitDecls, sspSpec, sspToHsl, sspFromHsl,
         sspRgbToHex, sspCtFallback, sspCtFallbackClear, sspCtBad, orbContrastHTML, themeVarsOf, themeVarsApply,
         /* v1.31.79：中文化 */
