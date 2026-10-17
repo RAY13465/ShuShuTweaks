@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.70';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.71';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -12586,6 +12586,242 @@ function sspShadowIconLinks() {
     } catch (e) { return []; }
 }
 
+/** v1.31.71 给这两个页签做的一套**皮肤**（只在影子根里用；加在最后，所以能盖住前面的规则）。
+    目标是"层次清晰、看得清"：页面底 → 区块卡片 → 行 → 控件，四级明暗；标签小而稳、占位符不再糊成一片。 */
+const SSP_SHADOW_SKIN = `
+:host #ssp_orb_panel {
+    background: #1b1b21 !important;
+    color: #e8e8ef !important;
+    padding: 12px 13px 16px !important;
+}
+/* ---- 区块卡片 ---- */
+:host #ssp_orb_panel .ssp-ch-vgroup {
+    background: #22222a !important; border: 1px solid rgba(255,255,255,.09) !important;
+    border-radius: 5px !important; margin-bottom: 10px !important; overflow: hidden !important;
+}
+:host #ssp_orb_panel .ssp-ch-vghead {
+    background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.015)) !important;
+    border-bottom: 1px solid rgba(255,255,255,.08) !important;
+    padding: 8px 11px !important; font-size: 12px !important; font-weight: 700 !important;
+    color: #cfcfdb !important; letter-spacing: .2px !important;
+}
+/* ---- 行：左标签 + 右控件 ---- */
+:host #ssp_orb_panel .ssp-ch-vrow {
+    padding: 10px 11px !important; border-bottom: 1px solid rgba(255,255,255,.06) !important;
+    background: transparent !important; gap: 10px !important; align-items: start !important;
+}
+:host #ssp_orb_panel .ssp-ch-vrow:last-child { border-bottom: 0 !important; }
+:host #ssp_orb_panel .ssp-ch-vlab, :host #ssp_orb_panel .ssp-ch-vrow > label,
+:host #ssp_orb_panel .ssp-ch-clabel {
+    color: #a9a9ba !important; font-size: 11.5px !important; letter-spacing: .2px !important;
+    line-height: 1.6 !important; text-shadow: none !important;
+}
+/* ---- 输入框 / 文本域：深一档底 + 明显的焦点圈 ---- */
+:host #ssp_orb_panel .ssp-ch-inp, :host #ssp_orb_panel .ssp-inp {
+    background: #15151a !important; color: #ececf2 !important;
+    border: 1px solid rgba(255,255,255,.12) !important; border-radius: 3px !important;
+    padding: 7px 9px !important; font-size: 12.5px !important; line-height: 1.6 !important;
+    transition: border-color .15s, box-shadow .15s !important;
+}
+:host #ssp_orb_panel .ssp-ch-inp::placeholder, :host #ssp_orb_panel .ssp-inp::placeholder {
+    color: #6c6c7c !important; opacity: 1 !important;
+}
+:host #ssp_orb_panel .ssp-ch-inp:focus, :host #ssp_orb_panel .ssp-inp:focus {
+    border-color: #6ea8ff !important; box-shadow: 0 0 0 2px rgba(110,168,255,.18) !important; outline: none !important;
+}
+:host #ssp_orb_panel textarea.ssp-ch-inp { min-height: 88px !important; resize: vertical !important; }
+/* ---- 分页条 ---- */
+:host #ssp_orb_panel .ssp-ch-tabs {
+    background: #1f1f26 !important; border: 1px solid rgba(255,255,255,.09) !important;
+    border-radius: 3px !important; padding: 3px !important; gap: 3px !important; display: flex !important;
+}
+:host #ssp_orb_panel .ssp-ch-tab {
+    border-radius: 3px !important; padding: 5px 11px !important; font-size: 12px !important;
+    color: #a9a9ba !important; cursor: pointer !important; transition: background .15s, color .15s !important;
+}
+:host #ssp_orb_panel .ssp-ch-tab:hover { background: rgba(255,255,255,.07) !important; color: #e8e8ef !important; }
+:host #ssp_orb_panel .ssp-ch-tab.on { background: #2c2c36 !important; color: #fff !important; font-weight: 700 !important; }
+/* ---- 保存条 ---- */
+:host #ssp_orb_panel #ssp_vault_savebar {
+    background: #1f1f26 !important; border: 1px solid rgba(255,255,255,.1) !important;
+    border-radius: 4px !important; padding: 6px 8px !important;
+}
+/* ---- 按钮 ---- */
+:host #ssp_orb_panel .ssp-pbtn {
+    border: 1px solid rgba(255,255,255,.14) !important; border-radius: 3px !important;
+    background: #2a2a33 !important; color: #e8e8ef !important;
+    padding: 5px 11px !important; font-size: 12px !important; line-height: 1.5 !important;
+    transition: background .15s, border-color .15s, transform .08s !important;
+}
+:host #ssp_orb_panel .ssp-pbtn:hover { background: #33333d !important; border-color: rgba(255,255,255,.26) !important; }
+:host #ssp_orb_panel .ssp-pbtn:active { transform: translateY(1px) !important; }
+:host #ssp_orb_panel .ssp-pbtn.primary {
+    background: #2b3f66 !important; border-color: #4d7fd6 !important; color: #eaf1ff !important; font-weight: 700 !important;
+}
+:host #ssp_orb_panel .ssp-pbtn.primary:hover { background: #33507f !important; }
+:host #ssp_orb_panel .ssp-pbtn.danger { background: #4a2530 !important; border-color: #8c4053 !important; color: #ffdfe6 !important; }
+/* ---- 选卡页：列表行 / 头像墙 ---- */
+:host #ssp_orb_panel .ssp-ch-grow {
+    background: #22222a !important; border: 1px solid rgba(255,255,255,.08) !important;
+    border-radius: 4px !important; margin-bottom: 5px !important; padding: 6px 9px !important;
+    transition: background .15s, border-color .15s !important;
+}
+:host #ssp_orb_panel .ssp-ch-grow:hover { background: #282832 !important; border-color: rgba(110,168,255,.35) !important; }
+:host #ssp_orb_panel .ssp-ch-grow.on { background: #242f45 !important; border-color: #6ea8ff !important; }
+:host #ssp_orb_panel .ssp-ch-grow .ssp-ch-cardrow { background: transparent !important; border: 0 !important; border-radius: 0 !important; padding: 0 !important; }
+:host #ssp_orb_panel .ssp-ch-cav {
+    width: 34px !important; height: 34px !important; flex: 0 0 34px !important;
+    border-radius: 4px !important; border: 1px solid rgba(255,255,255,.14) !important; background: #15151a !important;
+}
+:host #ssp_orb_panel .ssp-ch-cname b, :host #ssp_orb_panel .ssp-ch-meta b {
+    font-size: 13px !important; font-weight: 700 !important; color: #e8e8ef !important;
+}
+:host #ssp_orb_panel .ssp-ch-card {
+    background: #22222a !important; border: 1px solid rgba(255,255,255,.08) !important; border-radius: 5px !important;
+    transition: background .15s, border-color .15s, transform .08s !important;
+}
+:host #ssp_orb_panel .ssp-ch-card:hover { background: #2a2a34 !important; border-color: rgba(110,168,255,.45) !important; transform: translateY(-1px) !important; }
+:host #ssp_orb_panel .ssp-ch-card.on { border-color: #6ea8ff !important; box-shadow: 0 0 0 1px rgba(110,168,255,.45) inset !important; }
+/* 搜索框 / 模式条那几行 */
+:host #ssp_orb_panel .ssp-orb-pfilter { gap: 6px !important; margin-bottom: 8px !important; }
+:host #ssp_orb_panel .ssp-orb-pcount { color: #8f8fa2 !important; font-size: 11px !important; }
+`;
+
+/** v1.31.71「文档风」皮肤：少盒子、弱边框、排版为主（用户选的这版）。
+    只在影子根里生效；加在最后，能盖住前面的规则。
+    · 区块不再是一张张卡片，而是一节一节的长文（只用细横线分隔）
+    · 字段标签变成控件上方的小号 meta（大写、字距略开）
+    · 输入框只有一条底线，聚焦才显蓝线 + 极淡底色；长文本才给一个"引用块"式的框
+    · 页签是文字 + 下划线高亮；按钮基本是纯文字，只有主操作带一点蓝底
+    · 选卡页做成"目录"：细横线分隔、当前项左侧一条蓝竖线 */
+const SSP_SHADOW_DOC = `
+:host #ssp_orb_panel {
+    background: #191920 !important; color: #ececf2 !important;
+    padding: 18px 22px 26px !important;
+    font-size: 13.5px !important; line-height: 1.78 !important;
+    -webkit-font-smoothing: antialiased !important;
+}
+:host #ssp_orb_panel * { box-sizing: border-box !important; }
+/* 区块 = 一节长文 */
+:host #ssp_orb_panel .ssp-ch-vgroup {
+    background: transparent !important; border: 0 !important; border-radius: 0 !important;
+    margin: 0 !important; padding: 18px 0 0 !important; overflow: visible !important;
+}
+:host #ssp_orb_panel .ssp-ch-vgroup + .ssp-ch-vgroup { border-top: 1px solid rgba(255,255,255,.06) !important; }
+:host #ssp_orb_panel .ssp-ch-vghead {
+    background: none !important; border: 0 !important; padding: 0 0 10px !important;
+    font-size: 14.5px !important; font-weight: 700 !important; color: #fff !important; letter-spacing: .2px !important;
+}
+/* 字段：标签在上、控件占满整行 */
+:host #ssp_orb_panel .ssp-ch-vrow {
+    display: block !important; padding: 0 0 15px !important; border: 0 !important;
+    background: transparent !important; margin: 0 !important;
+}
+:host #ssp_orb_panel .ssp-ch-vlab, :host #ssp_orb_panel .ssp-ch-clabel,
+:host #ssp_orb_panel .ssp-ch-vrow > label {
+    display: block !important; margin: 0 0 5px !important;
+    font-size: 11px !important; letter-spacing: .6px !important; text-transform: uppercase !important;
+    color: #83839a !important; line-height: 1.6 !important; text-shadow: none !important;
+}
+/* 单行输入：只有一条底线 */
+:host #ssp_orb_panel .ssp-ch-inp:not(textarea), :host #ssp_orb_panel .ssp-inp:not(textarea) {
+    background: transparent !important; color: #ececf2 !important;
+    border: 0 !important; border-bottom: 1px solid rgba(255,255,255,.12) !important; border-radius: 0 !important;
+    padding: 4px 1px 6px !important; font-size: 13.5px !important; line-height: 1.7 !important;
+    transition: border-color .15s, background .15s !important;
+}
+:host #ssp_orb_panel .ssp-ch-inp:not(textarea):hover, :host #ssp_orb_panel .ssp-inp:not(textarea):hover {
+    border-bottom-color: rgba(255,255,255,.24) !important;
+}
+:host #ssp_orb_panel .ssp-ch-inp:not(textarea):focus, :host #ssp_orb_panel .ssp-inp:not(textarea):focus {
+    outline: none !important; border-bottom-color: #6ea8ff !important; background: rgba(110,168,255,.05) !important;
+    box-shadow: none !important;
+}
+/* 长文本：唯一保留框的地方（引用块感） */
+:host #ssp_orb_panel textarea.ssp-ch-inp, :host #ssp_orb_panel textarea.ssp-inp {
+    background: #15151c !important; color: #ececf2 !important;
+    border: 1px solid rgba(255,255,255,.08) !important; border-radius: 3px !important;
+    padding: 10px 11px !important; min-height: 96px !important; resize: vertical !important;
+    font-size: 13px !important; line-height: 1.72 !important; box-shadow: none !important;
+}
+:host #ssp_orb_panel textarea.ssp-ch-inp:focus, :host #ssp_orb_panel textarea.ssp-inp:focus {
+    border-color: rgba(110,168,255,.6) !important; background: #16161e !important; outline: none !important;
+}
+:host #ssp_orb_panel .ssp-ch-inp::placeholder, :host #ssp_orb_panel .ssp-inp::placeholder { color: #62627a !important; opacity: 1 !important; }
+/* 页签：文字 + 下划线 */
+:host #ssp_orb_panel .ssp-ch-tabs {
+    background: transparent !important; border: 0 !important; border-bottom: 1px solid rgba(255,255,255,.07) !important;
+    border-radius: 0 !important; padding: 0 !important; gap: 18px !important; display: flex !important; margin: 14px 0 4px !important;
+}
+:host #ssp_orb_panel .ssp-ch-tab {
+    background: none !important; border: 0 !important; border-bottom: 2px solid transparent !important;
+    border-radius: 0 !important; padding: 6px 0 8px !important; margin-bottom: -1px !important;
+    font-size: 12.5px !important; color: #8b8b9c !important; cursor: pointer !important;
+}
+:host #ssp_orb_panel .ssp-ch-tab:hover { color: #d8d8e4 !important; background: none !important; }
+:host #ssp_orb_panel .ssp-ch-tab.on {
+    color: #fff !important; border-bottom-color: #6ea8ff !important; font-weight: 600 !important; background: none !important;
+}
+/* 保存条：一条细线 + 透明底 */
+:host #ssp_orb_panel #ssp_vault_savebar {
+    background: transparent !important; border: 0 !important; border-bottom: 1px solid rgba(255,255,255,.07) !important;
+    border-radius: 0 !important; padding: 8px 0 !important; margin-bottom: 4px !important;
+}
+/* 按钮：以文字为主 */
+:host #ssp_orb_panel .ssp-pbtn {
+    background: transparent !important; border: 1px solid transparent !important; border-radius: 3px !important;
+    padding: 5px 10px !important; font-size: 12.5px !important; line-height: 1.5 !important; color: #d6d6e2 !important;
+    transition: background .15s, color .15s !important;
+}
+:host #ssp_orb_panel .ssp-pbtn:hover { background: rgba(255,255,255,.07) !important; color: #fff !important; }
+:host #ssp_orb_panel .ssp-pbtn.primary {
+    background: rgba(110,168,255,.13) !important; border-color: rgba(110,168,255,.35) !important;
+    color: #cfe0ff !important; font-weight: 600 !important;
+}
+:host #ssp_orb_panel .ssp-pbtn.primary:hover { background: rgba(110,168,255,.2) !important; }
+:host #ssp_orb_panel .ssp-pbtn.danger {
+    background: rgba(220,90,110,.12) !important; border-color: rgba(220,90,110,.3) !important; color: #ffc9d2 !important;
+}
+/* 选卡页：像目录 */
+:host #ssp_orb_panel .ssp-ch-grow {
+    background: transparent !important; border: 0 !important; border-bottom: 1px solid rgba(255,255,255,.05) !important;
+    border-radius: 0 !important; margin: 0 !important; padding: 9px 2px !important;
+}
+:host #ssp_orb_panel .ssp-ch-grow:hover { background: rgba(255,255,255,.03) !important; }
+:host #ssp_orb_panel .ssp-ch-grow.on {
+    background: rgba(110,168,255,.08) !important; border-bottom-color: rgba(255,255,255,.05) !important;
+    box-shadow: inset 2px 0 0 #6ea8ff !important;
+}
+:host #ssp_orb_panel .ssp-ch-grow .ssp-ch-cardrow { background: transparent !important; border: 0 !important; padding: 0 !important; }
+:host #ssp_orb_panel .ssp-ch-cav {
+    width: 30px !important; height: 30px !important; flex: 0 0 30px !important;
+    border-radius: 3px !important; border: 1px solid rgba(255,255,255,.1) !important; background: #22222b !important;
+}
+:host #ssp_orb_panel .ssp-ch-cname b, :host #ssp_orb_panel .ssp-ch-meta b {
+    font-size: 13.5px !important; font-weight: 600 !important; color: #ececf2 !important; letter-spacing: .2px !important;
+}
+:host #ssp_orb_panel .ssp-ch-gtag {
+    background: none !important; color: #8b8b9c !important; font-size: 10px !important; letter-spacing: .5px !important;
+}
+:host #ssp_orb_panel .ssp-ch-gops { opacity: .5 !important; }
+:host #ssp_orb_panel .ssp-ch-grow:hover .ssp-ch-gops { opacity: 1 !important; }
+/* 头像墙（切到格子视图时）：轻卡片、无重边框 */
+:host #ssp_orb_panel .ssp-ch-card {
+    background: #1e1e25 !important; border: 1px solid rgba(255,255,255,.06) !important; border-radius: 4px !important;
+    padding: 5px !important; transition: background .15s, border-color .15s !important;
+}
+:host #ssp_orb_panel .ssp-ch-card:hover { background: #24242c !important; border-color: rgba(110,168,255,.4) !important; }
+:host #ssp_orb_panel .ssp-ch-card.on { border-color: #6ea8ff !important; box-shadow: 0 0 0 1px rgba(110,168,255,.35) inset !important; }
+/* 标签旁边那个字数（比如「角色描述 10728」）别糊在一起 */
+:host #ssp_orb_panel .ssp-ch-cnt {
+    margin-left: 7px !important; font-size: 10px !important; font-style: normal !important;
+    opacity: .55 !important; letter-spacing: 0 !important; text-transform: none !important;
+}
+/* 搜索 / 计数那几行 */
+:host #ssp_orb_panel .ssp-orb-pfilter { gap: 6px !important; margin: 14px 0 8px !important; }
+:host #ssp_orb_panel .ssp-orb-pcount { color: #7a7a90 !important; font-size: 11px !important; margin: 6px 0 !important; }
+`;
+
 /** 把我们的 style.css 文本取一次、缓存起来（地址从酒馆给我们注入的 <link> 上找，不写死路径） */
 var sspShadowCssCache = '';
 function sspStyleHref() {
@@ -12648,6 +12884,7 @@ async function sspShadowRender() {
             root.innerHTML = iconLinks
                 + '<style>' + (css || '') + '</style>'
                 + '<style>' + SSP_SHADOW_EXTRA_CSS + '</style>'
+                + '<style>' + SSP_SHADOW_DOC + '</style>'
                 /* ⚠️ 外壳必须同时带 **class="ssp-orb-panel"**：主样式里大量规则是
                    `.ssp-orb-panel .ssp-pbtn{…}` 这种 **class** 选择器（不是 #id），
                    只给 id 的话它们全部不命中 → 按钮/文字的 padding、字号、间距全丢，
