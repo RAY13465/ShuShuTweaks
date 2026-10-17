@@ -1869,3 +1869,16 @@ select.ssp-ch-inp { cursor: pointer; padding-right: 6px !important; }
     border: 1px solid rgba(255, 255, 255, .18);
 }
 .ssp-fb-n { min-width: 34px; text-align: center; opacity: .75; font-family: Consolas, monospace; font-size: 11px; }
+/* ---------- v1.31.87：页面搜索的结果下拉 ---------- */
+.ssp-findbar.open { flex-direction: column; align-items: stretch; width: 316px; gap: 6px; }
+.ssp-fb-top { display: flex; align-items: center; gap: 4px; }
+.ssp-fb-list { max-height: 260px; overflow-y: auto; border-top: 1px solid rgba(255,255,255,.12); padding-top: 4px; }
+.ssp-fb-row {
+    display: flex; gap: 6px; align-items: baseline; padding: 3px 5px; border-radius: 5px;
+    cursor: pointer; font-size: 11px; line-height: 1.5;
+}
+.ssp-fb-row:hover { background: rgba(255, 255, 255, .12); }
+.ssp-fb-row.on { background: rgba(70, 140, 220, .3); }
+.ssp-fb-row b { flex: 0 0 auto; font-weight: 600; opacity: .6; font-family: Consolas, monospace; font-size: 10px; }
+.ssp-fb-row span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .9; }
+.ssp-fb-row.none { opacity: .5; cursor: default; }

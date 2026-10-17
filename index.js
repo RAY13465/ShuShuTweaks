@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.86';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.87';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -11780,12 +11780,30 @@ function findBarHTML() {
     if (!findBarOpen) {
         return '<span class="ssp-fb-btn" data-ssp-fb="open" title="页面搜索（关掉面板也能用）"><i class="fa-solid fa-magnifying-glass"></i></span>';
     }
-    return '<span class="ssp-fb-btn" data-ssp-fb="close" title="收成放大镜"><i class="fa-solid fa-xmark"></i></span>'
+    /* v1.31.87：展开后直接给结果列表（跟着输入实时变，点一条就跳过去） */
+    let list = '';
+    if (String(orbFindQ || '').trim()) {
+        let rows = [];
+        try { rows = findRows() || []; } catch (e) { rows = []; }
+        const cap = rows.slice(0, 40);
+        list = '<div class="ssp-fb-list">'
+            + (cap.length ? cap.map((h, i) => {
+                const snip = String(h.text || '').replace(/\s+/g, ' ').trim().slice(0, 54);
+                return '<div class="ssp-fb-row' + (i === orbFindCur ? ' on' : '') + '" data-ssp-fb="go" data-id="' + h.id + '"'
+                    + ' title="第 ' + (h.id + 1) + ' 楼">'
+                    + '<b>#' + (h.id + 1) + '</b><span>' + esc(snip) + '</span></div>';
+            }).join('') : '<div class="ssp-fb-row none">没有匹配的消息</div>')
+            + (rows.length > cap.length ? '<div class="ssp-fb-row none">…还有 ' + (rows.length - cap.length) + ' 条（用 ↑↓ 继续）</div>' : '')
+            + '</div>';
+    }
+    return '<div class="ssp-fb-top">'
+        + '<span class="ssp-fb-btn" data-ssp-fb="close" title="收成放大镜"><i class="fa-solid fa-xmark"></i></span>'
         + '<input class="ssp-fb-inp" type="text" data-ssp-fb="inp" placeholder="搜本聊天…" value="' + esc(orbFindQ) + '">'
         + '<span class="ssp-fb-n">' + (c.n ? (c.i || 1) + '/' + c.n : '0') + '</span>'
         + '<span class="ssp-fb-btn" data-ssp-fb="prev" title="上一条"><i class="fa-solid fa-chevron-up"></i></span>'
         + '<span class="ssp-fb-btn" data-ssp-fb="next" title="下一条"><i class="fa-solid fa-chevron-down"></i></span>'
-        + '<span class="ssp-fb-btn ssp-fb-off" data-ssp-fb="off" title="关掉这个浮条（之后在 常用开关 → 页面搜索浮条 里再打开）"><i class="fa-solid fa-power-off"></i></span>';
+        + '<span class="ssp-fb-btn ssp-fb-off" data-ssp-fb="off" title="关掉这个浮条（之后在 常用开关 → 页面搜索浮条 里再打开）"><i class="fa-solid fa-power-off"></i></span>'
+        + '</div>' + list;
 }
 function findBarPaint() {
     const el = document.getElementById('ssp_findbar');
@@ -11818,6 +11836,7 @@ function findBarMount() {
             const act = t.dataset.sspFb;
             if (act === 'open') { findBarOpen = true; findBarPaint(); const i = document.querySelector('#ssp_findbar [data-ssp-fb="inp"]'); if (i) i.focus(); return; }
             if (act === 'close') { findBarOpen = false; findBarPaint(); return; }
+            if (act === 'go') { const id = Number(t.dataset.id); if (isFinite(id)) orbFindGo(id); findBarPaint(); return; }
             if (act === 'off') {
                 getSettings().findBarOn = false; save(); findBarOpen = false; findBarMount();
                 toast('页面搜索浮条已关掉（常用开关 → 页面搜索浮条 里能再打开）', 'info');
