@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.65';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.66';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -9099,7 +9099,7 @@ function chSyncTabUI() {
     return true;
 }
 function chPanesLoad(force) {
-    const panel = document.getElementById('ssp_orb_panel');
+    const panel = sspPanelEl();
     if (!panel) return false;
     panel.querySelectorAll('[data-orb-cfpane]').forEach(p => {
         const t = p.dataset.orbCfpane;
@@ -9612,7 +9612,7 @@ function chOverlay(which) {
     chOverlayClose();
     const el = document.querySelector(cfg[0]);
     if (!el) { toast('找不到酒馆的「' + cfg[1] + '」面板（先把世界书按钮点开一次）', 'warning'); return false; }
-    const host = document.getElementById('ssp_vault_overlay');
+    const host = sspById('ssp_vault_overlay');
     if (!host) return false;
     chOvl = { key: key, host: host, el: el, home: { parent: el.parentElement, next: el.nextElementSibling } };
     try {
@@ -9712,7 +9712,7 @@ function chNativeEl(idOrSel) {
 
 /** 保存条初始化：骨架已经是新的（按钮写在 orbEditorHTML 里），这里只把状态对齐 */
 function chSavebarInit() {
-    const bar = document.getElementById('ssp_vault_savebar');
+    const bar = sspById('ssp_vault_savebar');
     if (!bar) return false;
     try { chSyncFav(); } catch (e) { }
     try { chCount(); } catch (e) { }
@@ -9814,7 +9814,7 @@ function chBindNativeOnce() {
        选卡页的"分组"输入框、备选开场白列表的正文/分组，都靠这里的事件委托。
        原来只在"进过写卡页"时才绑 → **直接进选卡页改分组完全没反应**（e2e 抓到）。
        所以改成由 bindOrb 在挂载时就绑，不依赖有没有进过写卡页；这里保留重试。 */
-    const g = document.getElementById('ssp_orb_panel');
+    const g = sspPanelEl();
     if (!g) return false;
     chBindOnce = true;
     try {
@@ -12441,6 +12441,22 @@ function sspShadowRoot() {
         return h ? h.shadowRoot : null;
     } catch (e) { return null; }
 }
+/** 面板本体（影子在就取影子里那个外壳；否则取文档里那个） */
+function sspPanelEl() {
+    try {
+        const sr = sspShadowRoot();
+        if (sr) { const el = sr.getElementById('ssp_orb_panel'); if (el) return el; }
+    } catch (e) { }
+    return document.getElementById('ssp_orb_panel');
+}
+/** 按 id 取"面板里"的元素（ssp_ 开头的优先查影子，查不到再回文档） */
+function sspById(id) {
+    try {
+        const sr = sspShadowRoot();
+        if (sr) { const el = sr.getElementById(id); if (el) return el; }
+    } catch (e) { }
+    return document.getElementById(id);
+}
 
 /** 固定色板：**完全不跟酒馆主题/美化/自定义 CSS 走**（用户选的"跟主题彻底无关"） */
 const SSP_SHADOW_VARS = [
@@ -12490,8 +12506,10 @@ const SSP_SHADOW_EXTRA_CSS = `
 }
 :host #ssp_orb_panel .ssp-ch-card:hover { background: #22222c !important; border-color: rgba(255,255,255,.28) !important; }
 :host #ssp_orb_panel .ssp-ch-card.on { border-color: #79a8ff !important; box-shadow: 0 0 0 1px rgba(121,168,255,.5) inset !important; }
-:host #ssp_orb_panel .ssp-ch-av { width: 100% !important; aspect-ratio: 1 / 1 !important; border-radius: 6px !important; overflow: hidden !important; background: #101015 !important; position: static !important; inset: auto !important; }
-:host #ssp_orb_panel .ssp-ch-av img { width: 100% !important; height: 100% !important; object-fit: cover !important; display: block !important; border: 0 !important; border-radius: 0 !important; }
+/* ⚠️ 只给**选卡页的卡片**（.ssp-ch-card 里）用。写卡页的头像也用 .ssp-ch-av 这个类，
+   一开始没限定 → 写卡页头像被拉成一大块、把下面的字段全顶出屏幕（用户反馈"人设卡界面出问题"）。 */
+:host #ssp_orb_panel .ssp-ch-card .ssp-ch-av { width: 100% !important; aspect-ratio: 1 / 1 !important; border-radius: 6px !important; overflow: hidden !important; background: #101015 !important; position: static !important; inset: auto !important; }
+:host #ssp_orb_panel .ssp-ch-card .ssp-ch-av img { width: 100% !important; height: 100% !important; object-fit: cover !important; display: block !important; border: 0 !important; border-radius: 0 !important; }
 :host #ssp_orb_panel .ssp-ch-meta { min-width: 0 !important; }
 :host #ssp_orb_panel .ssp-ch-meta b {
     display: block !important; font-family: inherit !important; font-size: 12.5px !important; font-weight: 700 !important;
@@ -12536,6 +12554,19 @@ const SSP_SHADOW_EXTRA_CSS = `
 :host #ssp_orb_panel .ssp-pbtn:hover { background: rgba(255,255,255,.14) !important; }
 :host #ssp_orb_panel .ssp-pbtn.primary { border-color: #79a8ff !important; background: #1e2a40 !important; }
 `;
+
+/** 图标字体（FontAwesome）的样式表地址 —— 影子根**继承不到**文档里的样式，
+    不把它们 link 进去，`<i class="fa-solid">` 就只剩一个 0 宽的空白（用户反馈"图标都没了"）。 */
+function sspShadowIconLinks() {
+    try {
+        const out = [];
+        document.querySelectorAll('link[rel="stylesheet"]').forEach(l => {
+            const h = l.getAttribute('href') || '';
+            if (/fontawesome|font-awesome|solid\.min\.css|brands\.min\.css|regular\.min\.css/i.test(h)) out.push(h);
+        });
+        return out;
+    } catch (e) { return []; }
+}
 
 /** 把我们的 style.css 文本取一次、缓存起来（地址从酒馆给我们注入的 <link> 上找，不写死路径） */
 var sspShadowCssCache = '';
@@ -12594,7 +12625,10 @@ async function sspShadowRender() {
         const paint = (css) => {
             const root = host.shadowRoot;
             const html = cur.render();
-            root.innerHTML = '<style>' + (css || '') + '</style>'
+            const iconLinks = sspShadowIconLinks()
+                .map(h => '<link rel="stylesheet" href="' + esc(h) + '">').join('');
+            root.innerHTML = iconLinks
+                + '<style>' + (css || '') + '</style>'
                 + '<style>' + SSP_SHADOW_EXTRA_CSS + '</style>'
                 + '<div id="ssp_orb_panel">' + html + '</div>';
         };
@@ -12655,7 +12689,7 @@ function sspInstallTestQueryShim() {
         };
         patch(Element.prototype, false);
         patch(Document.prototype, true);
-        /* 还有一个漏网的：`document.getElementById('ssp_vault_savebar')` 这类**按 id** 直接取的，
+        /* 还有一个漏网的：`sspById('ssp_vault_savebar')` 这类**按 id** 直接取的，
            演进影子根以后 document 上就没有了（老测试里到处都是）。只有 ssp_ 开头的才回退。 */
         try {
             const gid = Document.prototype.getElementById;
