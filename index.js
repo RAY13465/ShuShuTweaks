@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.63';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.64';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6552,12 +6552,17 @@ function orbChatRowsHTML() {
     const head = orbChSearch ? '<div class="ssp-orb-pcount">筛选出 ' + hit.length + ' / ' + orbChatList.length + ' 个存档</div>' : '';
     const rows = hit.map(x => {
         const on = (x.name === cur);
+        const mkey = personaChatKeyOf(ch.avatar, x.file);
+        const mpid = personaChatBindOf(mkey);
         return '<div class="ssp-orb-prow' + (on ? ' on' : '') + '">'
             + '<div class="ssp-orb-pmain">'
             + '<div class="ssp-orb-pname">' + esc(x.name) + (on ? '<span class="ssp-orb-ptag">当前</span>' : '') + '</div>'
             + (x.time ? '<div class="ssp-orb-pdesc">' + esc(String(x.time).slice(0, 70)) + '</div>' : '')
+            + (mpid ? '<div class="ssp-orb-pbind has"><i class="fa-solid fa-masks-theater"></i>' + esc(dlcPersonaName(mpid)) + '</div>' : '')
             + '</div>'
             + '<div class="ssp-orb-pacts">'
+            + '<span class="ssp-pbtn ssp-chat-mask' + (mpid ? ' bound' : '') + '" data-orb-chatmask="' + esc(mkey) + '"'
+            + ' title="给这份存档指定面具（切过去自动戴；存档优先于角色卡）">' + (mpid ? '🎭' : '🎭 绑面具') + '</span>'
             + '<span class="ssp-pbtn' + (on ? ' primary' : '') + '" data-orb-chatload="' + esc(x.file) + '">' + (on ? '当前' : '读档') + '</span>'
             + '<span class="ssp-pbtn" data-orb-chatren="' + esc(x.file) + '" data-orb-chatname="' + esc(x.name) + '"><i class="fa-solid fa-pen"></i></span>'
             + '<span class="ssp-pbtn danger" data-orb-chatdel="' + esc(x.file) + '" data-orb-chatname="' + esc(x.name) + '"><i class="fa-solid fa-trash"></i></span>'
@@ -6567,6 +6572,8 @@ function orbChatRowsHTML() {
 }
 
 function orbChatHTML() {
+    /* v1.31.64：正在给某份存档挑面具 → 整页换成挑面具的界面 */
+    if (personaChatMaskKey) return orbChatMaskPickerHTML(personaChatMaskKey);
     const ch = orbChatChar();
     return '<div class="ssp-orb-pfilter">'
         + '<i class="fa-solid fa-magnifying-glass"></i>'
@@ -7929,6 +7936,8 @@ function bindDlcMaskWatch() {
         es.on(et.CHAT_CHANGED || 'chat_changed', () => {
             dlcTempOff.clear(); dlcWornCache = '';
             if (orbOpenNow && orbTab === 'dlc') renderOrbPanel();
+            /* v1.31.64：这份存档绑了面具就自动戴上（等酒馆自己先把它的 loadPersonaForCurrentChat 跑完） */
+            globalThis.setTimeout?.(() => { try { personaChatApply(); } catch (e) { } }, 900);
         });
         bindDlcMaskWatch.done = true;
         return true;
@@ -11959,12 +11968,14 @@ function orbPersonaRowsHTML() {
         const bound = orbBindNames(p.id);
         const desc = orbPersonaDesc(p.id);
         const dlcN = dlcPersonaEntryCount(p.id);          // v1.31.59：只读显示"这个面具挂了哪几条 DLC"
+        const chatN = personaChatCount(p.id);             // v1.31.64：只读显示"这个面具绑了几份存档"
         return '<div class="ssp-orb-prow' + (on ? ' on' : '') + '">'
             + '<img class="ssp-orb-pav" src="' + orbPersonaThumb(p.id) + '" data-orb-persona="' + esc(p.id) + '" title="点头像换面具" alt="">'
             + '<div class="ssp-orb-pmain">'
             + '<div class="ssp-orb-pname">' + esc(p.name) + (on ? '<span class="ssp-orb-ptag">当前</span>' : '') + '</div>'
             + '<div class="ssp-orb-pdesc">' + (desc ? esc(desc.slice(0, 80)) + (desc.length > 80 ? '…' : '') : '<i>没写描述</i>') + '</div>'
             + '<div class="ssp-orb-pbind' + (bound ? ' has' : '') + '"><i class="fa-solid fa-link"></i>' + (bound ? esc(bound) : '未绑定角色') + '</div>'
+            + (chatN ? '<div class="ssp-orb-pbind has"><i class="fa-solid fa-box-archive"></i>存档：绑 ' + chatN + ' 份</div>' : '')
             + (dlcN ? '<div class="ssp-orb-pbind has"><i class="fa-solid fa-masks-theater"></i>DLC 条目：挂 ' + dlcN + ' 条</div>' : '')
             + '</div>'
             + '<div class="ssp-orb-pacts">'
@@ -12149,8 +12160,155 @@ function orbBindClear(id) {
     } catch (e) { return false; }
 }
 
+/* ---------------------------- 面具 ↔ 存档 绑定（v1.31.64）---------------------------
+   用户要的：「面具绑定存档」—— 现在能绑角色卡，但一份存档换不出不同的面具。
+
+   数据分两层（都不改别人的聊天文件）：
+     ① 我这边：`s.personaChatBinds['角色头像::存档文件名'] = 面具id`（意图表，跟酒馆备份走）
+     ② 酒馆原生：那份存档自己 metadata 里的 `persona`（效果；切过去时由**酒馆自己**保存）
+   优先级：**存档 > 角色卡 > 默认**（原生就是这个顺序，我只补"存档"这一层）。
+   ⚠️ 存档里如果本来就锁着别的面具（你自己在酒馆点的），**以原生为准、不覆盖** —— 只提示一句。
+   ------------------------------------------------------------------------------------ */
+var personaBindTab = 'char';      // 面具页「绑定」弹层里的分组：char（角色卡）| chat（存档）
+var personaChatMaskKey = '';      // 存档页 🎭：正在给哪份存档挑面具
+var personaChatApplied = '';      // 刚自动应用过的存档（只在弹提示时去重用）
+
+function personaChatBinds() {
+    const s = getSettings();
+    if (!s.personaChatBinds || typeof s.personaChatBinds !== 'object' || Array.isArray(s.personaChatBinds)) s.personaChatBinds = {};
+    return s.personaChatBinds;
+}
+/** 存档键：角色头像 + 存档文件名（去掉 .jsonl） */
+function personaChatKeyOf(avatar, file) {
+    const a = String(avatar || '');
+    const f = String(file || '').replace(/\.jsonl$/i, '');
+    return a && f ? (a + '::' + f) : '';
+}
+function personaChatKeyCur() {
+    const ch = orbChatChar();
+    if (!ch) return '';
+    return personaChatKeyOf(ch.avatar, orbCurChatId());
+}
+function personaChatBindOf(key) {
+    const v = personaChatBinds()[String(key || '')];
+    return typeof v === 'string' ? v : '';
+}
+/** 绑 / 解绑（返回 true = 现在绑上了） */
+function personaChatBindSet(key, pid) {
+    const b = personaChatBinds();
+    const k = String(key || '');
+    if (!k) return false;
+    if (pid) b[k] = pid; else delete b[k];
+    save();
+    return Boolean(pid);
+}
+/** 这个面具挂着几份存档 */
+function personaChatCount(pid) {
+    const b = personaChatBinds();
+    return Object.keys(b).filter(k => b[k] === pid).length;
+}
+/** 这份存档自己（酒馆原生）锁着谁 */
+function personaChatNative() {
+    try {
+        const md = (getContext() || {}).chatMetadata || {};
+        return typeof md.persona === 'string' ? md.persona : '';
+    } catch (e) { return ''; }
+}
+/** 切开到某份存档时自动应用：把表里的面具戴上 + 写进原生 metadata（由酒馆自己保存） */
+function personaChatApply(silent) {
+    try {
+        const key = personaChatKeyCur();
+        if (!key) return false;
+        const want = personaChatBindOf(key);
+        if (!want) return false;
+        const ctx = getContext() || {};
+        const md = ctx.chatMetadata || {};
+        const native = typeof md.persona === 'string' ? md.persona : '';
+        if (native && native !== want) {
+            if (!silent) toast('这份存档自己锁着「' + dlcPersonaName(native) + '」，没动它（我这边配的是「' + dlcPersonaName(want) + '」）', 'info');
+            return false;
+        }
+        /* ⚠️ "现在真戴着谁"必须**在写 metadata 之前**取：dlcWornPersona() 优先读 chat_metadata.persona，
+           先写再取就会读到刚写进去的值，于是以为"已经戴上了"，**根本不会去换面具**（实测踩到）。 */
+        const worn = dlcWornPersona();
+        if (!native) {
+            try { md.persona = want; ctx.saveMetadataDebounced?.(); } catch (e) { }
+        }
+        if (worn !== want) { try { orbPersonaSwitch(want); } catch (e) { } }
+        if (personaChatApplied !== key) {
+            personaChatApplied = key;
+            toast('这份存档锁着：' + dlcPersonaName(want), 'success');
+        }
+        return true;
+    } catch (e) { return false; }
+}
+
+/** 存档页里「给这份存档挑面具」那一页（整页替换存档列表，跟 DLC 那套一样） */
+function orbChatMaskPickerHTML(key) {
+    const ch = orbChatChar();
+    const k = String(key || '');
+    const bound = personaChatBindOf(k);
+    const native = personaChatNative();
+    const curKey = personaChatKeyCur();
+    const file = k.split('::')[1] || '';
+    const all = orbPersonas();
+    const rows = all.length ? all.map(p => {
+        const on = bound === p.id;
+        return '<div class="ssp-orb-charrow' + (on ? ' on' : '') + '" data-orb-chatmaskid="' + esc(p.id) + '">'
+            + '<img src="' + orbPersonaThumb(p.id) + '" alt="">'
+            + '<span class="ssp-orb-charn">' + esc(p.name) + '</span>'
+            + '<span class="ssp-orb-charmark">' + (on ? '<i class="fa-solid fa-check"></i> 已绑' : '<i class="fa-regular fa-circle"></i>') + '</span>'
+            + '</div>';
+    }).join('') : '<div class="ssp-orb-empty">读不到面具列表 —— 先在酒馆里打开一次「用户设定」。</div>';
+    return '<div class="ssp-orb-bindhead">'
+        + '<span class="ssp-pbtn" data-orb-chatmaskback="1"><i class="fa-solid fa-arrow-left"></i>回存档</span>'
+        + '<b>🎭 ' + esc(file || k) + '</b>'
+        + (bound ? '<span class="ssp-pbtn danger" data-orb-chatmaskclear="1">清空</span>' : '')
+        + '</div>'
+        + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">'
+        + '给这份存档点一个面具：<b>切到它时自动戴上</b>（存档优先于角色卡）。<br>'
+        + (k === curKey
+            ? '<b>这就是当前打开的存档</b> —— 点完会立刻写进它的 metadata。'
+            : '它不是当前存档：先记着，等你切过去的时侯再生效。')
+        + (native ? '<br>它现在（酒馆原生）锁着：<b>' + esc(dlcPersonaName(native)) + '</b>' : '')
+        + '</div>'
+        + '<div class="ssp-orb-charrows">' + rows + '</div>';
+}
+
 function orbBindPickerHTML(id) {
     const p = orbPersonas().find(x => x.id === id) || { name: id };
+    const tabBar = '<div class="ssp-orb-pcount">'
+        + '<span class="ssp-pbtn' + (personaBindTab === 'char' ? ' primary' : '') + '" data-orb-bindtab="char">角色卡</span>'
+        + '<span class="ssp-pbtn' + (personaBindTab === 'chat' ? ' primary' : '') + '" data-orb-bindtab="chat">存档</span>'
+        + '</div>';
+    const head = '<div class="ssp-orb-bindhead">'
+        + '<span class="ssp-pbtn" data-orb-bindback="1"><i class="fa-solid fa-arrow-left"></i>返回</span>'
+        + '<b>' + esc(p.name) + ' · 绑定' + (personaBindTab === 'chat' ? '存档' : '角色卡') + '</b>'
+        + (personaBindTab === 'chat' ? '' : '<span class="ssp-pbtn danger" data-orb-bindclear="' + esc(id) + '">清空</span>')
+        + '</div>';
+    if (personaBindTab === 'chat') {
+        const ch = orbChatChar();
+        const body = !ch
+            ? '<div class="ssp-orb-empty">先在酒馆里打开一个角色聊天，这里才会列出它的存档。</div>'
+            : (orbChatLoading ? '<div class="ssp-orb-empty">正在读存档列表…</div>'
+                : (orbChatErr ? '<div class="ssp-orb-empty">' + esc(orbChatErr) + '</div>'
+                    : (orbChatList.length ? orbChatList.map(x => {
+                        const key = personaChatKeyOf(ch.avatar, x.file);
+                        const mine = personaChatBindOf(key) === id;
+                        const other = personaChatBindOf(key);
+                        const cur = (x.name === orbCurChatId());
+                        return '<div class="ssp-orb-charrow' + (mine ? ' on' : '') + '" data-orb-bindchat="' + esc(key) + '">'
+                            + '<span class="ssp-orb-charn">' + esc(x.name) + (cur ? ' <i class="ssp-orb-ptag">当前</i>' : '')
+                            + (other && !mine ? '<i class="ssp-en-masknote">（绑给了 ' + esc(dlcPersonaName(other)) + '）</i>' : '')
+                            + '</span>'
+                            + '<span class="ssp-orb-charmark">' + (mine ? '<i class="fa-solid fa-check"></i> 已绑' : '<i class="fa-regular fa-circle"></i>') + '</span>'
+                            + '</div>';
+                    }).join('') : '<div class="ssp-orb-empty">这个角色还没有存档（酒馆里聊过就会有）。</div>'))); 
+        return head + tabBar
+            + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">点一份存档＝让它用这个面具（<b>存档优先于角色卡</b>）；'
+            + '再点一下＝解绑。切到那份存档时会自动戴上。</div>'
+            + body;
+    }
     const conns = orbBindConns(id).map(c => c && c.id);
     const chars = orbCharList();
     const rows = chars.length ? chars.map(c => {
@@ -12161,11 +12319,7 @@ function orbBindPickerHTML(id) {
             + '<span class="ssp-orb-charmark">' + (on ? '<i class="fa-solid fa-check"></i> 已绑定' : '<i class="fa-regular fa-circle"></i>') + '</span>'
             + '</div>';
     }).join('') : '<div class="ssp-orb-empty">没读到角色列表。</div>';
-    return '<div class="ssp-orb-bindhead">'
-        + '<span class="ssp-pbtn" data-orb-bindback="1"><i class="fa-solid fa-arrow-left"></i>返回</span>'
-        + '<b>' + esc(p.name) + ' · 绑定角色</b>'
-        + '<span class="ssp-pbtn danger" data-orb-bindclear="' + esc(id) + '">清空</span>'
-        + '</div>'
+    return head + tabBar
         + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">点角色＝绑定/取消；跟已绑定的角色聊天时，酒馆会自动戴上这个面具。</div>'
         + '<div class="ssp-orb-charrows">' + rows + '</div>';
 }
@@ -13909,6 +14063,7 @@ function bindOrb() {
             orbTab = nextTab; orbEditing = null;
             orbWbBinding = null;
             orbTabMenu = false; orbTabMenuEdit = false;    // 切页签就收起「…」
+            personaChatMaskKey = '';                       // 离开存档页就把"挑面具"那一页收掉
             orbWbCloseEntries(true);
             renderOrbPanel();
             /* 回到「写卡」页签：把块再搬进来 */
@@ -13986,6 +14141,59 @@ function bindOrb() {
         if (t.closest('[data-orb-btreload]')) { orbBeautyApply(); toast('已重新注入常用开关样式', 'info'); return; }
         /* 存档页：刷新 / 读档 / 删除 / 清除搜索 */
         if (t.closest('[data-orb-chrefresh]')) { orbChatsFetch(); return; }        if (t.closest('[data-orb-chclear]')) { orbChSearch = ''; renderOrbPanel(); return; }
+        /* v1.31.64：存档页 🎭 —— 给这份存档挑面具（整页替换） */
+        const chatMask = t.closest('[data-orb-chatmask]');
+        if (chatMask) {
+            personaChatMaskKey = chatMask.dataset.orbChatmask || '';
+            if (!orbChatList.length) { orbChatsFetch().then(() => { if (orbOpenNow) renderOrbPanel(); }); }
+            renderOrbPanel();
+            return;
+        }
+        if (t.closest('[data-orb-chatmaskback]')) { personaChatMaskKey = ''; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-chatmaskclear]')) {
+            personaChatBindSet(personaChatMaskKey, '');
+            toast('已清空这份存档的面具绑定', 'success');
+            renderOrbPanel();
+            return;
+        }
+        const chatMaskId = t.closest('[data-orb-chatmaskid]');
+        if (chatMaskId) {
+            const pid = chatMaskId.dataset.orbChatmaskid || '';
+            const key = personaChatMaskKey;
+            if (key && pid) {
+                const was = personaChatBindOf(key);
+                personaChatBindSet(key, was === pid ? '' : pid);
+                toast(was === pid ? ('已解绑：' + dlcPersonaName(pid))
+                    : ('这份存档锁着：' + dlcPersonaName(pid) + '（切过去自动戴）'), 'success');
+                /* 就是当前这份存档 → 立刻应用一次，别等下次切换 */
+                if (key === personaChatKeyCur()) { personaChatApply(true); }
+                renderOrbPanel();
+            }
+            return;
+        }
+        /* v1.31.64：面具页「绑定」弹层里的分组切换（角色卡 / 存档）+ 点存档绑 */
+        const bindTab = t.closest('[data-orb-bindtab]');
+        if (bindTab) {
+            personaBindTab = bindTab.dataset.orbBindtab === 'chat' ? 'chat' : 'char';
+            if (personaBindTab === 'chat' && !orbChatList.length && !orbChatLoading) {
+                orbChatsFetch().then(() => { if (orbOpenNow) renderOrbPanel(); });
+            }
+            renderOrbPanel();
+            return;
+        }
+        const bindChat = t.closest('[data-orb-bindchat]');
+        if (bindChat) {
+            const key = bindChat.dataset.orbBindchat || '';
+            const pid = orbBinding || '';
+            if (key && pid) {
+                const mine = personaChatBindOf(key) === pid;
+                personaChatBindSet(key, mine ? '' : pid);
+                toast(mine ? '已解绑这份存档' : ('已绑：这份存档用「' + dlcPersonaName(pid) + '」'), 'info');
+                if (!mine && key === personaChatKeyCur()) { personaChatApply(true); }
+                renderOrbPanel();
+            }
+            return;
+        }
         const cren = t.closest('[data-orb-chatren]');
         if (cren) {
             const file = cren.dataset.orbChatren, nm = cren.dataset.orbChatname || file;
@@ -14060,7 +14268,12 @@ function bindOrb() {
         }
         if (t.closest('[data-orb-bindback]')) { orbBinding = null; renderOrbPanel(); return; }
         const bindBtn = t.closest('[data-orb-bind]');
-        if (bindBtn) { orbBinding = bindBtn.dataset.orbBind; renderOrbPanel(); return; }
+        if (bindBtn) {
+            orbBinding = bindBtn.dataset.orbBind;
+            personaBindTab = 'char';                    // 每次打开都从「角色卡」开始（存档那栏要现拉列表）
+            renderOrbPanel();
+            return;
+        }
         const bindChar = t.closest('[data-orb-bindchar]');
         if (bindChar && orbBinding) { orbBindToggle(orbBinding, bindChar.dataset.orbBindchar); renderOrbPanel(); return; }
         const bindClear = t.closest('[data-orb-bindclear]');
@@ -14155,6 +14368,8 @@ function init() {
     /* v1.31.59：DLC 条目 ↔ 面具的过滤监听**无条件**挂一次（球关掉也要生效 —— 它管的是生成，
        跟界面无关）。拿不到上下文时它自己会在后面重试。 */
     bindDlcMaskWatch();
+    /* v1.31.64：已经打开的这份存档如果绑了面具，启动后也补一次（不然要等你切一次存档才生效） */
+    globalThis.setTimeout?.(() => { try { personaChatApply(true); } catch (e) { } }, 2200);
     qbMount(); bindOrb && qbBind();      // 快捷按钮托盘：建 + 绑事件（幂等）
     /* 面板一挂上就绑事件委托（含选卡页的分组框、开场白列表），别等到进写卡页才绑 */
     try {
@@ -14283,6 +14498,12 @@ if (globalThis.__SSP_TEST__) {
         get dlcWornCache() { return dlcWornCache; }, set dlcWornCache(v) { dlcWornCache = v; },
         /* v1.31.63：页签收纳 */
         orbTabsHTML, orbTabMenuHTML, orbTabsFit, orbTabHidden, orbTabIsHidden, orbTabHideSet, orbTabOverflowIds,
+        /* v1.31.64：面具 ↔ 存档 */
+        personaChatBinds, personaChatKeyOf, personaChatKeyCur, personaChatBindOf, personaChatBindSet,
+        personaChatCount, personaChatNative, personaChatApply, orbChatMaskPickerHTML,
+        get personaBindTab() { return personaBindTab; }, set personaBindTab(v) { personaBindTab = v; },
+        get personaChatMaskKey() { return personaChatMaskKey; }, set personaChatMaskKey(v) { personaChatMaskKey = v; },
+        get orbChatList() { return orbChatList; }, set orbChatList(v) { orbChatList = v; },
         get orbTabMenu() { return orbTabMenu; }, set orbTabMenu(v) { orbTabMenu = v; },
         get orbTabMenuEdit() { return orbTabMenuEdit; }, set orbTabMenuEdit(v) { orbTabMenuEdit = v; },
         get orbTabSqueeze() { return orbTabSqueeze; },
