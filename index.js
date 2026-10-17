@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.77';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.78';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6434,7 +6434,7 @@ function orbBeautyHTML() {
         + '<small>' + (anyOn ? ('已开 ' + anyOn + ' 个') : '一键美化小毛病（点标题展开）') + '</small>'
         + '<span class="ssp-bt-arrow"><i class="fa-solid fa-sliders"></i></span>'
         + '</div>';
-    if (!orbBeautyOpen) return '<div class="ssp-bt collapsed">' + head + '</div>' + sspSkinHTML();
+    if (!orbBeautyOpen) return '<div class="ssp-bt collapsed">' + head + '</div>' + sspSkinHTML() + orbContrastHTML();
     return '<div class="ssp-bt open">' + head
         + '<div class="ssp-bt-note">CSS 类的开关由扩展注入样式实现（**不写进你的自定义 CSS**）；'
         + '带「托盘」字样的那几个是直接开关功能本身。关掉即完全撤销。</div>'
@@ -6442,7 +6442,7 @@ function orbBeautyHTML() {
         + '<div class="ssp-bt-foot">'
         + '<span class="ssp-pbtn" data-orb-btreset="1">' + (anyOn ? '全部关掉（恢复默认）' : '已全部关闭') + '</span>'
         + '<span class="ssp-pbtn" data-orb-btreload="1" title="重新注入一次（排错用）">重新应用</span>'
-        + '</div></div>' + sspSkinHTML();
+        + '</div></div>' + sspSkinHTML() + orbContrastHTML();
 }
 
 /* ============================ 面板配色自锁（v1.31.77） ============================
@@ -6546,18 +6546,22 @@ function sspContrast(a, b) {
     const la = sspLum(a), lb = sspLum(b);
     return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
-/** 往上找"实际铺在下面的颜色"：最近的不透明背景，边找边合成 */
-function sspEffBg(el) {
-    let acc = null, node = el, guard = 0;
+/** 往上找"实际铺在下面的颜色"：最近的不透明背景，边找边合成
+    ⚠️ 顺手记一下"这段路上有没有背景图"：只看到"铺出底色"那一层为止，
+       不能一路往上翻 8 层 —— 美化的 body/#chat 通常都挂背景图，那样每行都带 ※，等于没信息。 */
+function sspEffBgEx(el) {
+    let acc = null, node = el, guard = 0, 有图 = false;
     while (node && node.nodeType === 1 && guard++ < 40) {
         const cs = getComputedStyle(node);
+        if (cs.backgroundImage && cs.backgroundImage !== 'none') 有图 = true;
         const c = sspParseColor(cs.backgroundColor);
         if (c && c.a > 0) { acc = acc ? sspMixColor(acc, c) : c; if (acc.a >= 0.995) break; }
         node = node.parentElement;
     }
     const base = { r: 255, g: 255, b: 255, a: 1 };   // 最后还有透明就压在白底上算
-    return acc ? sspMixColor(acc, base) : { r: 12, g: 12, b: 14, a: 1 };
+    return { bg: acc ? sspMixColor(acc, base) : { r: 12, g: 12, b: 14, a: 1 }, 有图 };
 }
+function sspEffBg(el) { return sspEffBgEx(el).bg; }
 /** 量面板上几处自己的文字：如果按"美化原色"来，最差的那处对比度是多少
     ⚠️ 只量**主文字**（标题 / 页签 / 按钮）。别量 .ssp-orb-title small 那种次级文字：
        它本来就是淡的（opacity .5 或 --ch-ink-3 混色），跟着深色美化时天然只有 1.0x，
@@ -6700,6 +6704,355 @@ function sspSkinHTML() {
         + '<div class="ssp-skin-now' + (worst && worst.对比度 < 3 ? ' bad' : '') + '">' + esc(now) + '　·　' + esc(d.why)
         + (worst ? '（最差一处：' + esc(worst.名字) + '）' : '') + '</div>'
         + '</div>';
+}
+
+/* ============================ 对比度体检（v1.31.78） ============================
+   上面那版（v1.31.77）只是"护住我们自己的面板"。可美化真正闹出来的事是**酒馆自己的字**也看不见：
+   正文、角色名、输入框、侧栏标题 —— 这些不归我们管，只能"体检 + 找出元凶 + 帮你改回去"。
+
+   三件事：
+     ① 体检：在几个关键位置真量 `color` 和"往上第一个不透明背景"，算 WCAG 对比度（< 3 标红）。
+        不靠变量名猜 —— 变量名骗人，算出来的颜色不骗人。
+     ② 找元凶：把当前美化的 CSS 解析成规则表，挑出"选择器能命中这个元素、且 color /
+        background-color 里用了 var(--x)"的规则 → 候选变量；再用哨兵色实测确认一次。
+        静态匹配，不闪屏、不改页面。
+     ③ 一键修：保色相、只推亮度，算到 ≥ 4.5:1，写进**覆盖层**（不动主题文件），当场预览；
+        满意再点「写回主题」（人手点，绝不自动写）。
+   ========================================================================== */
+const SSP_CT_POINTS = [
+    ['聊天正文', '#chat .mes_text'],
+    ['角色名字', '#chat .ch_name'],
+    ['输入框文字', '#send_textarea'],
+    ['楼层/时间', '#chat .mes_block .timestamp'],
+    ['右侧栏标题', '#right-nav-panel .inline-drawer-header'],
+    ['顶栏图标', '#top-settings-holder .drawer-icon'],
+    ['我们面板标题', '#ssp_orb_panel .ssp-orb-title b'],
+    ['我们面板按钮', '#ssp_orb_panel .ssp-pbtn'],
+];
+var orbCtRows = null;        // 最近一次体检结果
+var orbCtEls = [];           // 对应的真实元素（不序列化，只在本页用）
+var orbCtOpen = false;       // 展开栏
+var sspCssRuleCache = { css: null, rules: [] };
+
+/** 把 CSS 里的一段声明拆开：**不能**直接 split(';') —— 美化的 url(data:image/png;base64,…) 里就有分号 */
+function sspSplitDecls(body) {
+    const out = [];
+    let buf = '', depth = 0, quote = '';
+    for (let i = 0; i < body.length; i++) {
+        const ch = body[i];
+        if (quote) { buf += ch; if (ch === quote) quote = ''; continue; }
+        if (ch === '"' || ch === "'") { quote = ch; buf += ch; continue; }
+        if (ch === '(') depth++;
+        else if (ch === ')') depth = Math.max(0, depth - 1);
+        if (ch === ';' && depth === 0) { out.push(buf); buf = ''; continue; }
+        buf += ch;
+    }
+    out.push(buf);
+    return out;
+}
+/** 把一个 CSS 文本解析成 [{sel, decls:[{prop,val}]}]（@media/@supports 钻进去，@keyframes 跳过）
+    ⚠️ 必须"永不抛错"：美化的 CSS 可能有 @import、嵌套注释、坏括号 —— 解析失败就当没有规则，
+       宁可少报，也不能把面板搞崩。 */
+function sspCssRules(css) {
+    const text = String(css || '');
+    if (sspCssRuleCache.css === text) return sspCssRuleCache.rules;
+    const rules = [];
+    try {
+        const src = text.replace(/\/\*[\s\S]*?\*\//g, '');
+        const findClose = (from) => {
+            let depth = 1, j = from;
+            while (j < src.length && depth > 0) {
+                if (src[j] === '{') depth++;
+                else if (src[j] === '}') depth--;
+                j++;
+            }
+            return j - 1;
+        };
+        const walk = (from, to) => {
+            let k = from, guard = 0;
+            while (k < to && guard++ < 20000) {
+                const lb = src.indexOf('{', k);
+                if (lb < 0 || lb >= to) break;
+                const sel = src.slice(k, lb).trim();
+                const rb = findClose(lb + 1);
+                if (rb < 0 || rb > to) break;
+                const body = src.slice(lb + 1, rb);
+                if (/^@(media|supports|layer|document|container)/i.test(sel)) walk(lb + 1, rb);
+                else if (/^@/.test(sel)) { /* @keyframes / @font-face 之类：跳过 */ }
+                else if (sel) {
+                    const decls = [];
+                    sspSplitDecls(body).forEach(d => {
+                        const c = d.indexOf(':');
+                        if (c < 0) return;
+                        const prop = d.slice(0, c).trim().toLowerCase();
+                        const val = d.slice(c + 1).trim();
+                        if (prop && val) decls.push({ prop, val });
+                    });
+                    if (decls.length) rules.push({ sel, decls });
+                }
+                k = rb + 1;
+            }
+        };
+        walk(0, src.length);
+    } catch (e) { /* 解析失败：返回空规则表 */ }
+    sspCssRuleCache = { css: text, rules };
+    return rules;
+}
+/** 极简特异性打分（够用来排序候选） */
+function sspSpec(sel) {
+    const ids = (sel.match(/#[\w-]+/g) || []).length;
+    const cls = (sel.match(/\.[\w-]+|\[[^\]]+\]|:(?!:)[\w-]+/g) || []).length;
+    const tag = (sel.replace(/[#.\][:][^\s>+~]*/g, '').match(/[a-z]+/gi) || []).length;
+    return ids * 10000 + cls * 100 + tag;
+}
+/** 哪些美化规则在给这个元素的 color / background-color 供值？返回 [{k, prop, sel}] */
+function sspBlameVar(el) {
+    if (!el || !el.matches) return [];
+    const rules = sspCssRules(orbThemeCss());
+    const hits = [];
+    for (const rule of rules) {
+        const props = rule.decls.filter(d => d.prop === 'color' || d.prop === 'background-color' || d.prop === 'background');
+        if (!props.length) continue;
+        const vars = [];
+        props.forEach(d => {
+            const re = /var\(\s*--([\w-]+)/g;
+            let m;
+            while ((m = re.exec(d.val))) vars.push({ k: '--' + m[1], prop: d.prop });
+        });
+        if (!vars.length) continue;
+        const parts = rule.sel.split(',').map(s => s.trim()).filter(Boolean);
+        let matched = '';
+        for (const part of parts) {
+            if (/::|:before|:after/i.test(part)) continue;      // 伪元素不参与
+            let ok = false;
+            try { ok = el.matches(part); } catch (e) { ok = false; }
+            if (!ok) {
+                const bare = part.replace(/:(hover|focus|focus-visible|active|visited|checked|disabled)\b/gi, '');
+                try { ok = bare && bare !== part && el.matches(bare); } catch (e) { ok = false; }
+            }
+            if (ok) { matched = part; break; }
+        }
+        if (!matched) continue;
+        vars.forEach(v => hits.push({ k: v.k, prop: v.prop, sel: matched, spec: sspSpec(matched) }));
+    }
+    /* 去重（同名变量只留最具体的那条），按特异性降序 */
+    const seen = new Set();
+    const out = [];
+    hits.sort((a, b) => b.spec - a.spec).forEach(h => {
+        const key = h.k + '|' + h.prop;
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push(h);
+    });
+    return out;
+}
+/** 颜色 → HSL（0~360, 0~1, 0~1） */
+function sspToHsl(c) {
+    const r = c.r / 255, g = c.g / 255, b = c.b / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    let h = 0;
+    if (d > 0.0001) {
+        if (max === r) h = ((g - b) / d) % 6;
+        else if (max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h *= 60;
+        if (h < 0) h += 360;
+    }
+    const l = (max + min) / 2;
+    const s = d < 0.0001 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    return { h, s, l };
+}
+function sspFromHsl(h, s, l) {
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    let rgb;
+    if (h < 60) rgb = [c, x, 0];
+    else if (h < 120) rgb = [x, c, 0];
+    else if (h < 180) rgb = [0, c, x];
+    else if (h < 240) rgb = [0, x, c];
+    else if (h < 300) rgb = [x, 0, c];
+    else rgb = [c, 0, x];
+    return { r: Math.round((rgb[0] + m) * 255), g: Math.round((rgb[1] + m) * 255), b: Math.round((rgb[2] + m) * 255), a: 1 };
+}
+function sspRgbToHex(c) {
+    const two = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+    return '#' + two(c.r) + two(c.g) + two(c.b);
+}
+/** 保色相、只推亮度，算到对比度 ≥ target（够不到就返回能到的最好那个） */
+function sspFixColorToContrast(fg, bg, target) {
+    const hsl = sspToHsl(fg);
+    const need = Number(target) || 4.5;
+    const bgLum = sspLum(bg);
+    const wantLight = bgLum < 0.4;          // 深底 → 把字调亮；浅底 → 调暗
+    const base = sspContrast(fg, bg) || 1;
+    if (base >= need) return { color: sspRgbToHex(fg), cr: base, 改了吗: false };
+    const c0 = { color: sspRgbToHex(fg), cr: base, 改了吗: true };
+    const tryL = (l) => sspFromHsl(hsl.h, hsl.s, Math.max(0, Math.min(1, l)));
+    let best = c0;
+    /* 先粗扫，再在最优附近细扫 —— 比二分稳（对比度对亮度不是单调的） */
+    for (let l = 0; l <= 1.0001; l += 0.02) {
+        const cand = tryL(l);
+        const cr = sspContrast(cand, bg) || 1;
+        if (cr > best.cr) best = { color: sspRgbToHex(cand), cr, 改了吗: true };
+        if (cr >= need && (wantLight ? l > hsl.l : l < hsl.l)) {
+            /* 已经够亮了/够暗了，取"离原色最近且达标"的方向 */
+            let fine = best;
+            for (let d = -0.02; d <= 0.0201; d += 0.002) {
+                const cc = tryL(l + d);
+                const c2 = sspContrast(cc, bg) || 1;
+                if (c2 >= need && c2 < fine.cr + 0.001) fine = { color: sspRgbToHex(cc), cr: c2, 改了吗: true };
+            }
+            return fine.cr >= need ? fine : best;
+        }
+    }
+    return best;
+}
+/** 跑一遍体检：返回 [{名字, 选择器, 前景, 背景, 对比度, 有图}]，元素塞进 orbCtEls */
+function sspContrastRun() {
+    const rows = [];
+    orbCtEls = [];
+    SSP_CT_POINTS.forEach(([name, sel]) => {
+        let el = null;
+        try { el = document.querySelector(sel); } catch (e) { el = null; }
+        if (!el) return;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return;
+        if (Number(cs.opacity) < 0.35) return;          // 本来就淡的（时间戳之类）不算病
+        const fgRaw = sspParseColor(cs.color);
+        if (!fgRaw) return;
+        const bgInfo = sspEffBgEx(el);
+        const bg = bgInfo.bg;
+        const fg = fgRaw.a < 1 ? sspMixColor(fgRaw, bg) : fgRaw;
+        const cr = sspContrast(fg, bg);
+        if (cr === null) return;
+        orbCtEls.push(el);
+        rows.push({ 名字: name, 选择器: sel, 前景: sspRgbToHex(fg), 背景: sspRgbToHex(bg), 对比度: +cr.toFixed(2), 有图: bgInfo.有图 });
+    });
+    orbCtRows = rows;
+    return rows;
+}
+function sspCtBad(row) { return row && row.对比度 < 3; }
+/** 用哨兵色实测确认候选：把这个变量临时设成 #123456，看元素颜色变不变（同一帧内还原，不闪） */
+function sspBlameConfirm(el, hits) {
+    if (!el || !hits || !hits.length) return [];
+    const sent = '#123456';
+    let st = document.getElementById('ssp_ct_sentinel');
+    if (!st) {
+        st = document.createElement('style');
+        st.id = 'ssp_ct_sentinel';
+        st.setAttribute('type', 'text/css');
+        document.head.appendChild(st);
+    }
+    const out = [];
+    for (const h of hits.slice(0, 4)) {
+        const prop = h.prop === 'color' ? 'color' : 'backgroundColor';
+        let before = '', now = '';
+        try { before = getComputedStyle(el)[prop]; } catch (e) { }
+        try {
+            st.textContent = ':root, html, body { ' + h.k + ': ' + sent + ' !important; }';
+            now = getComputedStyle(el)[prop];
+        } catch (e) { now = ''; }
+        st.textContent = '';
+        if (now && now !== before) out.push(Object.assign({}, h, { 确认: /18\s*,\s*52\s*,\s*86/.test(now) }));
+    }
+    const yes = out.filter(x => x.确认);
+    return yes.length ? yes : out;
+}
+/** 给看不清的那几处找元凶（只找"看不清"的，省得白跑） */
+function sspContrastBlame() {
+    const rows = orbCtRows || [];
+    let found = 0;
+    rows.forEach((row, i) => {
+        if (!sspCtBad(row)) { row.元凶 = row.元凶 || []; return; }
+        const el = orbCtEls[i];
+        const hits = sspBlameVar(el).filter(h => h.prop === 'color');
+        const ok = sspBlameConfirm(el, hits);
+        row.元凶 = ok;
+        if (ok.length) found++;
+    });
+    return found;
+}
+/** 写一条"兜底样式"（只在找不到元凶、或元凶是背景色时才用；这是跟美化打架的路）
+    ⚠️ 光往样式表里写 `选择器 {color:…!important}` 常常压不住：美化的规则往往写成
+       `html body #chat .mes_text{…!important}`，特异性比我们高（实测写进去还是原色）。
+       所以写完**量一次**，没生效就退到行内 !important（行内最高，且能撤销）。 */
+function sspCtFallback(sel, color, el) {
+    let st = document.getElementById('ssp_contrast_fix');
+    if (!st) {
+        st = document.createElement('style');
+        st.id = 'ssp_contrast_fix';
+        st.setAttribute('type', 'text/css');
+        document.head.appendChild(st);
+    }
+    const rule = String(sel) + ' { color: ' + String(color) + ' !important; }';
+    if (st.textContent.indexOf(rule) < 0) st.textContent = (st.textContent || '') + rule + '\n';
+    let 用了行内 = false;
+    if (el && el.style) {
+        let got = '';
+        try { got = getComputedStyle(el).color; } catch (e) { got = ''; }
+        const want = sspParseColor(color);
+        const now = sspParseColor(got);
+        const same = want && now && Math.abs(want.r - now.r) < 2 && Math.abs(want.g - now.g) < 2 && Math.abs(want.b - now.b) < 2;
+        if (!same) {
+            try {
+                el.setAttribute('data-ssp-ctfix', '1');
+                el.style.setProperty('color', color, 'important');
+                用了行内 = true;
+            } catch (e) { }
+        }
+    }
+    return { rule, 用来行内: 用了行内 };
+}
+/** 撤掉所有兜底（样式表 + 行内），给「恢复」用 */
+function sspCtFallbackClear() {
+    const st = document.getElementById('ssp_contrast_fix');
+    if (st) st.remove();
+    const els = document.querySelectorAll('[data-ssp-ctfix]');
+    for (const el of els) {
+        try { el.style.removeProperty('color'); el.removeAttribute('data-ssp-ctfix'); } catch (e) { }
+    }
+    return els.length;
+}
+function orbContrastHTML() {
+    if (orbCtRows === null) { try { sspContrastRun(); } catch (e) { orbCtRows = []; } }
+    const rows = orbCtRows || [];
+    const bad = rows.filter(sspCtBad);
+    const head = '<div class="ssp-ct-head ssp-bt-toggle" data-orb-ctopen="1" role="button" tabindex="0">'
+        + '<i class="fa-solid ' + (orbCtOpen ? 'fa-caret-down' : 'fa-caret-right') + '"></i>'
+        + '<b>看得清吗</b>'
+        + '<small>' + (bad.length ? ('有 ' + bad.length + ' 处看不清（点标题展开）') : (rows.length ? '都看得清' : '点一下体检：正文/输入框/侧栏会不会看不见')) + '</small>'
+        + '<span class="ssp-ct-arrow"><i class="fa-solid ' + (bad.length ? 'fa-triangle-exclamation' : 'fa-eye') + '"></i></span>'
+        + '</div>';
+    if (!orbCtOpen) return '<div class="ssp-ct' + (bad.length ? ' bad' : '') + '">' + head + '</div>';
+    const list = rows.map((r, i) => {
+        const 元凶 = r.元凶 || [];
+        return '<div class="ssp-ct-row' + (sspCtBad(r) ? ' bad' : '') + '">'
+            + '<span class="ssp-ct-name">' + esc(r.名字) + '</span>'
+            + '<span class="ssp-ct-cr" title="' + esc(r.前景 + ' on ' + r.背景) + '">' + r.对比度.toFixed(2) + ':1'
+            + (r.有图 ? '<i title="这一处底下有背景图，数值仅供参考">※</i>' : '') + '</span>'
+            + '<span class="ssp-ct-swatch" style="background:' + esc(r.背景) + ';color:' + esc(r.前景) + '">字</span>'
+            + (元凶.length
+                ? ('<code class="ssp-ct-blame" title="命中的规则：' + esc(元凶[0].sel) + '">' + esc(元凶[0].k) + '</code>')
+                : '<code class="ssp-ct-blame none" title="没找到是哪条变量在管它（可能写死在具体选择器上了）">没定位到</code>')
+            + (sspCtBad(r)
+                ? '<span class="ssp-pbtn" data-orb-ctfix="' + i + '">修一下</span>'
+                : '')
+            + '</div>';
+    }).join('');
+    /* 「写回主题」放在脚上、而且只要这个美化有覆盖就出现：
+       修完那行就不"红"了，按钮要是挂在行上会跟着消失，人就没机会写回了。 */
+    const ovN = Object.keys(themeVarsOf()).length;
+    return '<div class="ssp-ct' + (bad.length ? ' bad' : '') + '">' + head
+        + '<div class="ssp-ct-body">'
+        + '<div class="ssp-ct-note">量的是真颜色（`color` 和往上第一个不透明背景），不是猜变量名。'
+        + '低于 3:1 就是看不清；※ 表示那底下有背景图，数值只能参考。</div>'
+        + (list || '<div class="ssp-orb-empty">当前没有可量的位置（先打开一个聊天再看看）。</div>')
+        + '<div class="ssp-ct-foot">'
+        + '<span class="ssp-pbtn" data-orb-ctcheck="1">重新体检</span>'
+        + '<span class="ssp-pbtn" data-orb-ctblame="1" title="对着看不清的那几处，去主题 CSS 里找是哪条变量在管">找元凶</span>'
+        + (ovN ? '<span class="ssp-pbtn" data-orb-ctwrite="1" title="把覆盖层的值写回主题 CSS（改的是你的美化文件，要你自己点）">写回主题（' + ovN + ' 条）</span>' : '')
+        + '</div></div></div>';
 }
 
 /* ============================ 存档（聊天记录）栏 ============================
@@ -13889,6 +14242,7 @@ function orbSetCollapsed(on, silent) {
 function protectSkinAfterThemeChange() {
     /* v1.31.77：主题换了，面板配色得重新量一遍对比度（顺手把上次的结论作废） */
     try { sspSkinProbeLast = null; } catch (e) { }
+    try { orbCtRows = null; } catch (e) { }   // v1.31.78：美化换了，体检要重跑
     [0, 120, 400].forEach(ms => setTimeout(() => {
         try { lockOrbSkin(); } catch (e) { }
         try { applyCardStyle(); } catch (e) { }
@@ -15276,6 +15630,70 @@ function bindOrb() {
             toast(d.why, d.skin === 'follow' ? 'info' : 'warning');
             return;
         }
+        /* 美化页：看得清吗（体检 / 重新体检 / 找元凶 / 修一下 / 写回主题） */
+        if (t.closest('[data-orb-ctopen]')) {
+            orbCtOpen = !orbCtOpen;
+            if (orbCtOpen && orbCtRows === null) { try { sspContrastRun(); } catch (e) { } }
+            renderOrbPanel();
+            return;
+        }
+        if (t.closest('[data-orb-ctcheck]')) {
+            let rows = [];
+            try { rows = sspContrastRun(); } catch (e) { rows = []; }
+            const bad = rows.filter(sspCtBad).length;
+            renderOrbPanel();
+            toast(bad ? ('体检完：' + bad + ' 处看不清') : '体检完：都看得清', bad ? 'warning' : 'success');
+            return;
+        }
+        if (t.closest('[data-orb-ctblame]')) {
+            let n = 0;
+            try { n = sspContrastBlame(); } catch (e) { n = 0; }
+            renderOrbPanel();
+            toast(n ? ('找到 ' + n + ' 处的元凶（看行尾那个变量名）') : '这几处定位不到是哪条变量在管（多半写死在具体选择器上了）',
+                n ? 'success' : 'info');
+            return;
+        }
+        const ctFix = t.closest('[data-orb-ctfix]');
+        if (ctFix) {
+            const idx = Number(ctFix.dataset.orbCtfix);
+            const row = (orbCtRows || [])[idx];
+            const el = orbCtEls[idx];
+            if (!row || !row.元凶 || !row.元凶.length) {
+                /* 没元凶：只改这一处的颜色（兜底样式），并且把标签说清楚 */
+                if (!el) { toast('这一处现在量不到了（聊天可能关了），刷新后再试', 'warning'); return; }
+                const bg = sspParseColor(row.背景) || { r: 12, g: 12, b: 14, a: 1 };
+                const fg = sspParseColor(getComputedStyle(el).color) || { r: 200, g: 200, b: 200, a: 1 };
+                const r = sspFixColorToContrast(fg, bg, 4.5);
+                const fb = sspCtFallback(row.选择器, r.color, el);
+                orbCtRows = null;
+                renderOrbPanel();
+                toast('这一处定位不到变量，已只给它自己写了一条兜底色 ' + r.color
+                    + (fb && fb.用来行内 ? '（美化的规则更硬，用了行内 !important）' : '')
+                    + '：' + r.cr.toFixed(2) + ':1', 'info');
+                return;
+            }
+            const h = row.元凶[0];
+            const bg = sspParseColor(row.背景) || { r: 12, g: 12, b: 14, a: 1 };
+            let fg = null;
+            try { fg = sspParseColor(getComputedStyle(el).color); } catch (e) { fg = null; }
+            if (!fg) fg = sspParseColor(row.前景);
+            const r = sspFixColorToContrast(fg, bg, 4.5);
+            if (!r || !r.改了吗) { toast('这条颜色已经够清楚了（' + (r ? r.cr.toFixed(2) : '?') + ':1）', 'info'); return; }
+            const ov = themeVarsOf();
+            ov[h.k] = r.color;
+            try { themeVarsApply(); } catch (e) { }
+            save();
+            orbCtRows = null;
+            renderOrbPanel();
+            toast('已把 ' + h.k + ' 调成 ' + r.color + '（覆盖层，' + r.cr.toFixed(2) + ':1）；满意再点「写回主题」', 'success');
+            return;
+        }
+        if (t.closest('[data-orb-ctwrite]')) {
+            if (!themeVarsWriteBack()) return;
+            orbCtRows = null;
+            renderOrbPanel();
+            return;
+        }
         /* 存档页：刷新 / 读档 / 删除 / 清除搜索 */
         if (t.closest('[data-orb-chrefresh]')) { orbChatsFetch(); return; }        if (t.closest('[data-orb-chclear]')) { orbChSearch = ''; renderOrbPanel(); return; }
         /* v1.31.64：存档页 🎭 —— 给这份存档挑面具（整页替换） */
@@ -15574,10 +15992,19 @@ if (globalThis.__SSP_TEST__) {
         orbDbgSelectorOf, orbDbgInspect, orbDbgPickStart, orbDbgPickOff, orbDbgStore,
         orbDbgEl, orbDbgSaveScript, orbDbgListScripts,
         ORB_BEAUTY_TWEAKS, orbBeautyState, orbBeautyOn, orbBeautyApply, orbBeautySet, orbBeautyReset, orbBeautyHTML,
-        sspSkinApply, sspSkinSet, sspSkinMode, sspSkinProbe, sspSkinHTML, sspContrast, sspParseColor, sspEffBg,
+        sspSkinApply, sspSkinSet, sspSkinMode, sspSkinProbe, sspSkinHTML, sspContrast, sspParseColor, sspEffBg, sspEffBgEx,
         sspMixColor, sspLum, SSP_SKIN_VARS, SSP_SKIN_SEL, SSP_SKIN_MODES,
         get sspSkinProbeLast() { return sspSkinProbeLast; },
         get sspSkinNow() { return sspSkinNow; },
+        /* v1.31.78：对比度体检 */
+        SSP_CT_POINTS, sspContrastRun, sspBlameVar, sspBlameConfirm, sspContrastBlame,
+        sspFixColorToContrast, sspCssRules, sspSplitDecls, sspSpec, sspToHsl, sspFromHsl,
+        sspRgbToHex, sspCtFallback, sspCtFallbackClear, sspCtBad, orbContrastHTML, themeVarsOf, themeVarsApply,
+        get orbCtRows() { return orbCtRows; },
+        set orbCtRows(v) { orbCtRows = v; },
+        get orbCtEls() { return orbCtEls; },
+        get orbCtOpen() { return orbCtOpen; },
+        set orbCtOpen(v) { orbCtOpen = v; },
         orbSeamFillOff, orbSeamFillUpdate, orbSeamFillSync,
         get orbBeautyOpen() { return orbBeautyOpen; }, set orbBeautyOpen(v) { orbBeautyOpen = v; },
         orbDbgRule, orbDbgDivider, orbDbgHl, orbDbgHlShow, orbDbgHlHide, orbDbgTagOf, orbDbgUnder,

@@ -1174,6 +1174,43 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-skin-now { margin-top: 6px; font-size: 11px; line-height: 1.5; opacity: .72; }
 .ssp-skin-now.bad { color: #ffd479; opacity: 1; }
 
+/* ---------- v1.31.78：美化页的「看得清吗」（对比度体检） ---------- */
+.ssp-ct {
+    margin: 6px 0 8px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 8px;
+    background: rgba(255, 255, 255, .04);
+}
+.ssp-ct.bad { border-color: rgba(255, 180, 80, .45); background: rgba(255, 170, 60, .07); }
+.ssp-ct-head { display: flex; align-items: center; gap: 6px; padding: 7px 9px; cursor: pointer; }
+.ssp-ct-head b { font-size: 12.5px; }
+.ssp-ct-head small { font-size: 11px; opacity: .62; }
+.ssp-ct-arrow { margin-left: auto; opacity: .6; }
+.ssp-ct.bad .ssp-ct-arrow { color: #ffc766; opacity: 1; }
+.ssp-ct-body { padding: 0 9px 8px; }
+.ssp-ct-note { font-size: 10.5px; line-height: 1.55; opacity: .58; margin-bottom: 6px; }
+.ssp-ct-row {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 4px 0; border-top: 1px solid rgba(255, 255, 255, .08);
+}
+.ssp-ct-name { flex: 0 0 auto; min-width: 74px; font-size: 11.5px; }
+.ssp-ct-cr {
+    flex: 0 0 auto; min-width: 52px; text-align: right;
+    font-family: Consolas, Monaco, monospace; font-size: 11px; opacity: .8;
+}
+.ssp-ct-row.bad .ssp-ct-cr { color: #ffbe5c; opacity: 1; }
+.ssp-ct-cr i { font-style: normal; opacity: .7; margin-left: 2px; }
+.ssp-ct-swatch {
+    flex: 0 0 auto; width: 26px; height: 16px; border-radius: 3px;
+    border: 1px solid rgba(255, 255, 255, .22);
+    font-size: 9.5px; line-height: 14px; text-align: center;
+}
+.ssp-ct-blame {
+    flex: 1 1 auto; min-width: 0; font-family: Consolas, Monaco, monospace; font-size: 10.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85;
+    background: rgba(0, 0, 0, .22); border-radius: 3px; padding: 1px 5px;
+}
+.ssp-ct-blame.none { opacity: .45; }
+.ssp-ct-foot { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 7px; }
+
 /* 收纳态：球收进魔法棒（缩到 0 + 淡出，不占位置也不会被点到） */
 #ssp_orb.ssp-collapsed {
     opacity: 0; transform: scale(.2); pointer-events: none;
