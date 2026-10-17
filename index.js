@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.84';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.85';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6421,6 +6421,7 @@ function orbBeautyReset() {
     try {
         setTimeout(() => {
             try { orbBeautyApply(); } catch (e) { }
+            try { findBarMount(); } catch (e) { }     // v1.31.85 页面搜索浮条
             try { sspSkinApply(); } catch (e) { }      // v1.31.77 面板配色自锁（同样要等设置读回来）
         }, ms);
     } catch (e) { }
@@ -11759,6 +11760,94 @@ function findTextOf(m) {
     return findUseThink() ? raw : findStripThink(raw);
 }
 /** 跑一遍搜索。counts **不受分类筛选影响**（就是当前关键字下每类的条数） */
+/* ==================== 页面上的搜索浮条（v1.31.85） ====================
+   用户要的：关掉口袋面板，搜索框还在页面上。
+   ⚠️ 必须挂在 body 上的独立 fixed 元素（不能塞进 #ssp_orb_root —— 那个关面板就 display:none）。
+   逻辑全复用面板「查找」页签那套（orbFindQ / findRows / orbFindStep），
+   这里只是另一套界面：收起=一颗放大镜，展开=输入框 + 3/12 + ↑↓ + ×。
+   纯只读：只搜当前聊天、只跳转。 */
+var findBarOpen = false;      // 展开成输入条了吗
+var findBarT = 0;             // 输入去抖
+function findBarOn() { return getSettings().findBarOn !== false; }
+function findBarCount() {
+    try {
+        const rows = findRows();
+        return { n: rows.length, i: orbFindCur >= 0 && orbFindCur < rows.length ? orbFindCur + 1 : 0 };
+    } catch (e) { return { n: 0, i: 0 }; }
+}
+function findBarHTML() {
+    const c = findBarCount();
+    if (!findBarOpen) {
+        return '<span class="ssp-fb-btn" data-ssp-fb="open" title="页面搜索（关掉面板也能用）"><i class="fa-solid fa-magnifying-glass"></i></span>';
+    }
+    return '<span class="ssp-fb-btn" data-ssp-fb="close" title="收成放大镜"><i class="fa-solid fa-xmark"></i></span>'
+        + '<input class="ssp-fb-inp" type="text" data-ssp-fb="inp" placeholder="搜本聊天…" value="' + esc(orbFindQ) + '">'
+        + '<span class="ssp-fb-n">' + (c.n ? (c.i || 1) + '/' + c.n : '0') + '</span>'
+        + '<span class="ssp-fb-btn" data-ssp-fb="prev" title="上一条"><i class="fa-solid fa-chevron-up"></i></span>'
+        + '<span class="ssp-fb-btn" data-ssp-fb="next" title="下一条"><i class="fa-solid fa-chevron-down"></i></span>';
+}
+function findBarPaint() {
+    const el = document.getElementById('ssp_findbar');
+    if (!el) return false;
+    const html = findBarHTML();
+    if (el.dataset.sspFbSig !== html) {
+        const keep = el.querySelector('[data-ssp-fb="inp"]');
+        const hadFocus = keep && document.activeElement === keep;
+        const sel = keep ? keep.selectionStart : 0;
+        el.innerHTML = html;
+        el.dataset.sspFbSig = html;
+        const inp = el.querySelector('[data-ssp-fb="inp"]');
+        if (inp && hadFocus) { try { inp.focus(); inp.setSelectionRange(sel, sel); } catch (e) { } }
+    }
+    el.classList.toggle('open', findBarOpen);
+    return true;
+}
+function findBarMount() {
+    let el = document.getElementById('ssp_findbar');
+    if (!findBarOn()) { if (el) el.remove(); return false; }
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'ssp_findbar';
+        el.className = 'ssp-findbar';
+        el.setAttribute('role', 'search');
+        document.body.appendChild(el);
+        el.addEventListener('click', ev => {
+            const t = ev.target && ev.target.closest ? ev.target.closest('[data-ssp-fb]') : null;
+            if (!t) return;
+            const act = t.dataset.sspFb;
+            if (act === 'open') { findBarOpen = true; findBarPaint(); const i = document.querySelector('#ssp_findbar [data-ssp-fb="inp"]'); if (i) i.focus(); return; }
+            if (act === 'close') { findBarOpen = false; findBarPaint(); return; }
+            if (act === 'prev') { orbFindStep(-1); findBarPaint(); return; }
+            if (act === 'next') { orbFindStep(1); findBarPaint(); return; }
+        });
+        el.addEventListener('input', ev => {
+            const t = ev.target;
+            if (!t || t.dataset.sspFb !== 'inp') return;
+            orbFindQ = String(t.value || '');
+            orbFindCur = -1;
+            try { if (orbOpenNow && orbTab === 'find') renderOrbPanel(); } catch (e) { }
+            try { clearTimeout(findBarT); } catch (e) { }
+            findBarT = setTimeout(() => { try { findBarPaint(); } catch (e) { } }, 140);
+        });
+        el.addEventListener('keydown', ev => {
+            const t = ev.target;
+            if (!t || t.dataset.sspFb !== 'inp') return;
+            if (ev.key === 'Enter') { ev.preventDefault(); orbFindStep(ev.shiftKey ? -1 : 1); findBarPaint(); }
+            else if (ev.key === 'Escape') { ev.preventDefault(); findBarOpen = false; findBarPaint(); }
+        });
+    }
+    findBarPaint();
+    return true;
+}
+function findBarToggle() {
+    const s = getSettings();
+    s.findBarOn = !findBarOn();
+    save();
+    findBarMount();
+    toast(s.findBarOn ? '页面搜索已挂到页面上（关掉面板也在）' : '页面搜索已收起', 'info');
+    return s.findBarOn;
+}
+
 function findRun() {
     const terms = findTerms();
     const chat = findChat();

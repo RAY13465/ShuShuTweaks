@@ -1843,3 +1843,29 @@ select.ssp-ch-inp { cursor: pointer; padding-right: 6px !important; }
     .ssp-ch-vrow { grid-template-columns: 1fr; }
     .ssp-ch-vlab { padding-top: 0; }
 }
+
+/* ---------- v1.31.85：页面搜索浮条（关掉面板也在） ---------- */
+.ssp-findbar {
+    position: fixed; right: 18px; top: 84px; z-index: 3200;
+    display: none; align-items: center; gap: 4px;
+    padding: 4px 5px; border-radius: 10px;
+    background: rgba(16, 16, 22, .92);
+    border: 1px solid rgba(255, 255, 255, .22);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .5);
+    color: #e8e8ee; font-size: 12px;
+    backdrop-filter: blur(6px);
+}
+.ssp-findbar { display: flex; }
+.ssp-findbar.open { padding: 5px 7px; }
+.ssp-fb-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 6px; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, .16); background: rgba(255, 255, 255, .07);
+}
+.ssp-fb-btn:hover { background: rgba(255, 255, 255, .18); }
+.ssp-fb-inp {
+    width: 132px; padding: 3px 6px; font-size: 12px; border-radius: 6px;
+    color: #e8e8ee; background: rgba(0, 0, 0, .35);
+    border: 1px solid rgba(255, 255, 255, .18);
+}
+.ssp-fb-n { min-width: 34px; text-align: center; opacity: .75; font-family: Consolas, monospace; font-size: 11px; }
