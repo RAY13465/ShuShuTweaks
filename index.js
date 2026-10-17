@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.71';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.72';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -6707,6 +6707,172 @@ function orbThemeRowsHTML() {
 /* ⚠️ 「常用开关」要**不管有没有美化主题都渲染出来**：v1.31.58 起托盘的开关就放在这里面，
    而冷启动/主题列表还没拉回来时（实测无头浏览器就是）`#themes` 是空的 ——
    以前这里直接 return 列表，整块「常用开关」跟着一起消失，用户就找不到开关了。 */
+/* ============================ 主题变量（美化页 · v1.31.72）============================
+   用户要的：切到某个美化时，如果它写了 `:root{…}` 这种**全局变量**，就能直接在鼠鼠面板里调。
+
+   做法（用户选的"覆盖层 + 一键写回"）：
+     · 从**当前美化 CSS** 里只扒 `:root` / `html` 两个选择器的变量（别的不算"全局"）
+     · 调过的值存 `s.themeVars[主题名][--变量] = 值`，最后注入一条自己的 `:root{…}` 样式（放 head 末尾，优先级最高）
+       → 不动主题文件、随时还原、换主题互不影响
+     · 想固化就点「写回主题」：把覆盖值写进主题 CSS 再走酒馆自己的"更新当前美化"
+     · 控件按值自动选：颜色→取色器；px / em / % → 滑块；其它→文本框
+     · 自动按名字前缀分组 + 搜索（有的主题 :root 里几十上百个）
+   ========================================================================== */
+var orbTVSearch = '';
+var orbTVOpen = true;
+
+function themeVarsBinds() {
+    const s = getSettings();
+    if (!s.themeVars || typeof s.themeVars !== 'object' || Array.isArray(s.themeVars)) s.themeVars = {};
+    return s.themeVars;
+}
+function themeVarsOf(name) {
+    const b = themeVarsBinds();
+    const k = String(name || orbThemeCur() || '(未命名)');
+    if (!b[k] || typeof b[k] !== 'object' || Array.isArray(b[k])) b[k] = {};
+    return b[k];
+}
+/** 只扒 :root / html 里的 --变量（返回 [{k,v}]，同名以第一次出现为准） */
+function themeVarsParse(css) {
+    const out = [];
+    const seen = new Set();
+    const txt = String(css || '');
+    let m;
+    const blockRe = /(?:^|\})\s*(:root|html)\b[^{}]*\{([^}]*)\}/gi;
+    while ((m = blockRe.exec(txt))) {
+        const body = m[2] || '';
+        const declRe = /(--[\w-]+)\s*:\s*([^;}]+)/g;
+        let d;
+        while ((d = declRe.exec(body))) {
+            const k = d[1], v = String(d[2]).trim();
+            if (!k || seen.has(k)) continue;
+            seen.add(k);
+            out.push({ k: k, v: v });
+        }
+    }
+    return out;
+}
+function themeVarKind(v) {
+    const s = String(v || '').trim();
+    if (/^#([0-9a-f]{3,8})$/i.test(s) || /^(rgb|hsl)a?\s*\(/i.test(s)) return 'color';
+    if (/^-?\d+(\.\d+)?px$/i.test(s)) return 'px';
+    if (/^-?\d+(\.\d+)?(em|rem)$/i.test(s)) return 'em';
+    if (/^-?\d+(\.\d+)?%$/.test(s)) return 'pct';
+    if (/^-?\d+(\.\d+)?$/.test(s)) return 'num';
+    return 'text';
+}
+function themeVarColorOf(v) {
+    const s = String(v || '').trim();
+    if (/^#[0-9a-f]{6}$/i.test(s)) return s;
+    if (/^#[0-9a-f]{3}$/i.test(s)) return '#' + s[1] + s[1] + s[2] + s[2] + s[3] + s[3];
+    const m = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(s);
+    if (m) return '#' + [1, 2, 3].map(i => Number(m[i]).toString(16).padStart(2, '0')).join('');
+    return '#ffffff';
+}
+/** 值 + 单位拆开（滑块要用数字） */
+function themeVarNumOf(v) {
+    const m = /^(-?\d+(?:\.\d+)?)\s*([a-z%]*)$/i.exec(String(v || '').trim());
+    return m ? { n: Number(m[1]), unit: m[2] || '' } : { n: 0, unit: '' };
+}
+/** 把覆盖值注入一条自己的 :root 样式（放最后，优先级最高） */
+function themeVarsApply() {
+    try {
+        const ov = themeVarsOf();
+        const keys = Object.keys(ov).filter(k => k && typeof ov[k] === 'string' && ov[k] !== '');
+        let el = document.getElementById('ssp_theme_vars_style');
+        if (!keys.length) { if (el) el.remove(); return false; }
+        if (!el) {
+            el = document.createElement('style');
+            el.id = 'ssp_theme_vars_style';
+            (document.head || document.body).appendChild(el);
+        }
+        el.textContent = ':root{\n' + keys.map(k => '  ' + k + ': ' + ov[k] + ' !important;').join('\n') + '\n}';
+        return true;
+    } catch (e) { return false; }
+}
+/** 把覆盖值写回主题 CSS（再做酒馆自己的「更新当前美化」） */
+function themeVarsWriteBack() {
+    try {
+        const ov = themeVarsOf();
+        const keys = Object.keys(ov);
+        if (!keys.length) { toast('还没有调过任何变量', 'info'); return false; }
+        let css = String(orbThemeCss() || '');
+        keys.forEach(k => {
+            const re = new RegExp('(' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*:\\s*)([^;}]+)', 'g');
+            if (re.test(css)) { re.lastIndex = 0; css = css.replace(re, function (m0, p1) { return p1 + ov[k]; }); }
+        });
+        orbThemePreview(css);
+        orbThemeSyncToSt(css);
+        try { orbThemeClickSt('ui-preset-update-button'); } catch (e) { }
+        toast('已把调过的 ' + keys.length + ' 个变量写回当前美化', 'success');
+        return true;
+    } catch (e) { toast('写回失败：' + (e && e.message), 'warning'); return false; }
+}
+
+/** 美化页里那块「主题变量」 */
+function orbThemeVarsHTML() {
+    const cur = orbThemeCur() || '(读不到当前美化)';
+    const all = themeVarsParse(orbThemeCss());
+    const ov = themeVarsOf();
+    const ovN = Object.keys(ov).length;
+    const q = String(orbTVSearch || '').trim().toLowerCase();
+    const hit = all.filter(v => !q || v.k.toLowerCase().indexOf(q) >= 0);
+    const head = '<div class="ssp-tv-head">'
+        + '<span class="ssp-tv-title">🎨 主题变量' + (all.length ? '（' + all.length + ' 个）' : '') + '</span>'
+        + (ovN ? '<span class="ssp-tv-badge">已改 ' + ovN + '</span>' : '')
+        + '<span class="ssp-sp"></span>'
+        + (ovN ? '<span class="ssp-pbtn" data-orb-tvwrite="1" title="把调过的值写进主题 CSS，并点酒馆自己的「更新当前美化」">写回主题</span>' : '')
+        + (ovN ? '<span class="ssp-pbtn" data-orb-tvall="1" title="把所有变量还原成主题原值">全部还原</span>' : '')
+        + '<span class="ssp-pbtn" data-orb-tvfold="1">' + (orbTVOpen ? '收起' : '展开') + '</span>'
+        + '</div>';
+    if (!all.length) {
+        return head + (orbTVOpen ? '<div class="ssp-orb-empty" style="padding:2px 2px 6px">当前美化里没有 <b>:root</b> / <b>html</b> 变量 —— '
+            + '这个美化把值写死在具体选择器上了，所以没得调。</div>' : '');
+    }
+    if (!orbTVOpen) return head;
+    const tools = '<div class="ssp-orb-pfilter" style="margin-bottom:6px">'
+        + '<input class="ssp-inp" type="text" data-orb-tvsearch="1" placeholder="搜变量名（比如 --accent）" value="' + esc(orbTVSearch) + '">'
+        + (orbTVSearch ? '<span class="ssp-pbtn" data-orb-tvsearchclear="1">清除</span>' : '')
+        + '</div>';
+    if (!hit.length) return head + tools + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">没有匹配「' + esc(orbTVSearch) + '」的变量。</div>';
+    const groups = new Map();
+    hit.forEach(v => {
+        const g = (v.k.replace(/^--/, '').split('-')[0] || '其他').toLowerCase();
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(v);
+    });
+    const rowsHTML = (arr) => arr.map(v => {
+        const now = ov[v.k];
+        const val = (now === undefined) ? v.v : now;
+        const kind = themeVarKind(v.v);
+        const changed = now !== undefined && now !== v.v;
+        let ctl = '';
+        if (kind === 'color') {
+            ctl = '<input class="ssp-tv-color" type="color" data-orb-tvk="' + esc(v.k) + '" value="' + esc(themeVarColorOf(val)) + '"'
+                + ' title="' + esc(val) + '">';
+        } else if (kind === 'px' || kind === 'em' || kind === 'pct') {
+            const num = themeVarNumOf(val);
+            const max = kind === 'px' ? Math.max(64, Math.round(num.n * 2) + 32)
+                : kind === 'em' ? Math.max(4, num.n * 2 + 2) : 100;
+            const step = kind === 'px' ? 1 : (kind === 'pct' ? 1 : 0.05);
+            ctl = '<input class="ssp-tv-range" type="range" min="0" max="' + max + '" step="' + step + '"'
+                + ' data-orb-tvk="' + esc(v.k) + '" data-orb-tvunit="' + esc(num.unit || kind) + '" value="' + num.n + '">'
+                + '<b class="ssp-tv-num" data-orb-tvout="' + esc(v.k) + '">' + esc(val) + '</b>';
+        } else {
+            ctl = '<input class="ssp-inp ssp-tv-text" type="text" data-orb-tvk="' + esc(v.k) + '" value="' + esc(val) + '">';
+        }
+        return '<div class="ssp-tv-row' + (changed ? ' changed' : '') + '" data-orb-tvrow="' + esc(v.k) + '">'
+            + '<span class="ssp-tv-k" title="' + esc(v.k) + ' = ' + esc(v.v) + '">' + esc(v.k) + '</span>'
+            + '<span class="ssp-tv-ctl">' + ctl + '</span>'
+            + (changed ? '<span class="ssp-pbtn ssp-tv-reset" data-orb-tvr="' + esc(v.k) + '" title="还原成主题原值">↺</span>' : '')
+            + '</div>';
+    }).join('');
+    const body = [...groups.entries()].map(([g, arr]) => '<div class="ssp-tv-group">'
+        + '<div class="ssp-tv-ghead">' + esc(g) + '<i>' + arr.length + '</i></div>'
+        + rowsHTML(arr) + '</div>').join('');
+    return head + tools + '<div class="ssp-tv-body">' + body + '</div>';
+}
+
 function orbThemeHTML() {
     if (orbThemeEdit) return orbThemeEditHTML();
     if (orbThemeBinding) return orbThemePickerHTML(orbThemeBinding);
@@ -6724,6 +6890,8 @@ function orbThemeHTML() {
         + '<span class="ssp-pbtn" data-orb-thexport="1"><i class="fa-solid fa-file-export"></i>导出当前美化</span>'
         + '</div>'
         + orbBeautyHTML()
+        /* v1.31.72：主题变量（:root / html 里的全局变量）就地调整 */
+        + orbThemeVarsHTML()
         + '<div id="ssp_orb_theme_list">' + orbThemeRowsHTML() + '</div>'
         + '<div class="ssp-orb-empty" style="padding-top:6px">当前美化：<b>' + esc(orbThemeCur() || '(读不到)') + '</b>'
         + '；「用这个」立刻换，「绑定」选角色 —— <b>一个主题能绑多个角色卡</b>，一张角色卡只认一个主题。</div>';
@@ -13886,6 +14054,32 @@ function bindOrb() {
         }
     });
 
+    /* v1.31.72 主题变量：输入 / 拖滑块就立刻生效（颜色、滑块、文本框都走这一条） */
+    document.addEventListener('input', ev => {
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
+        if (!el || !el.dataset) return;
+        if (el.dataset.orbTvsearch !== undefined) {
+            orbTVSearch = el.value || '';
+            const host = sspTabRoot().querySelector('#ssp_orb_panel [data-orb-tvbody]');
+            if (host) host.innerHTML = orbThemeVarsHTML(); else renderOrbPanel();
+            return;
+        }
+        const k = el.dataset.orbTvk;
+        if (!k) return;
+        let v;
+        if (el.type === 'range') v = String(el.value) + String(el.dataset.orbTvunit || '');
+        else v = String(el.value == null ? '' : el.value);
+        try {
+            themeVarsOf()[k] = v;
+            save();
+            themeVarsApply();
+            const out = sspTabRoot().querySelector('#ssp_orb_panel [data-orb-tvout="' + k + '"]');
+            if (out) out.textContent = v;
+            const row = el.closest('[data-orb-tvrow]');
+            if (row && !row.classList.contains('changed')) row.classList.add('changed');
+        } catch (e) { }
+    });
+
     /* DLC 页搜索 */
     document.addEventListener('input', ev => {
         const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
@@ -14066,7 +14260,30 @@ function bindOrb() {
                 return;
             }
         }
-        /* ---- 「调试」页签里的按钮（以前是独立窗口自己接监听；现在是页签，走面板委托）---- */
+        /* v1.31.72 主题变量：取值 / 还原 / 写回 / 搜索 / 折叠 */
+        const tvRow = t.closest('[data-orb-tvrow]');
+        if (tvRow) {
+            /* 行里除 ↺ 以外的控件点击都交给 input 处理（这里只挡掉冒泡误判） */
+        }
+        const tvr = t.closest('[data-orb-tvr]');
+        if (tvr) {
+            const k = tvr.dataset.orbTvr;
+            const ov = themeVarsOf();
+            delete ov[k]; save(); themeVarsApply(); renderOrbPanel();
+            toast('已还原 ' + k, 'info');
+            return;
+        }
+        if (t.closest('[data-orb-tvall]')) {
+            const b = themeVarsBinds();
+            delete b[String(orbThemeCur() || '(未命名)')];
+            save(); themeVarsApply(); renderOrbPanel();
+            toast('已把所有变量还原成主题原值', 'success');
+            return;
+        }
+        if (t.closest('[data-orb-tvwrite]')) { themeVarsWriteBack(); renderOrbPanel(); return; }
+        if (t.closest('[data-orb-tvfold]')) { orbTVOpen = !orbTVOpen; renderOrbPanel(); return; }
+        if (t.closest('[data-orb-tvsearchclear]')) { orbTVSearch = ''; renderOrbPanel(); return; }
+        /* 调试页签里的按钮（以前是独立窗口自己接监听；现在是页签，走面板委托）---- */
         if (t.closest('[data-ssp-dbgclose]')) { orbDbgClose(); return; }
         if (t.closest('[data-ssp-dbgclear]')) { orbDbgClear(); return; }
         {
