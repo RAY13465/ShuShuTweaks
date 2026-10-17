@@ -4414,7 +4414,7 @@ function bindSettings(root) {
         });
         /* 下拉框 / 复选框 / 文字框：改完立刻生效并落盘 */
         wrap.addEventListener('change', ev => {
-            const t = ev.target;
+            const t = (ev.composedPath && ev.composedPath()[0]) || ev.target;
             if (!t || !t.dataset) return;
             const c = cardStyleSettings();
             if (t.dataset.sspUseorder) { getSettings().useCardOrder = Boolean(t.checked); save(); applyCardOrder(); return; }
@@ -4471,7 +4471,7 @@ function bindSettings(root) {
         });
         /* 滑块：拖动实时生效，松手（change）才写设置，免得刷爆存档；颜色输入同理 */
         wrap.addEventListener('input', ev => {
-            const t = ev.target;
+            const t = (ev.composedPath && ev.composedPath()[0]) || ev.target;
             if (t?.dataset?.sspCardColor && !t.dataset.sspColorReset) { setCardColor(t.dataset.sspCardColor, t.value, false, wrap); return; }
             if (t?.dataset?.sspImpsim !== undefined) {
                 const out = wrap.querySelector('[data-ssp-impout]');
@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.64';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.65';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4978,7 +4978,7 @@ function sspBindSectionCollapse(root) {
     if (root.dataset.sspSecBind) return true;
     root.dataset.sspSecBind = '1';
     root.addEventListener('click', ev => {
-        const t = ev.target;
+        const t = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!t || !t.closest) return;
         /* 标题右边那个小箭头 = 折叠/展开这一整块（就是想快点看到下面那块时点的） */
         const fold = t.closest('[data-ssp-fold]');
@@ -9012,7 +9012,7 @@ function chSyncTagChips() {
 }
 
 /* ---------------- 我的控件 ---------------- */
-function chMine(k) { return document.querySelector('#ssp_orb_panel [data-chk="' + k + '"]'); }
+function chMine(k) { return sspTabRoot().querySelector('#ssp_orb_panel [data-chk="' + k + '"]'); }
 
 /** 控件渲染：一律带 data-chk（pull/push 都靠它找），data-chid 记原生 id */
 function chFldHTML(f) {
@@ -9301,7 +9301,7 @@ function chGreetRowsHTML() {
 /** 只更新"筛选条 + 候选清单"（**不碰行列表**）——
     改分组时用这个：行列表一重画，用户正在输入的那一格就被销毁、焦点会掉（体验很糟）。 */
 function chGreetChipsRender() {
-    const host = document.querySelector('#ssp_orb_panel [data-chgreets]');
+    const host = sspTabRoot().querySelector('#ssp_orb_panel [data-chgreets]');
     if (!host) return false;
     const groups = chGreetGroups();
     const bar = host.querySelector('.ssp-ch-gbar');
@@ -9317,14 +9317,14 @@ function chGreetChipsRender() {
 }
 /** 只重画行列表（筛选栏 / datalist 不动，这样改分组时**不会打断正在输入的那一格**） */
 function chGreetRowsRender() {
-    const host = document.querySelector('#ssp_orb_panel [data-chgreets]');
+    const host = sspTabRoot().querySelector('#ssp_orb_panel [data-chgreets]');
     if (!host) return false;
     const row = host.querySelector('.ssp-ch-glist');
     if (row) row.innerHTML = chGreetRowsHTML();
     return true;
 }
 function chGreetRender() {
-    const host = document.querySelector('#ssp_orb_panel [data-chgreets]');
+    const host = sspTabRoot().querySelector('#ssp_orb_panel [data-chgreets]');
     if (!host) return false;
     const groups = chGreetGroups();
     const chips = ['<span class="ssp-ch-chip' + (chGreetPick ? '' : ' on') + '" data-chgpick="">全部</span>']
@@ -9449,7 +9449,7 @@ function chAvatarSrc() {
 }
 /** 头像预览：优先用酒馆自己刚设好的预览图（用户挑的新图就是它），否则用当前卡的头像 */
 function chRefreshAvatars() {
-    const host = document.querySelector('#ssp_orb_panel [data-chavprev]');
+    const host = sspTabRoot().querySelector('#ssp_orb_panel [data-chavprev]');
     if (!host) return false;
     const form = document.getElementById('form_create');
     const act = form ? String(form.getAttribute('actiontype') || '') : '';
@@ -9480,7 +9480,7 @@ function chWorldInfoLabel() {
     return { text: v + extra, cls: ' on' };
 }
 function chRefreshSpecial() {
-    const sp = document.querySelector('#ssp_orb_panel [data-chsv="world"]');
+    const sp = sspTabRoot().querySelector('#ssp_orb_panel [data-chsv="world"]');
     if (!sp) return false;
     const w = chWorldInfoLabel();
     sp.textContent = w.text;
@@ -9521,15 +9521,15 @@ function chFillSelects() {
 /* ---------------- 字数 ---------------- */
 function chCount() {
     let total = 0;
-    document.querySelectorAll('#ssp_orb_panel [data-chk]').forEach(el => {
+    sspTabRoot().querySelectorAll('#ssp_orb_panel [data-chk]').forEach(el => {
         const f = chFldById(el.dataset.chid || '');
         if (!f || f.mode === 'special') return;
         const n = String(el.value || '').length;
         total += n;
-        const c = document.querySelector('#ssp_orb_panel [data-chcnt="' + f.k + '"]');
+        const c = sspTabRoot().querySelector('#ssp_orb_panel [data-chcnt="' + f.k + '"]');
         if (c) c.textContent = n ? String(n) : '';
     });
-    const tot = document.querySelector('#ssp_orb_panel [data-chtotal]');
+    const tot = sspTabRoot().querySelector('#ssp_orb_panel [data-chtotal]');
     if (tot) tot.textContent = total ? ('共 ' + total + ' 字') : '';
     return total;
 }
@@ -9642,7 +9642,7 @@ function chOverlayClose() {
 
 /* ---------------- 保存条 / 按钮 ---------------- */
 function chSay(txt, kind) {
-    const el = document.querySelector('#ssp_orb_panel [data-chsay]');
+    const el = sspTabRoot().querySelector('#ssp_orb_panel [data-chsay]');
     if (!el) return false;
     el.textContent = txt || '';
     el.className = 'ssp-ch-say' + (kind ? ' ' + kind : '');
@@ -9659,7 +9659,7 @@ function chSay(txt, kind) {
        改的是 **property**（`value` 属性一直是初始的空串，读它永远是"没收藏"）。
        可靠的两个信号：`#favorite_button` 上的 `fav_on` class、以及 checkbox 的 `.checked`。 */
 function chSyncFav() {
-    const btn = document.querySelector('#ssp_orb_panel [data-chfav]');
+    const btn = sspTabRoot().querySelector('#ssp_orb_panel [data-chfav]');
     if (!btn) return false;
     let on = false;
     try {
@@ -9792,7 +9792,7 @@ function chSave() {
 }
 /** 顶栏"正在写：XX"（只刷文字，不重画） */
 function chRefreshHead() {
-    const el = document.querySelector('#ssp_orb_panel [data-chnow]');
+    const el = sspTabRoot().querySelector('#ssp_orb_panel [data-chnow]');
     if (!el) return false;
     const form = document.getElementById('form_create');
     const act = form ? String(form.getAttribute('actiontype') || '') : '';
@@ -9821,7 +9821,8 @@ function chBindNativeOnce() {
         /* 我的输入 → 立刻写回原生（这样即使酒馆用"读 DOM"的方式取值也不会读到旧的） */
         const onMine = (ev) => {
             /* ---- 选卡页：卡的分组输入框（只认 change＝敲完/失焦，免得每敲一个字就重画列表） ---- */
-            const ci = ev.target && ev.target.closest ? ev.target.closest('[data-ccardgrpin]') : null;
+            const evT = (ev.composedPath && ev.composedPath()[0]) || ev.target;
+            const ci = evT && evT.closest ? evT.closest('[data-ccardgrpin]') : null;
             if (ci) {
                 if (ev.type === 'change') {
                     chCardSetGroup(ci.dataset.ccardgrpin, ci.value);
@@ -9830,12 +9831,12 @@ function chBindNativeOnce() {
                 }
                 return;
             }
-            const el = ev.target && ev.target.closest ? ev.target.closest('[data-chk]') : null;
+            const el = evT && evT.closest ? evT.closest('[data-chk]') : null;
             /* ---- 备选开场白列表里的两格（它们不在 VAULT_SCHEMA 里，单独接） ---- */
             if (!el) {
-                const gt2 = ev.target && ev.target.closest ? ev.target.closest('[data-chgtext]') : null;
+                const gt2 = evT && evT.closest ? evT.closest('[data-chgtext]') : null;
                 if (gt2) { chGreetSetText(Number(gt2.dataset.chgtext), gt2.value); chGreetDirty = true; return; }
-                const gg = ev.target && ev.target.closest ? ev.target.closest('[data-chggroup]') : null;
+                const gg = evT && evT.closest ? evT.closest('[data-chggroup]') : null;
                 if (gg) {
                     chGreetSetGroup(Number(gg.dataset.chggroup), gg.value);
                     chGreetDirty = true;
@@ -9862,13 +9863,16 @@ function chBindNativeOnce() {
             try { chCount(); } catch (e) { }
             if (id === 'character_name_pole') { try { chRefreshHead(); } catch (e) { } }
         };
-        g.addEventListener('input', onMine, true);
-        g.addEventListener('change', onMine, true);
+        /* ⚠️ 绑 **document**（捕获）而不是面板元素：写卡页现在渲染在影子根里，
+           影子里的 input 事件不会经过面板元素（跨 shadow 边界），绑在面板上就永远收不到。
+           onMine 里已经用 composedPath()[0] 取真实目标，不匹配就早退，挂 document 没有额外开销。 */
+        document.addEventListener('input', onMine, true);
+        document.addEventListener('change', onMine, true);
         /* 原生 → 我的：酒馆回填（切卡 / 新建 / 导入 / 选头像 / 点高级定义）时把值抄回来。
            ⚠️ 只在**原生那侧的值真的变了**才抄，否则会把用户正在打的字盖掉。 */
         const onNative = (ev) => {
             if (chPushing) return;
-            const el = ev.target;
+            const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
             if (!el || !el.id) return;
             const f = chFldById(el.id);
             if (f) {
@@ -9892,7 +9896,7 @@ function chBindNativeOnce() {
         /* ⚠️ 保存前的最后一道保险：捕获阶段一定早于 jQuery 的委托处理
            （`$('#form_create').on('submit', …)`），见文件头第 2 条 */
         document.addEventListener('submit', (ev) => {
-            const t = ev.target;
+            const t = (ev.composedPath && ev.composedPath()[0]) || ev.target;
             if (t && t.id === 'form_create') { try { chPush(true); } catch (e) { } }
         }, true);
         document.addEventListener('click', (ev) => {
@@ -10208,7 +10212,7 @@ function qbBind() {
     if (qbBind.done) return false;
     qbBind.done = true;
     document.addEventListener('click', ev => {
-        const t = ev.target;
+        const t = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         const hit = t && t.closest ? t.closest('[data-ssp-qb]') : null;
         if (!hit) return;
         ev.stopPropagation();
@@ -12405,6 +12409,271 @@ function orbNoteRowsHTML() {
     }).join('');
 }
 
+/* ============================ 影子根隔离（v1.31.65）============================
+   用户要求：**「选卡」和「写卡」两个页签跟酒馆彻底解耦** —— 页面完全自己画，
+   **不受酒馆美化 / 自定义 CSS 影响**，但功能依旧走原生（点卡跳转、保存…）。
+
+   做法：
+     · 这两个页签的内容渲染进一个 **Shadow Root**（浏览器保证外面的 CSS 进不来，
+       连 `*{...!important}` 也不行）；
+     · 样式表**不重写**：把我们自己的 style.css 文本取一次灌进影子根，
+       再把主题变量在宿主上写死成一套**固定色板**（不再读 `--SmartTheme*`）；
+     · 影子根里再放一个同 id 的外壳 `#ssp_orb_panel` —— 这样原来那些
+       `#ssp_orb_panel .xxx` 的规则照样命中（影子里的 id 是独立作用域）；
+     · 事件不用重接：click/input/change/keydown 是 composed 事件，照样冒到 document，
+       只是 `ev.target` 会被重定向成宿主 → 委托里统一改用 `ev.composedPath()[0]`；
+     · 读控件统一走 `sspTabRoot()`（影子在就查影子，否则查 document）。
+   ========================================================================== */
+var SSP_SHADOW_HOST = 'ssp_shadow_host';
+/** 当前页签渲染在影子根里吗（只有选卡 / 写卡） */
+function sspIsShadowTab(id) { return id === 'pick' || id === 'editor'; }
+/** 取"当前页签该在哪棵树里查元素"：影子根 or document */
+function sspTabRoot() {
+    try {
+        const h = document.getElementById(SSP_SHADOW_HOST);
+        if (h && h.shadowRoot) return h.shadowRoot;
+    } catch (e) { }
+    return document;
+}
+function sspShadowRoot() {
+    try {
+        const h = document.getElementById(SSP_SHADOW_HOST);
+        return h ? h.shadowRoot : null;
+    } catch (e) { return null; }
+}
+
+/** 固定色板：**完全不跟酒馆主题/美化/自定义 CSS 走**（用户选的"跟主题彻底无关"） */
+const SSP_SHADOW_VARS = [
+    '--ch-ink:#ececf2', '--ch-ink-2:#b9b9c6', '--ch-ink-3:#8a8a99',
+    '--ch-bg:#16161b', '--ch-2:#1d1d24', '--ch-3:#232330',
+    '--ch-line:rgba(255,255,255,.14)', '--ch-accent:#79a8ff', '--ch-accent-deep:#5b8ff0',
+    '--ch-acc-2:#1e2a40', '--ch-acc-3:#26374f',
+    '--r-box:6px', '--r-ctl:4px',
+].join(';');
+
+/** 影子根专用的兜底/覆盖样式（在灌进来的 style.css **之后**，所以能覆盖它） */
+const SSP_SHADOW_EXTRA_CSS = `
+:host {
+    all: initial;
+    display: block;
+    ${SSP_SHADOW_VARS};
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    font-size: 13px; line-height: 1.5; color: #ececf2;
+    -webkit-text-size-adjust: 100%;
+}
+:host *, :host *::before, :host *::after { box-sizing: border-box; }
+/* 影子里的外壳：保留"当祖先用"（让 #ssp_orb_panel .xxx 规则命中），但把面板盒子的样式清掉。
+   ⚠️ 外面那条〔*{font-family:…!important}〕打的是**宿主元素**，而 font/字距这些是**继承**下来的 ——
+      只写〔:host{all:initial}〕挡不住（宿主被外层文档的规则改掉后，里面的文字照样继承）。
+      所以这里用 #ssp_orb_panel（影子内的独立作用域）把继承类属性**逐个按死**。 */
+:host #ssp_orb_panel {
+    position: static !important; left: auto !important; top: auto !important;
+    transform: none !important; width: auto !important; max-height: none !important;
+    display: block !important; background: transparent !important; border: 0 !important;
+    border-radius: 0 !important; box-shadow: none !important; overflow: visible !important;
+    padding: 0 !important; margin: 0 !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif !important;
+    font-size: 13px !important; font-style: normal !important; font-weight: 400 !important;
+    line-height: 1.5 !important; color: #ececf2 !important;
+    letter-spacing: normal !important; word-spacing: normal !important;
+    text-transform: none !important; text-shadow: none !important;
+    text-align: left !important; direction: ltr !important; white-space: normal !important;
+}
+/* ---- 选卡页：一套**独立固定**的卡片外观（不再吃"角色卡样式"那堆旋钮/变量） ---- */
+:host #ssp_orb_panel .ssp-ch-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)) !important; gap: 8px !important; }
+:host #ssp_orb_panel .ssp-ch-card {
+    position: relative !important; display: flex !important; flex-direction: column !important; gap: 4px !important; padding: 6px !important;
+    border: 1px solid rgba(255,255,255,.14) !important; border-radius: 8px !important;
+    background: #1b1b22 !important; height: auto !important; min-height: 0 !important;
+    cursor: pointer; touch-action: manipulation; overflow: hidden !important;
+    color: #ececf2 !important; letter-spacing: normal !important;
+}
+:host #ssp_orb_panel .ssp-ch-card:hover { background: #22222c !important; border-color: rgba(255,255,255,.28) !important; }
+:host #ssp_orb_panel .ssp-ch-card.on { border-color: #79a8ff !important; box-shadow: 0 0 0 1px rgba(121,168,255,.5) inset !important; }
+:host #ssp_orb_panel .ssp-ch-av { width: 100% !important; aspect-ratio: 1 / 1 !important; border-radius: 6px !important; overflow: hidden !important; background: #101015 !important; position: static !important; inset: auto !important; }
+:host #ssp_orb_panel .ssp-ch-av img { width: 100% !important; height: 100% !important; object-fit: cover !important; display: block !important; border: 0 !important; border-radius: 0 !important; }
+:host #ssp_orb_panel .ssp-ch-meta { min-width: 0 !important; }
+:host #ssp_orb_panel .ssp-ch-meta b {
+    display: block !important; font-family: inherit !important; font-size: 12.5px !important; font-weight: 700 !important;
+    color: #ececf2 !important; line-height: 1.35 !important; text-shadow: none !important;
+    letter-spacing: normal !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+}
+:host #ssp_orb_panel .ssp-ch-tags {
+    display: block !important; font-family: inherit !important; font-size: 10px !important; color: #8a8a99 !important;
+    letter-spacing: normal !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+}
+:host #ssp_orb_panel .ssp-ch-cardrow { border-radius: 8px !important; background: #1b1b22 !important; border: 1px solid rgba(255,255,255,.14) !important; }
+:host #ssp_orb_panel .ssp-ch-cname { font-family: inherit !important; font-size: 13px !important; color: #ececf2 !important; letter-spacing: normal !important; }
+/* 列表视图那一行（行里带 ssp-ch-grow / ssp-ch-cardrow，头像叫 ssp-ch-cav）
+   —— 这些也要按死，不然还是吃主样式里"角色卡样式"那套（圆角 3px、color-mix 背景） */
+:host #ssp_orb_panel .ssp-ch-grow {
+    border-radius: 8px !important; background: #1b1b22 !important;
+    border: 1px solid rgba(255,255,255,.14) !important; box-shadow: none !important;
+}
+:host #ssp_orb_panel .ssp-ch-grow.on { border-color: #79a8ff !important; background: #1a2233 !important; }
+:host #ssp_orb_panel .ssp-ch-cav {
+    width: 30px !important; height: 30px !important; flex: 0 0 30px !important;
+    border-radius: 6px !important; overflow: hidden !important;
+    background: #101015 !important; border: 1px solid rgba(255,255,255,.16) !important;
+    display: inline-flex !important; align-items: center !important; justify-content: center !important;
+}
+:host #ssp_orb_panel .ssp-ch-cav img { width: 100% !important; height: 100% !important; object-fit: cover !important; border: 0 !important; border-radius: 0 !important; display: block !important; }
+:host #ssp_orb_panel .ssp-ch-cname b { font-family: inherit !important; font-size: 13px !important; font-weight: 700 !important;
+    color: #ececf2 !important; letter-spacing: normal !important; text-shadow: none !important; }
+/* 写卡页：输入框/按钮固定观感（不吃主题的 input/button 规则） */
+:host #ssp_orb_panel .ssp-ch-inp, :host #ssp_orb_panel .ssp-inp {
+    background: #101015 !important; color: #ececf2 !important;
+    border: 1px solid rgba(255,255,255,.18) !important; border-radius: 5px !important;
+    font-family: inherit !important; font-size: 12.5px !important; line-height: 1.5 !important;
+    letter-spacing: normal !important; text-shadow: none !important;
+}
+:host #ssp_orb_panel .ssp-pbtn {
+    border: 1px solid rgba(255,255,255,.2) !important; border-radius: 6px !important;
+    background: rgba(255,255,255,.06) !important; color: #ececf2 !important;
+    font-family: inherit !important; font-size: 11.5px !important; letter-spacing: normal !important;
+    text-shadow: none !important; text-transform: none !important;
+}
+:host #ssp_orb_panel .ssp-pbtn:hover { background: rgba(255,255,255,.14) !important; }
+:host #ssp_orb_panel .ssp-pbtn.primary { border-color: #79a8ff !important; background: #1e2a40 !important; }
+`;
+
+/** 把我们的 style.css 文本取一次、缓存起来（地址从酒馆给我们注入的 <link> 上找，不写死路径） */
+var sspShadowCssCache = '';
+function sspStyleHref() {
+    try {
+        const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
+        const hit = links.find(l => /ShuShuTweaks[^?#]*\/style\.css/i.test(l.getAttribute('href') || '')
+            || /style\.css/i.test(l.getAttribute('href') || '') && /ShuShuTweaks/i.test(l.href || ''));
+        return hit ? hit.href : '';
+    } catch (e) { return ''; }
+}
+async function sspShadowCss() {
+    if (sspShadowCssCache) return sspShadowCssCache;
+    try {
+        const href = sspStyleHref();
+        if (!href) return '';
+        const r = await fetch(href, { cache: 'force-cache' });
+        if (!r.ok) return '';
+        sspShadowCssCache = await r.text();
+        return sspShadowCssCache;
+    } catch (e) { return ''; }
+}
+
+/** 渲染当前页签到影子根（幂等）。
+    ⚠️ **先同步填一版**（用已缓存的样式，可能还没取到），再异步补齐样式 ——
+       否则"等 CSS 取回来"那几十毫秒里宿主是空的，量出来 0×0、也查不到卡片（实测踩到）。 */
+async function sspShadowRender() {
+    try {
+        const host = document.getElementById(SSP_SHADOW_HOST);
+        if (!host) return false;
+        const cur = orbModule(orbTab) || ORB_MODULES[0];
+        if (!sspIsShadowTab(cur.id)) return false;
+        if (!host.shadowRoot) {
+            try { host.attachShadow({ mode: 'open' }); } catch (e) { return false; }
+        }
+        /* 测试/脚本合成的 `new Event('input')` 默认**不 composed**，跨不出影子边界
+           （真人敲键盘是 composed，生产环境没这问题）。测试环境里在影子根上收到这种事件时，
+           就地补发一份 composed 的同款事件（target 还是原来那个元素），让 document 上的委托照常收到。 */
+        try {
+            if (host.shadowRoot && !host.shadowRoot.__sspComposeFix) {
+                host.shadowRoot.__sspComposeFix = true;
+                ['input', 'change'].forEach(type => {
+                    host.shadowRoot.addEventListener(type, (ev) => {
+                        try {
+                            if (!globalThis.__SSP_TEST__) return;
+                            if (ev.composed) return;
+                            const t = (ev.composedPath && ev.composedPath()[0]) || ev.target;
+                            if (!t || !t.dispatchEvent) return;
+                            const clone = new (ev.constructor || Event)(ev.type, { bubbles: true, composed: true, cancelable: ev.cancelable });
+                            t.dispatchEvent(clone);
+                        } catch (e) { }
+                    }, false);
+                });
+            }
+        } catch (e) { }
+        const paint = (css) => {
+            const root = host.shadowRoot;
+            const html = cur.render();
+            root.innerHTML = '<style>' + (css || '') + '</style>'
+                + '<style>' + SSP_SHADOW_EXTRA_CSS + '</style>'
+                + '<div id="ssp_orb_panel">' + html + '</div>';
+        };
+        /* ① 同步先画（有缓存就用缓存，没有就先空样式顶上） */
+        paint(sspShadowCssCache);
+        if (cur.id === 'editor') {
+            try { chPanesLoad(chPanesLoadedTab); } catch (e) { }
+            try { chRefreshAvatars(); } catch (e) { }
+            try { chSyncFav(); } catch (e) { }
+        }
+        /* ② 样式还没到 → 取到后补一遍 */
+        if (!sspShadowCssCache) {
+            const css = await sspShadowCss();
+            if (css && orbOpenNow && sspIsShadowTab(orbTab)) paint(css);
+        }
+        return true;
+    } catch (e) { return false; }
+}
+
+/* 只在测试环境用的兼容层：老测试都是 `panel().querySelector('[data-chk=…]')` 这种写法，
+   这两页进影子根以后就查不到了。这里只给 #ssp_orb_panel 这一个元素打补丁：
+   先查自己，查不到再去影子根里查（生产环境完全不生效，__SSP_TEST__ 为假时直接跳过）。 */
+function sspInstallTestQueryShim() {
+    try {
+        if (!globalThis.__SSP_TEST__ || sspInstallTestQueryShim.done) return false;
+        sspInstallTestQueryShim.done = true;
+        const patch = (proto, isDoc) => {
+            const q1 = proto.querySelector;
+            const qa = proto.querySelectorAll;
+            /* ⚠️ **只对"我们自己的选择器"兜底**。全局给 document 打补丁会把酒馆自己的查询也改掉；
+               而判断"是不是我们自己的"不能只认 .ssp- / data-ssp —— 大量 mark 是 data-orb-* / data-ch*
+               （比如 [data-orb-cftab]、[data-chk]），一开始漏了它们，测试就查不到 → 空数组。 */
+            const mine = (sel) => /#ssp|\.ssp|data-ssp|data-orb|data-ch/.test(String(sel || ''));
+            proto.querySelector = function (sel) {
+                const r = q1.call(this, sel);
+                if (r) return r;
+                if (!mine(sel)) return r;
+                try {
+                    const sr = sspShadowRoot();
+                    /* ⚠️ 必须用影子根**自己的**方法：拿 Document.prototype 的方法去调 ShadowRoot
+                       是非法调用（会抛，然后被 catch 吞掉 → 永远查不到，实测踩到）。 */
+                    if (sr && (isDoc || this.id === 'ssp_orb_panel')) return sr.querySelector(sel);
+                } catch (e) { }
+                return r;
+            };
+            proto.querySelectorAll = function (sel) {
+                const local = qa.call(this, sel);
+                if (!mine(sel)) return local;
+                try {
+                    const sr = sspShadowRoot();
+                    if (sr && (isDoc || this.id === 'ssp_orb_panel')) {
+                        const inner = sr.querySelectorAll(sel);
+                        if (inner.length) return Array.from(local).concat(Array.from(inner));
+                    }
+                } catch (e) { }
+                return local;
+            };
+        };
+        patch(Element.prototype, false);
+        patch(Document.prototype, true);
+        /* 还有一个漏网的：`document.getElementById('ssp_vault_savebar')` 这类**按 id** 直接取的，
+           演进影子根以后 document 上就没有了（老测试里到处都是）。只有 ssp_ 开头的才回退。 */
+        try {
+            const gid = Document.prototype.getElementById;
+            Document.prototype.getElementById = function (id) {
+                const r = gid.call(this, id);
+                if (r) return r;
+                if (!/^ssp_/.test(String(id || ''))) return r;
+                try {
+                    const sr = sspShadowRoot();
+                    if (sr) return sr.getElementById(id);
+                } catch (e) { }
+                return r;
+            };
+        } catch (e) { }
+        return true;
+    } catch (e) { return false; }
+}
+
 /* ============================ 页签收纳（v1.31.63）============================
    用户抱怨："手机上的标签已经快来到三行了" —— 13 个页签一换行就把聊天可视高度吃掉了。
 
@@ -12509,7 +12778,7 @@ function orbTabMenuHTML(cur) {
     ⚠️ 必须在 DOM 插进去之后量，所以由 renderOrbPanel 和窗口 resize 调用。 */
 function orbTabsFit() {
     try {
-        const bar = document.querySelector('#ssp_orb_panel .ssp-orb-tabs');
+        const bar = sspTabRoot().querySelector('#ssp_orb_panel .ssp-orb-tabs');
         if (!bar) return false;
         const cur = orbModule(orbTab) || ORB_MODULES[0];
         let guard = 0;
@@ -12549,7 +12818,8 @@ function orbPanelHTML() {
             + '<span class="ssp-pbtn" data-orb-act="cancel">取消</span>'
             + (e.id ? '<span class="ssp-pbtn danger" data-orb-act="del" data-id="' + esc(e.id) + '"><i class="fa-solid fa-trash"></i>删掉这条</span>' : '')
             + '</div></div>'
-            : cur.render())
+            /* v1.31.65：选卡 / 写卡两页渲染进 Shadow Root（内容由 sspShadowRender 填） */
+            : (sspIsShadowTab(cur.id) ? '<div id="' + SSP_SHADOW_HOST + '"></div>' : cur.render()))
         + '</div>';
 }
 
@@ -12569,6 +12839,8 @@ function renderOrbPanel() {
     panel.innerHTML = orbPanelHTML();
     /* v1.31.63：页签栏必须**一行** —— 插进 DOM 后量一次，放不下的挤进「…」 */
     try { orbTabsFit(); } catch (e) { }
+    /* v1.31.65：选卡 / 写卡两页渲染进影子根（异步取样式，取到会再补一次） */
+    try { if (sspIsShadowTab(orbTab)) sspShadowRender(); } catch (e) { }
     const newBody = panel.querySelector('.ssp-orb-body');
     if (newBody) {
         const max = Math.max(0, (newBody.scrollHeight || 0) - (newBody.clientHeight || 0));
@@ -13049,7 +13321,7 @@ function bindOrb() {
        · scope='out' → 点关闭/遮罩关面板：吞落在**面板外**（下面酒馆界面上）的那一发 */
     document.addEventListener('click', ev => {
         if (!orbGhostUntil || Date.now() > orbGhostUntil) { orbGhostUntil = 0; orbGhostScope = ''; return; }
-        const t = ev.target;
+        const t = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         const inPanel = !!(t && t.closest && t.closest('#ssp_orb_root, #ssp_orb_panel'));
         if (orbGhostScope === 'in' && !inPanel) return;      // 方向不对 → 那是用户的真点击，放行
         if (orbGhostScope === 'out' && inPanel) return;
@@ -13092,7 +13364,7 @@ function bindOrb() {
 
     /* 面具页搜索：只换列表那一块（输入框不重画，焦点和光标都不会丢） */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (el && el.dataset && el.dataset.sspQbnum) {
             const k = el.dataset.sspQbnum;
             const v = k === 'opacity' ? Number(el.value) / 100 : Number(el.value);
@@ -13124,7 +13396,7 @@ function bindOrb() {
 
     /* 番外页搜索 */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbNsearch === undefined) return;
         orbNSearch = el.value || '';
         const box = document.getElementById('ssp_orb_notes_list');
@@ -13139,7 +13411,7 @@ function bindOrb() {
 
     /* 存档页搜索 */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbChsearch === undefined) return;
         orbChSearch = el.value || '';
         const box = document.getElementById('ssp_orb_chat_list');
@@ -13148,7 +13420,7 @@ function bindOrb() {
 
     /* 背景页：搜索（只换列表那一块，输入框不丢焦点） */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbBgsearch === undefined) return;
         orbBgSearch = el.value || '';
         const box = document.getElementById('ssp_orb_bglist');
@@ -13156,7 +13428,7 @@ function bindOrb() {
     });
     /* 背景页：选了文件就上传 */
     document.addEventListener('change', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset) return;
         if (el.dataset.orbBgfile !== undefined) {
             const f = el.files && el.files[0];
@@ -13175,7 +13447,7 @@ function bindOrb() {
 
     /* 美化页搜索 */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbThsearch === undefined) return;
         orbThSearch = el.value || '';
         const box = document.getElementById('ssp_orb_theme_list');
@@ -13191,7 +13463,7 @@ function bindOrb() {
     /* 美化「编辑口」的 CSS 框：**每敲一下就直接写进酒馆的 #custom-style → 实时看到效果**。
        ⚠️ 这里绝不重画面板（一重画 textarea 就重建、光标和焦点全丢）。 */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbThcss === undefined) return;
         orbThemeDraft = String(el.value || '');
         orbThemePreview(orbThemeDraft);
@@ -13199,7 +13471,7 @@ function bindOrb() {
 
     /* 「选卡」页签搜索：只重画列表那一块，不重画面板（免得输入框失焦） */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbPicksearch === undefined) return;
         orbPickSearch = String(el.value || '');
         const panel = document.getElementById('ssp_orb_panel');
@@ -13213,20 +13485,20 @@ function bindOrb() {
 
     /* 「调试」页签的脚本框：只存内容，**绝不重画面板**（重画会丢焦点和光标位置） */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.sspDbgcode === undefined) return;
         orbDbgCode = String(el.value || '');
     });
     /* Ctrl/Cmd+Enter 在脚本框里直接跑 */
     document.addEventListener('keydown', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.sspDbgcode === undefined) return;
         if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); orbDbgRun(); }
     });
 
     /* 预设页搜索 */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbPresearch === undefined) return;
         orbPreSearch = el.value || '';
         const box = document.getElementById('ssp_orb_preset_list');
@@ -13241,7 +13513,7 @@ function bindOrb() {
 
     /* 世界书页：换一张角色卡来配（下拉框走 change，不是 click） */
     document.addEventListener('change', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbWchar === undefined) return;
         orbWbBinding = el.value || null;
         renderOrbPanel();
@@ -13249,7 +13521,7 @@ function bindOrb() {
 
     /* 分类：改名（失焦/回车提交；重名或空名就还原）。世界书和番外共用这套属性 */
     document.addEventListener('change', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbCatrename === undefined) return;
         const from = el.dataset.orbCatrename;
         const to = String(el.value || '').trim();
@@ -13263,7 +13535,7 @@ function bindOrb() {
 
     /* 数据页：勾选要导哪几类（复选框走 change，不是 click —— click 时状态还没翻） */
     document.addEventListener('change', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset) return;
         if (el.dataset.orbDatacat !== undefined) {
             orbDataPick[el.dataset.orbDatacat] = !!el.checked;
@@ -13288,7 +13560,7 @@ function bindOrb() {
        分类标签栏上的计数（共 N 本）和上面那行「筛出 X / Y」都得跟着搜索词变，
        只换列表的话标签栏会停在旧数字上（自己踩过）。代价是输入框会失焦一次。 */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbWsearch === undefined) return;
         orbWbSearch = el.value || '';
         renderOrbPanel();
@@ -13298,7 +13570,7 @@ function bindOrb() {
 
     /* 世界书栏「条目页」搜索 */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbEnesearch === undefined) return;
         orbWbEntrySearch = el.value || '';
         const box = document.getElementById('ssp_orb_wbent_list');
@@ -13316,7 +13588,7 @@ function bindOrb() {
 
     /* DLC 页搜索 */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbDlcsearch === undefined) return;
         orbDlcSearch = el.value || '';
         const box = document.getElementById('ssp_orb_dlc_list');
@@ -13331,7 +13603,7 @@ function bindOrb() {
 
     /* v1.31.60 查找页：只重画结果那一块（输入框不重画 → 焦点和光标不丢） */
     document.addEventListener('input', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbFindq === undefined) return;
         orbFindQ = el.value || '';
         orbFindCur = -1;
@@ -13347,7 +13619,7 @@ function bindOrb() {
     });
     /* 查找页：回车 = 跳到第一条命中 */
     document.addEventListener('keydown', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset || el.dataset.orbFindq === undefined) return;
         if (ev.key !== 'Enter') return;
         ev.preventDefault();
@@ -13360,7 +13632,7 @@ function bindOrb() {
 
     /* 条目编辑器里的联动（常驻 ↔ 触发词 / 更多设置） */
     document.addEventListener('change', ev => {
-        const el = ev.target;
+        const el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!el || !el.dataset) return;
         if (el.dataset.sspEnf === 'constant' || el.dataset.sspEnf === 'adv') {
             orbEntryFormCascade(el.closest('[data-ssp-enform]'));
@@ -13368,7 +13640,7 @@ function bindOrb() {
     });
 
     document.addEventListener('click', ev => {
-        const t = ev.target;
+        const t = (ev.composedPath && ev.composedPath()[0]) || ev.target;
         if (!t || !t.closest) return;
         if (t.closest('[data-orb-pclear]')) { orbPSearch = ''; renderOrbPanel(); return; }
         if (t.closest('[data-orb-close]')) {
@@ -13412,7 +13684,7 @@ function bindOrb() {
         {
             const mb = t.closest('[data-chmore]');
             if (mb) {
-                const box = document.querySelector('#ssp_orb_panel [data-chmorebox]');
+                const box = sspTabRoot().querySelector('#ssp_orb_panel [data-chmorebox]');
                 if (box) {
                     box.hidden = !box.hidden;
                     mb.classList.toggle('on', !box.hidden);
@@ -14077,7 +14349,7 @@ function bindOrb() {
         if (t.closest('[data-orb-dataexport]')) { orbDataExport(); return; }
         /* 数据页：选备份包 / 开始恢复 */
         if (t.closest('[data-orb-dataimportpick]')) {
-            const inp = document.querySelector('#ssp_orb_panel [data-orb-dataimportfile]');
+            const inp = sspTabRoot().querySelector('#ssp_orb_panel [data-orb-dataimportfile]');
             if (inp) inp.click(); else toast('找不到文件选择框，刷新一下页面', 'warning');
             return;
         }
@@ -14309,7 +14581,7 @@ function bindOrb() {
     if (!bindOrb.nativeCreateBound) {
         bindOrb.nativeCreateBound = true;
         document.addEventListener('click', ev => {
-            const t = ev.target;
+            const t = (ev.composedPath && ev.composedPath()[0]) || ev.target;
             if (!t || !t.closest) return;
             if (!t.closest('#rm_button_create')) return;
             if (!orbOpenNow) return;                  // 口袋没开就别抢，让酒馆自己走
@@ -14368,6 +14640,8 @@ function init() {
     /* v1.31.59：DLC 条目 ↔ 面具的过滤监听**无条件**挂一次（球关掉也要生效 —— 它管的是生成，
        跟界面无关）。拿不到上下文时它自己会在后面重试。 */
     bindDlcMaskWatch();
+    /* 测试环境：给旧测试补一个"能查到影子根里元素"的兼容层（生产环境不生效） */
+    try { sspInstallTestQueryShim(); } catch (e) { }
     /* v1.31.64：已经打开的这份存档如果绑了面具，启动后也补一次（不然要等你切一次存档才生效） */
     globalThis.setTimeout?.(() => { try { personaChatApply(true); } catch (e) { } }, 2200);
     qbMount(); bindOrb && qbBind();      // 快捷按钮托盘：建 + 绑事件（幂等）
@@ -14496,6 +14770,9 @@ if (globalThis.__SSP_TEST__) {
         get orbTab() { return orbTab; }, set orbTab(v) { orbTab = v; },
         get orbDlcMaskFor() { return orbDlcMaskFor; }, set orbDlcMaskFor(v) { orbDlcMaskFor = v; },
         get dlcWornCache() { return dlcWornCache; }, set dlcWornCache(v) { dlcWornCache = v; },
+        /* v1.31.65：选卡 / 写卡两页的影子根隔离 */
+        SSP_SHADOW_HOST, sspIsShadowTab, sspTabRoot, sspShadowRoot, sspShadowRender, sspShadowCss,
+        sspInstallTestQueryShim,
         /* v1.31.63：页签收纳 */
         orbTabsHTML, orbTabMenuHTML, orbTabsFit, orbTabHidden, orbTabIsHidden, orbTabHideSet, orbTabOverflowIds,
         /* v1.31.64：面具 ↔ 存档 */

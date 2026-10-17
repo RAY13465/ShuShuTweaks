@@ -2219,6 +2219,58 @@ CSS 支持检测（21 项：`:has()`、`dvh/svh/lvh`、`inset`、`color-mix`、`
 
 现在四个会写数据的脚本跑完，角色卡数 / 聊天目录数**前后一致**（实测 16 / 24 → 16 / 24）。
 
+### v1.31.65：「选卡」和「写卡」两个页签跟酒馆**彻底解耦**（Shadow DOM 隔离）
+
+用户要求：
+> 「把这两个面板与原生酒馆彻底解耦，仅留点击后的端口，连接原生酒馆端。
+>  页面完全重构，不受酒馆美化以及自定义 CSS 影响，但功能依旧使用原生的功能。」
+
+#### 为什么非得用 Shadow DOM
+
+只靠"我们自己的 class + 高特异性"做不到 —— 用户的自定义 CSS 可以写 `*{border-radius:0!important}`，
+主题也可能给 `*` 加东西（以前面板圆角被抹平就是这个原因）。**浏览器只保证 Shadow DOM 里的东西
+不受外面 CSS 影响**，所以只有这条路是"彻底"。
+
+#### 怎么做的（尽量少改）
+
+| 事 | 做法 |
+|---|---|
+| 隔离 | 这两个页签渲染进一个影子宿主（`#ssp_shadow_host`），内容在 `shadowRoot` 里 |
+| 样式表 | **不重写**：把我们自己的 `style.css` 文本取一次灌进影子根（地址从酒馆给我们注入的 `<link>` 上找，不写死路径） |
+| 固定色板 | 在宿主上把 `--ch-*` / 字体 / 字号 **写死**，不再读 `--SmartTheme*`（用户选的"跟主题彻底无关"） |
+| 让老规则命中 | 影子根里再放一个**同 id** 的外壳 `#ssp_orb_panel` —— 影子里的 id 是独立作用域，所以 `#ssp_orb_panel .xxx` 照样命中 |
+| 事件 | click/input/change/keydown 是 **composed** 事件，照样冒到 document，只是 `ev.target` 被重定向成宿主 → 委托统一改用 `ev.composedPath()[0]` |
+| 查控件 | 原来那十几处 `document.querySelector('#ssp_orb_panel …')` 统一改成 `sspTabRoot().querySelector(…)`（影子在就查影子） |
+| 功能 | 全部照旧走原生：点卡 `ctx.selectCharacterById()`；写卡字段同步到酒馆原生 textarea、保存走原生表单 submit |
+| 删掉的耦合 | 不再往面板里搬任何原生 DOM；`#rm_ch_create_block` 一个像素都不动（原生界面测试仍然全过） |
+
+选卡页的卡片是**一套独立固定的外观**（圆角 8px / 深底 / 固定字号），不再受「角色卡样式」那堆旋钮影响。
+
+#### 测试（`影子隔离-e2e测试.mjs`）
+
+- 结构：32~36 张卡渲染在 `shadowRoot` 里，`document` 直接查**查不到**（0 条）；
+- **敌意 CSS**：往页面塞 `*{border-radius:0!important; font-family:Comic Sans!important; letter-spacing:3px!important}`
+  + `#ssp_orb_panel .ssp-ch-card{background:red!important}` + 改主题变量 →
+  影子里量出来仍然是 **圆角 8px / 底色 rgb(27,27,34) / 我们自己的字体 / 字距 normal**；
+  同时**对照组**（影子外面的页签栏）圆角被压成 0px —— 证明那条敌意 CSS 确实生效了，只是进不来；
+- 功能：在影子里点卡 → 真的切了角色（原生 API）；写卡页 16 个字段都在影子里，
+  改值会同步到酒馆原生 `name_textarea`（测完把原值写回，不留脏状态）。
+
+#### 踩到的坑（三个，都记下来）
+
+1. **`*{font-family:…!important}` 打的是"宿主元素"**，而字体/字距是**继承**下来的 ——
+   只写 `:host{all:initial}` 挡不住。必须在外壳（影子里的 `#ssp_orb_panel`）上把继承类属性逐个按死。
+2. **圆角还是 3px**：主样式里 `#ssp_orb_panel .ssp-ch-card` 这些规则在影子里照样命中，
+   我们的覆盖得用 `:host #ssp_orb_panel .xxx`（更高特异性）才压得住。
+3. **测试兼容补丁用错底座**：拿 `Document.prototype.querySelectorAll` 去调 `ShadowRoot` 是非法调用
+   （抛了被 catch 吞掉 → 老测试永远查不到影子内容，表现是"选卡里有卡（0）"）。改用影子根**自己的**方法。
+   另外影子渲染原来是**异步**填的（等 CSS 取回），中间那几十毫秒宿主是 0×0 —— 改成**先同步画一版**、样式到了再补。
+
+> 旧测试一行没改：给 `#ssp_orb_panel` 加了个**只在 `__SSP_TEST__` 下生效**的查询兼容层
+> （先查自己，查不到再去影子根里查），所以写卡那几套测试照旧能用。
+
+> 仍然**没有推送**（等用户实测）。
+
 ### v1.31.64：面具 ↔ **存档** 绑定（一份存档一个面具）
 
 用户问的：
