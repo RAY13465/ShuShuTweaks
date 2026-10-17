@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.80';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.81';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -7033,7 +7033,7 @@ function sspCtFallback(sel, decl, el) {
     }
     /* v1.31.80：第二个参数既能是颜色字符串（老调用），也能是 {color, fontSize} */
     const d = (decl && typeof decl === 'object') ? decl : { color: decl };
-    const CSS_PROP = { color: 'color', fontSize: 'font-size' };
+    const CSS_PROP = { color: 'color', fontSize: 'font-size', lineHeight: 'line-height' };
     const body = Object.keys(d).filter(k => d[k]).map(k => (CSS_PROP[k] || k) + ': ' + d[k] + ' !important;').join(' ');
     const rule = String(sel) + ' { ' + body + ' }';
     if (st.textContent.indexOf(rule) < 0) st.textContent = (st.textContent || '') + rule + '\n';
@@ -7399,6 +7399,7 @@ function orbThemeRowsHTML() {
      · 自动按名字前缀分组 + 搜索（有的主题 :root 里几十上百个）
    ========================================================================== */
 var orbTVSearch = '';
+var orbTVCat = 'all';           // v1.31.81：类别页签（全部/颜色/字号尺寸/字体/其它）
 var orbTVDictOpen = false;      // v1.31.79：词表（改中文名 / 导入导出）那块要不要展开
 var orbTVOpen = true;
 
@@ -7646,6 +7647,20 @@ function sspVarDictLoad(txt) {
     return { ok: true, msg: '载入完成：词典 ' + nDict + ' 条、别名 ' + nAlias + ' 条' };
 }
 
+/** v1.31.81：一个变量属于哪一类 —— 用户要的是「一眼看出哪个是颜色、哪个是字号」。
+    判定顺序：颜色 > 尺寸 > 字体 > 其它（名字里带 color/bg 的，即使值是 var(--x) 也算颜色）。 */
+const SSP_TV_CATS = [['all', '全部'], ['color', '颜色'], ['size', '字号·尺寸'], ['font', '字体'], ['other', '其它']];
+function sspVarCat(k, val) {
+    const name = String(k || '').toLowerCase();
+    const kind = themeVarKind(val);
+    if (kind === 'color') return 'color';
+    if (/color|colour|bg|background|tint|ink|fill|glow|shadow/.test(name)) return 'color';
+    if (kind === 'px' || kind === 'em' || kind === 'pct') return 'size';
+    if (/font|family|mono|display|cut|weight|serif|sans/.test(name)) return 'font';
+    return 'other';
+}
+function sspVarCatTag(cat) { return ({ color: '🎨', size: '📐', font: '🅰', other: '✨' })[cat] || '·'; }
+
 /** 美化页里那块「主题变量」 */
 function orbThemeVarsHTML() {
     const cur = orbThemeCur() || '(读不到当前美化)';
@@ -7653,10 +7668,14 @@ function orbThemeVarsHTML() {
     const ov = themeVarsOf();
     const ovN = Object.keys(ov).length;
     const q = String(orbTVSearch || '').trim().toLowerCase();
+    /* v1.31.81：先按类别归类（页签要用），再跟搜索一起筛 */
+    const catOf = new Map();
+    const catN = { all: all.length, color: 0, size: 0, font: 0, other: 0 };
+    all.forEach(v => { const c = sspVarCat(v.k, v.v); catOf.set(v.k, c); catN[c] = (catN[c] || 0) + 1; });
     /* v1.31.79：搜索同时匹 英文原名 / 中文名 / 别名（用户不该被迫记英文） */
-    const hit = all.filter(v => !q
+    const hit = all.filter(v => (orbTVCat === 'all' || catOf.get(v.k) === orbTVCat) && (!q
         || v.k.toLowerCase().indexOf(q) >= 0
-        || sspVarNameCN(v.k).toLowerCase().indexOf(q) >= 0);
+        || sspVarNameCN(v.k).toLowerCase().indexOf(q) >= 0));
     const head = '<div class="ssp-tv-head">'
         + '<span class="ssp-tv-title">🎨 主题变量' + (all.length ? '（' + all.length + ' 个）' : '') + '</span>'
         + (ovN ? '<span class="ssp-tv-badge">已改 ' + ovN + '</span>' : '')
@@ -7671,7 +7690,10 @@ function orbThemeVarsHTML() {
     }
     if (!orbTVOpen) return head;
     const rawOn = getSettings().varShowRaw !== false;
-    const tools = '<div class="ssp-orb-pfilter" style="margin-bottom:4px">'
+    const tabs = '<div class="ssp-tv-cats">' + SSP_TV_CATS.map(([k, label]) =>
+        '<span class="ssp-tv-cat' + (k === orbTVCat ? ' on' : '') + '" data-orb-tvcat="' + k + '">'
+        + label + '<i>' + (k === 'all' ? all.length : (catN[k] || 0)) + '</i></span>').join('') + '</div>';
+    const tools = tabs + '<div class="ssp-orb-pfilter" style="margin-bottom:4px">'
         + '<input class="ssp-inp" type="text" data-orb-tvsearch="1" placeholder="搜中文名或变量名（比如 正文 / --accent）" value="' + esc(orbTVSearch) + '">'
         + (orbTVSearch ? '<span class="ssp-pbtn" data-orb-tvsearchclear="1">清除</span>' : '')
         + '</div>'
@@ -7691,7 +7713,12 @@ function orbThemeVarsHTML() {
                 + '<span class="ssp-pbtn" data-orb-tvjsonreset="1" title="把词典恢复成内置的（别名不动）">词典复位</span>'
                 + '</div></div>')
             : '');
-    if (!hit.length) return head + tools + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">没有匹配「' + esc(orbTVSearch) + '」的变量。</div>';
+    if (!hit.length) {
+        return head + tools + '<div class="ssp-orb-empty" style="padding:2px 2px 6px">'
+            + (orbTVSearch ? '没有匹配「' + esc(orbTVSearch) + '」的变量。'
+                : ('这一类里没有变量（' + esc((SSP_TV_CATS.filter(x => x[0] === orbTVCat)[0] || ['', ''])[1]) + '）。'))
+            + '</div>';
+    }
     const groups = new Map();
     /* 分组：`--p5-pitch` 这种按第一个横线前的词分（p5）；
        `--SmartThemeBodyColor` 这种没有横线的，按同族（公共前缀）并成一组，
@@ -7775,7 +7802,8 @@ function orbThemeVarsHTML() {
         /* v1.31.79：左边显示中文名，英文原名按开关跟在小字里；点一下可以改中文名 */
         const cn = sspVarNameCN(v.k);
         const rawOn = getSettings().varShowRaw !== false;
-        const label = (cn || v.k) + (cn && rawOn ? ' <i class="ssp-tv-raw">' + esc(v.k) + '</i>' : '');
+        const label = '<i class="ssp-tv-cat-tag">' + sspVarCatTag(sspVarCat(v.k, v.v)) + '</i>'
+            + (cn || v.k) + (cn && rawOn ? ' <i class="ssp-tv-raw">' + esc(v.k) + '</i>' : '');
         const labelTitle = (cn ? cn + '\n' + v.k : v.k) + ' = ' + v.v + '\n（点一下可以给它起个中文名）';
         return '<div data-orb-tvrow="' + esc(v.k) + '" style="' + S_ROW + '">'
             + '<span class="ssp-tv-k" data-orb-tvrename="' + esc(v.k) + '" title="' + esc(labelTitle) + '" style="' + S_K + '">'
@@ -15227,6 +15255,8 @@ function bindOrb() {
             renderOrbPanel();
             return;
         }
+        const catBtn = t.closest('[data-orb-tvcat]');
+        if (catBtn) { orbTVCat = catBtn.dataset.orbTvcat; renderOrbPanel(); return; }
         if (t.closest('[data-orb-tvdict]')) { orbTVDictOpen = !orbTVDictOpen; renderOrbPanel(); return; }
         if (t.closest('[data-orb-tvjsonload]')) {
             const box = document.querySelector('#ssp_orb_panel [data-orb-tvjson]');
@@ -15966,6 +15996,14 @@ function bindOrb() {
                     + (fb && fb.用来行内 ? '（走行内 !important）' : ''), 'info');
                 return;
             }
+            if (row.太挤) {
+                const fb = sspCtFallback(row.选择器, { lineHeight: '1.5' }, el);
+                orbCtRows = null;
+                renderOrbPanel();
+                toast('这一处行高太挤，已给它自己写成 1.5 倍行距'
+                    + (fb && fb.用来行内 ? '（走行内 !important）' : ''), 'info');
+                return;
+            }
             if (!row.元凶 || !row.元凶.length) {
                 /* 没元凶：只改这一处的颜色（兜底样式），并且把标签说清楚 */
                 const bg = sspParseColor(row.背景) || { r: 12, g: 12, b: 14, a: 1 };
@@ -16308,10 +16346,11 @@ if (globalThis.__SSP_TEST__) {
         sspFixColorToContrast, sspCssRules, sspSplitDecls, sspSpec, sspToHsl, sspFromHsl,
         sspRgbToHex, sspCtFallback, sspCtFallbackClear, sspCtBad, orbContrastHTML, themeVarsOf, themeVarsApply,
         /* v1.31.79：中文化 */
-        SSP_VAR_DICT, sspNameTokens, sspVarNameCN, sspGroupNameCN, sspVarAliasOf, sspVarAliasSet,
+        SSP_VAR_DICT, SSP_TV_CATS, sspVarCat, sspVarCatTag, sspNameTokens, sspVarNameCN, sspGroupNameCN, sspVarAliasOf, sspVarAliasSet,
         sspVarDictJSON, sspVarDictLoad, sspDictUser, sspDictOf, themeVarsParse, orbThemeCss,
         get orbTVSearch() { return orbTVSearch; },
         set orbTVSearch(v) { orbTVSearch = String(v == null ? '' : v); },
+        get orbTVCat() { return orbTVCat; }, set orbTVCat(v) { orbTVCat = String(v || 'all'); },
         get orbTVDictOpen() { return orbTVDictOpen; },
         set orbTVDictOpen(v) { orbTVDictOpen = v; },
         get orbCtRows() { return orbCtRows; },

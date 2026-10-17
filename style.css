@@ -1217,6 +1217,15 @@ body.ssp-sorting .ssp-newbtn.on { background: rgba(236, 65, 65, .45); color: #ff
 .ssp-ct-foot { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 7px; }
 
 /* ---------- v1.31.79：主题变量的中文化（原名 / 词表） ---------- */
+.ssp-tv-cats { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.ssp-tv-cat {
+    cursor: pointer; padding: 2px 8px; border-radius: 999px; font-size: 10.5px;
+    border: 1px solid rgba(255, 255, 255, .16); background: rgba(255, 255, 255, .05);
+}
+.ssp-tv-cat i { font-style: normal; opacity: .55; margin-left: 3px; font-size: 9.5px; }
+.ssp-tv-cat.on { border-color: rgba(120, 200, 255, .7); background: rgba(70, 140, 220, .22); font-weight: 700; }
+.ssp-tv-cat-tag { font-style: normal; margin-right: 3px; opacity: .9; }
+.ssp-tv-fontprev { font-size: 12px; opacity: .85; padding: 0 4px; white-space: nowrap; }
 .ssp-tv-tools { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
 .ssp-tv-tools .ssp-pbtn { padding: 2px 7px; font-size: 10.5px; }
 .ssp-tv-k { cursor: text; }
