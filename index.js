@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.89';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.90';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5199,14 +5199,36 @@ function mountPocketMenuEntry() {
         try { openOrb(); } catch (e) { toast('打开鼠鼠口袋失败：' + e.message, 'warning'); }
     }));
 
-    menu.append(mk('ssp_menu_retract', 'fa-eye-slash', '收回悬浮球', '把右下角那颗球收起来（之后还能用上面那条打开面板）', function () {
-        getSettings().orbOn = false;
-        try { save(); } catch (e) { }
-        try { orbSetCollapsed(true, true); } catch (e) { }
-        const b0 = document.getElementById('ssp_orb');
-        if (b0) setTimeout(function () { try { b0.style.display = 'none'; } catch (e) { } }, 260);
-        toast('球已收回；想放出来：鼠鼠面板里勾「显示悬浮球」', 'info');
-    }));
+    /* v1.31.90（用户报的 bug）：这条以前写死「收回悬浮球」。
+       球如果是从别的入口（工坊面板 / 鼠鼠口袋）收回的，它不变、还是「收回」，
+       再点一下就等于对着一颗不存在的球做收回 —— 状态打架，实测会卡死。
+       现在文字和行为都跟着真实状态走：球在 → 收回；球没了 → 放出。
+       （这个函数每 800ms 重挂一次，所以球从别处收回后文字也会自己跟上。） */
+    const orbOff = (getSettings().orbOn === false);
+    menu.append(mk(orbOff ? 'ssp_menu_release' : 'ssp_menu_retract',
+        orbOff ? 'fa-eye' : 'fa-eye-slash',
+        orbOff ? '放出悬浮球' : '收回悬浮球',
+        orbOff ? '把右下角那颗球放出来' : '把右下角那颗球收起来（之后还能用上面那条打开面板）',
+        function () {
+            try {
+                if (getSettings().orbOn === false) {
+                    getSettings().orbOn = true;
+                    try { save(); } catch (e) { }
+                    try { mountOrb(); } catch (e) { }
+                    try { orbSetCollapsed(getSettings().orbCollapsed === true, true); } catch (e) { }
+                    const b1 = document.getElementById('ssp_orb');
+                    if (b1) { b1.style.display = ''; }
+                    toast('悬浮球已放出', 'success');
+                } else {
+                    getSettings().orbOn = false;
+                    try { save(); } catch (e) { }
+                    try { orbSetCollapsed(true, true); } catch (e) { }
+                    const b0 = document.getElementById('ssp_orb');
+                    if (b0) setTimeout(function () { try { b0.style.display = 'none'; } catch (e) { } }, 260);
+                    toast('球已收回；想放出来：这条会变成「放出悬浮球」', 'info');
+                }
+            } catch (e) { toast('悬浮球操作失败：' + (e && e.message), 'warning'); }
+        }));
 
     return true;
 }
