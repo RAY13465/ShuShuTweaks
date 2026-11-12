@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.93';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.94';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -14532,6 +14532,10 @@ function orbScrollIntoView(el) {
 }
 
 function openOrb() {
+    /* v1.31.94【用户报的 bug】关着悬浮球（orbOn=false）时，初始化那段**不会**调 bindOrb()，
+       于是面板的 document 点击委托从没绑上 —— 从「扩展程序」列表打开口袋，面板画出来了，
+       但点什么都没反应（表现为"卡死/无法操作"）。所以这里补一次（bindOrb 自己是幂等的）。 */
+    try { bindOrb(); } catch (e) { }
     mountOrb();
     bindWbWatch();                            // 顺便重试挂「世界书被改了」的监听（首次常拿不到上下文）
     bindDlcMaskWatch();                       // 同一个道理：DLC↔面具 的生成前过滤也在这儿重试
@@ -16514,7 +16518,11 @@ function init() {
     if (importMergeOn()) bindImportMerge();                      // 导入即更新（合并 导入 / 替换 / URL导入）
     registerThinkDisplayHook();                                  // 思维链收纳：显示层兜底（流式半截标签也不上屏）
     registerThinkEvents();                                       // 思维链收纳：生成结束/收到消息/换聊天时收纳
-    if (getSettings().orbOn !== false) { mountOrb(); bindOrb(); }
+    /* v1.31.94【用户报的 bug】关着悬浮球时这里原来只 mountOrb+bindOrb（条件里），
+       于是 orbOn=false 的人初始化根本不会绑点击委托 —— 从「扩展程序」列表开面板，
+       面板能画出来但点什么都没反应（用户描述为"卡死/无法操作"）。委托必须无条件绑。 */
+    try { bindOrb(); } catch (e) { }
+    if (getSettings().orbOn !== false) { mountOrb(); }
     /* v1.31.59：DLC 条目 ↔ 面具的过滤监听**无条件**挂一次（球关掉也要生效 —— 它管的是生成，
        跟界面无关）。拿不到上下文时它自己会在后面重试。 */
     bindDlcMaskWatch();
