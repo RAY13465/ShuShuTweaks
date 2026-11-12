@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.91';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.92';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -14432,7 +14432,15 @@ function pruneDeadBinds(force) {
     const s = getSettings();
     let n = 0;
     try {
-        const books = (getContext() || {}).world_names;
+        /* v1.31.92（用户反馈：美化那条成了、世界书这条没成）：
+           `getContext().world_names` 有时是空的（世界书列表还没读回来），
+           而我们自己面板的世界书页那份一定是拿得到的（orbWorldList() 返回书名数组）。
+           两个都试，谁有内容用谁；都没有就按铁律不动。 */
+        let books = [];
+        try { books = ((getContext() || {}).world_names) || []; } catch (e) { books = []; }
+        if (!Array.isArray(books) || !books.length) {
+            try { books = orbWorldList() || []; } catch (e) { books = []; }
+        }
         if (Array.isArray(books) && books.length) {
             const has = function (x) { return books.indexOf(x) >= 0; };
             const wb = s.worldBinds;
