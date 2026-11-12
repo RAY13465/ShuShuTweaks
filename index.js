@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.90';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.91';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -5175,6 +5175,8 @@ function reclaim(reason) {
      ① 鼠鼠口袋（打开面板，球收着也能开）  ② 收回悬浮球
    栏是点开时才生成的，用定时器补挂（800ms 一次，没找到就直接返回）。 */
 function mountPocketMenuEntry() {
+    /* v1.31.91：先把上一轮挂上去的条目摘掉 —— 否则『收回/放出悬浮球』的文字永远停在第一次的样子（用户报的） */
+    try { document.querySelectorAll('#ssp_menu_pocket, #ssp_menu_retract, #ssp_menu_release').forEach(function (n) { n.remove(); }); } catch (e) { }
     const menu = document.getElementById('extensionsMenu');
     if (!menu) return false;
     if (document.getElementById('ssp_menu_pocket')) return true;
@@ -14418,8 +14420,52 @@ function orbPanelHTML() {
     ⚠️ 会还原滚动位置：整块 innerHTML 一换，滚动就回顶了 ——
     开关一条世界书 / 条目、切个绑定，列表一长每次都被弹回顶部，很烦（用户反馈）。
     滚动容器是 .ssp-orb-body；这里记它、重画后写回。 */
+/** v1.31.91：清理「绑了但目标已经没了」的绑定（世界书被删 / 美化被删）。
+    用户反馈：删了世界书或美化，角色上还绑着 → 每次进面板都弹提示，很烦。所以干脆自动解绑。
+    ⚠️ 两条铁律：① 列表拿不到（为空）时一律不动 —— 否则一次读空就把人家绑的全清了；
+                  ② 只有真删了条目才 save()，没变化不写盘。 */
+var pruneDeadBindsAt = 0;
+function pruneDeadBinds(force) {
+    const now = Date.now();
+    if (!force && now - pruneDeadBindsAt < 4000) return 0;
+    pruneDeadBindsAt = now;
+    const s = getSettings();
+    let n = 0;
+    try {
+        const books = (getContext() || {}).world_names;
+        if (Array.isArray(books) && books.length) {
+            const has = function (x) { return books.indexOf(x) >= 0; };
+            const wb = s.worldBinds;
+            if (wb && typeof wb === 'object') {
+                Object.keys(wb).forEach(function (k) {
+                    const v = wb[k];
+                    if (Array.isArray(v)) {
+                        const keep = v.filter(has);
+                        if (keep.length !== v.length) { n += v.length - keep.length; if (keep.length) wb[k] = keep; else delete wb[k]; }
+                    } else if (typeof v === 'string' && v && !has(v)) { delete wb[k]; n++; }
+                });
+            }
+        }
+    } catch (e) { }
+    try {
+        const sel = document.getElementById('themes');
+        const names = sel ? [].map.call(sel.options, function (o) { return String(o.textContent || '').trim(); }) : [];
+        if (names.length) {
+            const tb = s.themeBinds;
+            if (tb && typeof tb === 'object') {
+                Object.keys(tb).forEach(function (k) {
+                    const v = tb[k];
+                    if (typeof v === 'string' && v && names.indexOf(v) < 0) { delete tb[k]; n++; }
+                });
+            }
+        }
+    } catch (e) { }
+    if (n) { try { save(); } catch (e) { } }
+    return n;
+}
 function renderOrbPanel() {
     const panel = document.getElementById('ssp_orb_panel');
+    try { pruneDeadBinds(); } catch (e) { }
     if (!panel) return false;
     const oldBody = panel.querySelector('.ssp-orb-body');
     const keepTop = oldBody ? oldBody.scrollTop : 0;
