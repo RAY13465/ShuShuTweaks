@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.94';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.95';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -4768,8 +4768,14 @@ function sspIntegrityProbe() {
         sspCk(L, cks, '球 #ssp_orb 在', ball.exists, ball.exists ? '位置 ' + ball.w + '×' + ball.h : '★ 球不在 DOM 里');
         sspCk(L, cks, '球有尺寸', ball.visible, ball.visible ? '' : '★ 0×0：球被隐藏了（收回过？或位置算到屏幕外了）');
     }
-    sspCk(L, cks, '口袋面板 #ssp_orb_panel 在', orbPanel.exists, orbPanel.exists ? '模块数 ' + ORB_MODULES.length + '（' + ORB_MODULES.map(m => m.name).join('/') + '）' : '☆ 口袋面板还没建（开一次球才会建，正常）');
-    sspCk(L, cks, '口袋根 #ssp_orb_root', orbRoot.exists, orbRoot.exists ? '' : '☆ 还没建（开一次球才会建，正常）');
+    /* v1.31.94：球关着（orbOn=false）时，口袋根/面板本来就不会建 —— 那是正常状态，
+       不能记成 ★ 异常（否则"一键诊断"永远报 2 项异常，桌面回归也跟着红）。 */
+    const orbBuiltOk = orbOn;      // 球开着才要求根/面板已建
+    sspCk(L, cks, '口袋面板 #ssp_orb_panel 在', orbPanel.exists || !orbBuiltOk,
+        orbPanel.exists ? '模块数 ' + ORB_MODULES.length + '（' + ORB_MODULES.map(m => m.name).join('/') + '）'
+            : (orbBuiltOk ? '★ 球开着但面板没建' : '☆ 悬浮球是关着的，面板还没建（正常）'));
+    sspCk(L, cks, '口袋根 #ssp_orb_root', orbRoot.exists || !orbBuiltOk,
+        orbRoot.exists ? '' : (orbBuiltOk ? '★ 球开着但根没建' : '☆ 悬浮球是关着的，还没建（正常）'));
 
     /* ---------- 7. 本页报错 ---------- */
     L.push('');
