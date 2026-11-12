@@ -4504,7 +4504,7 @@ function bindSettings(root) {
    关键：所有设置项的 data-ssp-* 属性和原来**一模一样**，
    所以 bindSettings() 里那一大段逻辑一行都不用改。
    ========================================================================== */
-const PANEL_VERSION = '1.31.92';   // 面板上显示的版本号（改 manifest 时记得一起改）
+const PANEL_VERSION = '1.31.93';   // 面板上显示的版本号（改 manifest 时记得一起改）
 let panelEl = null;
 
 /** 扁平开关（外面套 label，里面是真 checkbox —— 事件逻辑完全复用老的） */
@@ -8421,7 +8421,18 @@ function orbWbSyncChar() {
     const all = orbWorldList();
     const bound = orbWbBound(ch.key);
     const gone = bound.filter(n => all.indexOf(n) < 0);
-    if (gone.length) toast('绑的世界书找不到了：' + gone.join('、'), 'warning');
+    if (gone.length) {
+        /* v1.31.93（用户要求）：书被删了就别再提醒 —— 直接把这些死绑定摘掉。
+           ⚠️ 只在世界书列表确实拿到（all 非空）时才摘：列表读空时摘会把真绑定全删掉。 */
+        if (all.length) {
+            try {
+                const keep2 = bound.filter(function (n) { return all.indexOf(n) >= 0; });
+                orbWbSetBound(ch.key, keep2);
+                save();
+                toast('有 ' + gone.length + ' 本绑定的世界书已经被删了，已自动解绑：' + gone.join('、'), 'info');
+            } catch (e) { }
+        }
+    }
     const want = bound.filter(n => all.indexOf(n) >= 0);
 
     let cur = orbWbActive();
